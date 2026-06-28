@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<project xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd" xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.example</groupId>
+    <artifactId>service-parent</artifactId>
+    <version>1.0.0</version>
+    <relativePath>../../multi-module-project/service-parent/pom.xml</relativePath>
+  </parent>
+  <groupId>com.example.a</groupId>
+  <artifactId>a-project-service</artifactId>
+  <version>TEST-TEST-1.0.0</version>
+  <properties>
+    <a-project-api.version>TEST-TEST-1.0.0</a-project-api.version>
+  </properties>
+  <dependencies>
+    <dependency>
+      <groupId>com.example.a</groupId>
+      <artifactId>a-project-api</artifactId>
+      <version>${a-project-api.version}</version>
+    </dependency>
+  </dependencies>
+</project>

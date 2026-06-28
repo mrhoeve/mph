@@ -1,0 +1,62 @@
+<div class="folder-selector">
+  <div class="folder-selector__header">
+    <div class="current-path">
+      <span>Browsing</span>
+      <strong>{{ currentPath() }}</strong>
+    </div>
+
+    <div class="scan-depth">
+      <label for="maxScanDepth">Scan depth</label>
+      <input id="maxScanDepth" type="number" min="1" max="10" [value]="maxScanDepth()" (change)="onDepthChange($event)">
+    </div>
+
+    <button
+      type="button"
+      [disabled]="!currentPath() || isLoading()"
+      (click)="useCurrentFolder()"
+    >
+      Use this folder
+    </button>
+  </div>
+
+  @if (errorMessage(); as message) {
+    <div class="error-message" role="alert">
+      {{ message }}
+    </div>
+  }
+
+  @if (isLoading()) {
+    <div class="folder-empty" role="status">
+      Loading folders…
+    </div>
+  } @else {
+    <ul class="folder-list" aria-label="Folders">
+      @if (parentPath(); as parent) {
+        <li>
+          <button type="button" class="folder-up" (click)="openFolder(parent)">
+            <span class="folder-icon" aria-hidden="true">↩</span>
+            <span>..</span>
+            <small>Parent folder</small>
+          </button>
+        </li>
+      }
+
+      @for (folder of folders(); track folder.path) {
+        <li>
+          <button type="button" (click)="openFolder(folder.path)">
+            <span class="folder-icon" aria-hidden="true">📁</span>
+            <span>{{ folder.name }}</span>
+          </button>
+        </li>
+      }
+
+      @if (!parentPath() && folders().length === 0) {
+        <li>
+          <div class="folder-empty">
+            This folder does not contain subfolders.
+          </div>
+        </li>
+      }
+    </ul>
+  }
+</div>

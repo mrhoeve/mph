@@ -1,0 +1,162 @@
+<main class="app-shell">
+  <header class="hero">
+    <div class="hero__badge">Maven Project Helper v0.1</div>
+    <h1>{{ title() }}</h1>
+    <p class="hero__subtitle">
+      Manage and update Maven project versions with ease.
+    </p>
+  </header>
+
+  @if (errorMessage(); as message) {
+    <div class="error-message" role="alert">
+      {{ message }}
+    </div>
+  }
+
+  @if (isSelectingFolder()) {
+    <section class="scan-card">
+      <div class="scan-card__header">
+        <h2>Select a folder</h2>
+        <p>Choose the root directory of your Maven projects to begin the analysis.</p>
+      </div>
+
+      <app-folder-selector (folderSelected)="folderSelected($event)"></app-folder-selector>
+    </section>
+  } @else {
+    <div class="main-layout">
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <h3>Projects</h3>
+          <button class="secondary-button" (click)="changeFolder()">Change Folder</button>
+        </div>
+
+        <div class="sidebar-actions">
+          <label class="select-all">
+            <input type="checkbox" [checked]="isAllSelected()" (change)="toggleSelectAll()">
+            Select All
+          </label>
+          <button class="bulk-button" [disabled]="selectedRootProjects().size === 0" (click)="openBulkModal()">
+            Bulk Update ({{ selectedRootProjects().size }})
+          </button>
+        </div>
+
+        <div class="project-list">
+          <ng-container *ngTemplateOutlet="projectTree; context: { $implicit: projects(), isRoot: true }"></ng-container>
+        </div>
+      </aside>
+
+      <section class="content">
+        @if (isScanning()) {
+          <div class="loading-state">
+            Scanning and analyzing projects...
+          </div>
+        } @else if (selectedProject(); as project) {
+          <div class="project-details">
+            <header class="details-header">
+              <h2>{{ project.artifactId }}</h2>
+              <span class="version-badge">{{ project.version }}</span>
+            </header>
+            
+            <p class="details-path"><code>{{ project.path }}</code></p>
+
+            <div class="details-section">
+              <h3>Usages</h3>
+              @if (project.usages.length > 0) {
+                <table class="usages-table">
+                  <thead>
+                    <tr>
+                      <th>Used in</th>
+                      <th>Version used</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (usage of project.usages; track usage.path) {
+                      <tr>
+                        <td>{{ usage.usedInArtifactId }}</td>
+                        <td [class.version-mismatch]="usage.usedVersion !== project.version">
+                          {{ usage.usedVersion }}
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+                <div class="actions">
+                  <button class="primary-button" (click)="updateToLatest(project)">Update all to {{ project.version }}</button>
+                </div>
+              } @else {
+                <p>No usages found in scanned projects.</p>
+              }
+            </div>
+          </div>
+        } @else {
+          <div class="empty-state">
+            Select a project from the list to see details.
+          </div>
+        }
+      </section>
+    </div>
+  }
+</main>
+
+@if (isBulkModalOpen()) {
+  <div class="modal-overlay" (click)="closeBulkModal()">
+    <div class="modal-content" (click)="$event.stopPropagation()">
+      <h3>Bulk Version Update</h3>
+      <p>Modify the version of {{ selectedRootProjects().size }} selected projects.</p>
+      
+      <div class="form-group radio-group">
+        <label>
+          <input type="radio" name="bulkMode" value="ADD_PREFIX" [ngModel]="bulkMode()" (ngModelChange)="bulkMode.set($event)">
+          Add Prefix
+        </label>
+        <label>
+          <input type="radio" name="bulkMode" value="REMOVE_PREFIX" [ngModel]="bulkMode()" (ngModelChange)="bulkMode.set($event)">
+          Remove Prefix
+        </label>
+      </div>
+
+      <div class="form-group">
+        <label for="prefix">Version Prefix</label>
+        <input type="text" id="prefix" [ngModel]="bulkPrefix()" (ngModelChange)="bulkPrefix.set($event)" placeholder="e.g. DEV-">
+      </div>
+      
+      <div class="form-group checkbox-group">
+        <input type="checkbox" id="updateDependents" [ngModel]="bulkUpdateDependents()" (ngModelChange)="bulkUpdateDependents.set($event)">
+        <label for="updateDependents">Update version in dependent projects</label>
+      </div>
+      
+      <div class="modal-actions">
+        <button class="secondary-button" (click)="closeBulkModal()">Cancel</button>
+        <button class="primary-button" [disabled]="!bulkPrefix()" (click)="executeBulkUpdate()">Apply Update</button>
+      </div>
+    </div>
+  </div>
+}
+
+<ng-template #projectTree let-items let-isRoot="isRoot">
+  <ul>
+    @for (item of items; track item.path) {
+      <li class="project-item" [class.root-project]="isRoot">
+        <div class="project-item-header" [class.selected]="selectedProject()?.path === item.path" (click)="selectProject(item)">
+          @if (isRoot) {
+            <input type="checkbox" class="project-checkbox" [checked]="isProjectSelected(item)" (change)="toggleProjectSelection(item)" (click)="$event.stopPropagation()">
+          }
+          <span class="project-icon">{{ isRoot ? '📂' : '📦' }}</span>
+          <span class="project-name">
+            {{ item.artifactId }}
+            @if (item.hasSpringBootParent) {
+              <span class="spring-boot-icon" title="Spring Boot Project">🍃</span>
+            }
+          </span>
+        </div>
+        @if (item.modules.length > 0) {
+          <div class="project-modules">
+            <ng-container *ngTemplateOutlet="projectTree; context: { $implicit: item.modules, isRoot: false }"></ng-container>
+          </div>
+        }
+      </li>
+    }
+  </ul>
+</ng-template>
+
+<router-outlet />
