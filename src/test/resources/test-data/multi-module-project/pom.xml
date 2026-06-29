@@ -18,6 +18,8 @@
     <properties>
         <kotlin.version>1.8.0</kotlin.version>
         <mockk.version>1.12.0</mockk.version>
+                <!-- overriden -->
+        <mongodb.version>5.8.0</mongodb.version>
     </properties>
 
     <modules>
@@ -27,6 +29,12 @@
     </modules>
 
     <dependencyManagement>
-        <!-- Shared dependency management can go here -->
+        <dependencies>
+            <dependency>
+                <groupId>com.example</groupId>
+                <artifactId>common</artifactId>
+                <version>1.0.0</version>
+            </dependency>
+        </dependencies>
     </dependencyManagement>
 </project>

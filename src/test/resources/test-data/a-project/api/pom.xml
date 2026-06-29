@@ -10,5 +10,5 @@
   </parent>
   <groupId>com.example.a</groupId>
   <artifactId>a-project-api</artifactId>
-  <version>TEST-TEST-1.0.0</version>
+  <version>1.0.0</version>
 </project>

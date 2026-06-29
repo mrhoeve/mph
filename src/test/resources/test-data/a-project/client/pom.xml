@@ -10,7 +10,7 @@
   </parent>
   <groupId>com.example.a</groupId>
   <artifactId>a-project-client</artifactId>
-  <version>TEST-TEST-1.0.0</version>
+  <version>1.0.0</version>
   <properties>
     <a-project-api.version>TEST-TEST-1.0.0</a-project-api.version>
   </properties>
