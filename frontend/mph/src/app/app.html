@@ -47,17 +47,34 @@
 
       <section class="content">
         @if (isScanning()) {
-          <div class="loading-state">
-            Scanning and analyzing projects...
+          <div class="loading-container">
+            <div class="spinner"></div>
+            <p>Scanning and analyzing projects...</p>
           </div>
         } @else if (selectedProject(); as project) {
           <div class="project-details">
             <header class="details-header">
               <h2>{{ project.artifactId }}</h2>
-              <span class="version-badge">{{ project.version }}</span>
+              <div class="version-badges">
+                <span class="version-badge">{{ project.version }}</span>
+                @if (project.hasSpringBootParent) {
+                  <span class="version-badge spring-badge">🍃 {{ project.springBootVersion }}</span>
+                }
+              </div>
             </header>
             
             <p class="details-path"><code>{{ project.path }}</code></p>
+
+            @if (project.hasSpringBootParent) {
+              <div class="spring-upgrade-section">
+                <button class="spring-manage-button" (click)="openVersionsModal(project)">
+                  <span class="icon">⚙️</span> Manage spring component versions
+                </button>
+                <button class="spring-button" (click)="openSpringBootModal(project)">
+                  <span class="icon">🍃</span> Upgrade Spring Boot
+                </button>
+              </div>
+            }
 
             <div class="details-section">
               <h3>Usages</h3>
@@ -128,6 +145,172 @@
       <div class="modal-actions">
         <button class="secondary-button" (click)="closeBulkModal()">Cancel</button>
         <button class="primary-button" [disabled]="!bulkPrefix()" (click)="executeBulkUpdate()">Apply Update</button>
+      </div>
+    </div>
+  </div>
+}
+
+@if (isSpringBootModalOpen()) {
+  <div class="modal-overlay" (click)="closeSpringBootModal()">
+    <div class="modal-content" (click)="$event.stopPropagation()">
+      <h3>Upgrade Spring Boot</h3>
+      
+      @if (isLoadingSuggestions()) {
+        <div class="loading-container">
+          <div class="spinner"></div>
+          <p>Fetching latest Spring Boot versions...</p>
+        </div>
+      } @else if (springBootSuggestions(); as suggestions) {
+        <p>Current version: <strong>{{ suggestions.currentVersion }}</strong></p>
+        
+        @if (!suggestions.latestInSeries && !suggestions.latestOverall) {
+          <p class="success-text">You are already on the latest version of Spring Boot!</p>
+        } @else {
+          <div class="suggestion-list">
+            @if (suggestions.latestInSeries) {
+              <div class="suggestion-item">
+                <div class="suggestion-info">
+                  <span class="suggestion-label">Latest in current series</span>
+                  <span class="suggestion-version">{{ suggestions.latestInSeries }}</span>
+                </div>
+                <button class="primary-button small" (click)="upgradeSpringBoot(suggestions.latestInSeries)">Upgrade</button>
+              </div>
+            }
+            
+            @if (suggestions.latestOverall) {
+              <div class="suggestion-item">
+                <div class="suggestion-info">
+                  <span class="suggestion-label">Latest absolute version</span>
+                  <span class="suggestion-version">{{ suggestions.latestOverall }}</span>
+                </div>
+                <button class="primary-button small" (click)="upgradeSpringBoot(suggestions.latestOverall)">Upgrade</button>
+              </div>
+            }
+          </div>
+        }
+      }
+
+      <div class="modal-actions">
+        <button class="secondary-button" (click)="closeSpringBootModal()">Close</button>
+      </div>
+    </div>
+  </div>
+}
+
+@if (isVersionsModalOpen(); as isOpen) {
+  <div class="modal-overlay" (click)="closeVersionsModal()">
+    <div class="modal-content wide" (click)="$event.stopPropagation()">
+      <div class="modal-header">
+        <h3>Managed Component Versions</h3>
+        <button class="close-icon" (click)="closeVersionsModal()">×</button>
+      </div>
+      
+      <p>Managed properties for <strong>{{ versionsModalProject()?.artifactId }}</strong>.</p>
+      
+      @if (versionsModalProject()?.error; as error) {
+        <div class="error-banner">
+          <p><strong>Warning:</strong> Failed to resolve effective model. Some inherited properties may be missing.</p>
+          <p class="error-details">{{ error }}</p>
+          <p>Try running <code>mvn install</code> on the project to ensure all parents and BOMs are in your local repository.</p>
+        </div>
+      }
+
+      <div class="search-container">
+        <input type="text" 
+               class="search-input" 
+               placeholder="Search properties or versions..." 
+               [ngModel]="propertySearchQuery()" 
+               (ngModelChange)="propertySearchQuery.set($event)">
+        
+        <label class="filter-checkbox">
+          <input type="checkbox" [ngModel]="showOnlyOverrides()" (ngModelChange)="showOnlyOverrides.set($event)">
+          Show only overrides
+        </label>
+      </div>
+
+      <div class="modal-table-container">
+        @if (isLoadingProperties()) {
+          <div class="loading-container">
+            <div class="spinner"></div>
+            <p>Resolving managed properties...</p>
+          </div>
+        } @else if (filteredProperties().length > 0) {
+          <table class="managed-properties-table">
+            <thead>
+              <tr>
+                <th>Property</th>
+                <th>Value</th>
+                <th>Source</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (prop of filteredProperties(); track prop.name) {
+                <tr [class.overridden]="prop.isOverridden">
+                  <td class="prop-name-cell">
+                    <span class="prop-name">{{ prop.name }}</span>
+                    @if (prop.comment) {
+                      <div class="prop-comment" [title]="prop.comment">/* {{ prop.comment }} */</div>
+                    }
+                  </td>
+                  <td class="prop-value-cell">
+                    <span class="prop-value" [title]="prop.value">{{ prop.value }}</span>
+                    @if (prop.isOverridden && prop.inheritedValue) {
+                      <div class="inherited-value" [title]="'Inherited: ' + prop.inheritedValue">Inherited: {{ prop.inheritedValue }}</div>
+                    }
+                  </td>
+                  <td>
+                    <span class="source-badge" [class.source-local]="prop.source === 'Local POM'">
+                      {{ prop.source }}
+                    </span>
+                  </td>
+                  <td>
+                    <div class="action-buttons">
+                      <button class="secondary-button small" (click)="openOverrideModal(versionsModalProject()!, prop)">
+                        {{ prop.isOverridden ? 'Edit' : 'Override' }}
+                      </button>
+                      @if (prop.isOverridden) {
+                        <button class="danger-button small" (click)="removeOverride(versionsModalProject()!, prop)">
+                          Remove
+                        </button>
+                      }
+                    </div>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        } @else {
+          <p class="no-results">No properties match your search.</p>
+        }
+      </div>
+      
+      <div class="modal-actions">
+        <button class="secondary-button" (click)="closeVersionsModal()">Close</button>
+      </div>
+    </div>
+  </div>
+}
+
+@if (isOverrideModalOpen(); as isOpen) {
+  <div class="modal-overlay" (click)="closeOverrideModal()">
+    <div class="modal-content" (click)="$event.stopPropagation()">
+      <h3>Override Property</h3>
+      <p>Set a local override for <strong>{{ overridePropertyData()?.prop?.name }}</strong>.</p>
+      
+      <div class="form-group">
+        <label for="newValue">New Version</label>
+        <input type="text" id="newValue" [ngModel]="overrideNewValue()" (ngModelChange)="overrideNewValue.set($event)" placeholder="e.g. 3.4.0">
+      </div>
+
+      <div class="form-group">
+        <label for="remark">Remark (optional comment)</label>
+        <input type="text" id="remark" [ngModel]="overrideRemark()" (ngModelChange)="overrideRemark.set($event)" placeholder="e.g. overridden due to CVE">
+      </div>
+      
+      <div class="modal-actions">
+        <button class="secondary-button" (click)="closeOverrideModal()">Cancel</button>
+        <button class="primary-button" [disabled]="!overrideNewValue()" (click)="executeOverride()">Apply Override</button>
       </div>
     </div>
   </div>

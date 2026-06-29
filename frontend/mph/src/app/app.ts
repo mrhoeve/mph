@@ -1,8 +1,8 @@
-import { Component, DestroyRef, inject, OnInit, signal } from '@angular/core';
+import { Component, computed, DestroyRef, inject, OnInit, signal } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { FolderSelector } from './components/folder-selector/folder-selector';
 import { FileSystemService } from './services/file-system-service';
-import { MavenProjectService, ProjectAnalysis } from './services/maven-project-service';
+import { MavenProjectService, ProjectAnalysis, ManagedProperty } from './services/maven-project-service';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 
@@ -28,6 +28,36 @@ export class App implements OnInit {
   protected readonly bulkPrefix = signal('');
   protected readonly bulkUpdateDependents = signal(true);
   protected readonly bulkMode = signal('ADD_PREFIX');
+
+  protected readonly isSpringBootModalOpen = signal(false);
+  protected readonly springBootSuggestions = signal<any | null>(null);
+  protected readonly isLoadingSuggestions = signal(false);
+
+  protected readonly isOverrideModalOpen = signal(false);
+  protected readonly overridePropertyData = signal<{project: ProjectAnalysis, prop: ManagedProperty} | null>(null);
+  protected readonly overrideNewValue = signal('');
+  protected readonly overrideRemark = signal('');
+
+  protected readonly isVersionsModalOpen = signal(false);
+  protected readonly versionsModalProject = signal<ProjectAnalysis | null>(null);
+  protected readonly versionsModalProperties = signal<ManagedProperty[]>([]);
+  protected readonly isLoadingProperties = signal(false);
+  protected readonly propertySearchQuery = signal('');
+  protected readonly showOnlyOverrides = signal(false);
+
+  protected readonly filteredProperties = computed(() => {
+    const props = this.versionsModalProperties();
+    const query = this.propertySearchQuery().toLowerCase();
+    const onlyOverrides = this.showOnlyOverrides();
+
+    return props.filter(p => {
+      const matchesSearch = !query || 
+        p.name.toLowerCase().includes(query) || 
+        p.value.toLowerCase().includes(query);
+      const matchesOverride = !onlyOverrides || p.isOverridden;
+      return matchesSearch && matchesOverride;
+    });
+  });
 
   private readonly fileSystemService = inject(FileSystemService);
   private readonly mavenProjectService = inject(MavenProjectService);
@@ -165,6 +195,136 @@ export class App implements OnInit {
     this.destroyRef.onDestroy(() => subscription.unsubscribe());
   }
 
+  protected openSpringBootModal(project: ProjectAnalysis): void {
+    if (!project) return;
+    this.isLoadingSuggestions.set(true);
+    this.isSpringBootModalOpen.set(true);
+    this.springBootSuggestions.set(null);
+
+    const subscription = this.mavenProjectService.getSpringBootSuggestions(project.springBootVersion || '').subscribe({
+      next: (suggestions) => {
+        this.springBootSuggestions.set(suggestions);
+        this.isLoadingSuggestions.set(false);
+      },
+      error: () => {
+        this.errorMessage.set('Failed to load Spring Boot version suggestions.');
+        this.isLoadingSuggestions.set(false);
+        this.isSpringBootModalOpen.set(false);
+      }
+    });
+    this.destroyRef.onDestroy(() => subscription.unsubscribe());
+  }
+
+  protected closeSpringBootModal(): void {
+    this.isSpringBootModalOpen.set(false);
+  }
+
+  protected upgradeSpringBoot(newVersion: String): void {
+    const project = this.selectedProject();
+    if (!project || !newVersion) return;
+
+    this.closeSpringBootModal();
+    this.isScanning.set(true);
+
+    const subscription = this.mavenProjectService.upgradeSpringBoot(project.path, newVersion as string).subscribe({
+      next: (projects) => {
+        this.updateProjectsData(projects);
+        this.isScanning.set(false);
+      },
+      error: () => {
+        this.errorMessage.set('Spring Boot upgrade failed.');
+        this.isScanning.set(false);
+      }
+    });
+    this.destroyRef.onDestroy(() => subscription.unsubscribe());
+  }
+
+  protected openVersionsModal(project: ProjectAnalysis): void {
+    this.versionsModalProject.set(project);
+    this.versionsModalProperties.set([]);
+    this.propertySearchQuery.set('');
+    this.showOnlyOverrides.set(false);
+    this.isVersionsModalOpen.set(true);
+    this.loadManagedProperties(project.path);
+  }
+
+  protected loadManagedProperties(path: string): void {
+    this.isLoadingProperties.set(true);
+    const subscription = this.mavenProjectService.getManagedProperties(path).subscribe({
+      next: (props) => {
+        this.versionsModalProperties.set(props);
+        this.isLoadingProperties.set(false);
+      },
+      error: () => {
+        this.isLoadingProperties.set(false);
+      }
+    });
+    this.destroyRef.onDestroy(() => subscription.unsubscribe());
+  }
+
+  protected closeVersionsModal(): void {
+    this.isVersionsModalOpen.set(false);
+    this.versionsModalProject.set(null);
+  }
+
+  protected openOverrideModal(project: ProjectAnalysis, prop: ManagedProperty): void {
+    this.overridePropertyData.set({ project, prop });
+    this.overrideNewValue.set(prop.value);
+    this.overrideRemark.set(prop.comment || '');
+    this.isOverrideModalOpen.set(true);
+  }
+
+  protected closeOverrideModal(): void {
+    this.isOverrideModalOpen.set(false);
+  }
+
+  protected executeOverride(): void {
+    const data = this.overridePropertyData();
+    if (!data) return;
+
+    this.closeOverrideModal();
+    this.isScanning.set(true);
+
+    const subscription = this.mavenProjectService.overrideProperty(
+      data.project.path,
+      data.prop.name,
+      this.overrideNewValue(),
+      this.overrideRemark()
+    ).subscribe({
+      next: (projects) => {
+        this.updateProjectsData(projects);
+        this.isScanning.set(false);
+      },
+      error: () => {
+        this.errorMessage.set('Property override failed.');
+        this.isScanning.set(false);
+      }
+    });
+    this.destroyRef.onDestroy(() => subscription.unsubscribe());
+  }
+
+  protected removeOverride(project: ProjectAnalysis, prop: ManagedProperty): void {
+    if (!confirm(`Are you sure you want to remove the override for ${prop.name}?`)) {
+      return;
+    }
+
+    this.isScanning.set(true);
+    const subscription = this.mavenProjectService.removePropertyOverride(
+      project.path,
+      prop.name
+    ).subscribe({
+      next: (projects) => {
+        this.updateProjectsData(projects);
+        this.isScanning.set(false);
+      },
+      error: () => {
+        this.errorMessage.set('Failed to remove property override.');
+        this.isScanning.set(false);
+      }
+    });
+    this.destroyRef.onDestroy(() => subscription.unsubscribe());
+  }
+
   private updateProjectsData(projects: ProjectAnalysis[]): void {
     this.projects.set(projects);
     
@@ -173,6 +333,14 @@ export class App implements OnInit {
     if (currentSelected) {
       const updated = this.findProjectByPath(projects, currentSelected.path);
       this.selectedProject.set(updated);
+    }
+
+    // Refresh versions modal project if modal is open
+    const currentVersionsProject = this.versionsModalProject();
+    if (currentVersionsProject) {
+      const updated = this.findProjectByPath(projects, currentVersionsProject.path);
+      this.versionsModalProject.set(updated);
+      this.loadManagedProperties(currentVersionsProject.path);
     }
   }
 
