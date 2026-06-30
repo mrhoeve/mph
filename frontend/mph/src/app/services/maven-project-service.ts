@@ -100,4 +100,12 @@ export class MavenProjectService {
       params: { path }
     });
   }
+
+  getBuildOrder(): Observable<ProjectAnalysis[]> {
+    return this.http.get<ProjectAnalysis[]>(`${this.apiBaseUrl}/api/projects/build-order`);
+  }
+
+  getExcelUrl(): string {
+    return `${this.apiBaseUrl}/api/projects/export-excel`;
+  }
 }

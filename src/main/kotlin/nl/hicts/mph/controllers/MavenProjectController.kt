@@ -5,6 +5,9 @@ import nl.hicts.mph.services.ManagedProperty
 import nl.hicts.mph.services.ProjectAnalysis
 import nl.hicts.mph.services.SpringBootUpgradeSuggestions
 import nl.hicts.mph.services.SpringBootVersionService
+import org.springframework.http.HttpHeaders
+import org.springframework.http.MediaType
+import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -107,6 +110,26 @@ class MavenProjectController(
         val settings = loadSettings()
         val basePath = settings.basePath ?: throw RuntimeException("Base path not set")
         return mavenProjectService.getManagedProperties(basePath, settings.maxScanDepth, path)
+    }
+
+    @GetMapping("/api/projects/build-order")
+    fun getBuildOrder(): List<ProjectAnalysis> {
+        val settings = loadSettings()
+        val basePath = settings.basePath ?: throw RuntimeException("Base path not set")
+        return mavenProjectService.getBuildOrder(basePath, settings.maxScanDepth)
+    }
+
+    @GetMapping("/api/projects/export-excel")
+    fun exportExcel(): ResponseEntity<ByteArray> {
+        val settings = loadSettings()
+        val basePath = settings.basePath ?: throw RuntimeException("Base path not set")
+        val buildOrder = mavenProjectService.getBuildOrder(basePath, settings.maxScanDepth)
+        val excelBytes = mavenProjectService.exportToExcel(buildOrder)
+
+        return ResponseEntity.ok()
+            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=build-order.xlsx")
+            .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+            .body(excelBytes)
     }
 
     private fun loadSettings(): Settings {

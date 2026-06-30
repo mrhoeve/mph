@@ -31,13 +31,19 @@
         </div>
 
         <div class="sidebar-actions">
-          <label class="select-all">
-            <input type="checkbox" [checked]="isAllSelected()" (change)="toggleSelectAll()">
-            Select All
-          </label>
-          <button class="bulk-button" [disabled]="selectedRootProjects().size === 0" (click)="openBulkModal()">
-            Bulk Update ({{ selectedRootProjects().size }})
+          <button class="build-order-button" (click)="openBuildOrderModal()">
+            <span class="icon">📊</span> Show Build Order
           </button>
+          
+          <div class="bulk-row">
+            <label class="select-all">
+              <input type="checkbox" [checked]="isAllSelected()" (change)="toggleSelectAll()">
+              Select All
+            </label>
+            <button class="bulk-button" [disabled]="selectedRootProjects().size === 0" (click)="openBulkModal()">
+              Bulk Update ({{ selectedRootProjects().size }})
+            </button>
+          </div>
         </div>
 
         <div class="project-list">
@@ -345,6 +351,70 @@
       <div class="modal-actions">
         <button class="secondary-button" (click)="closeOverrideModal()">Cancel</button>
         <button class="primary-button" [disabled]="!overrideNewValue()" (click)="executeOverride()">Apply Override</button>
+      </div>
+    </div>
+  </div>
+}
+
+@if (isBuildOrderModalOpen()) {
+  <div class="modal-overlay" (click)="closeBuildOrderModal()">
+    <div class="modal-content wide" (click)="$event.stopPropagation()">
+      <div class="modal-header">
+        <h3>Project Build Order</h3>
+        <button class="close-icon" (click)="closeBuildOrderModal()">×</button>
+      </div>
+
+      <div class="build-order-container">
+        <div class="build-order-main">
+          @if (isLoadingBuildOrder()) {
+            <div class="loading-container">
+              <div class="spinner"></div>
+              <p>Calculating build order...</p>
+            </div>
+          } @else {
+            <div class="actions" style="margin-bottom: 16px;">
+              <button class="primary-button" (click)="downloadExcel()">Export to Excel</button>
+            </div>
+            <div class="build-order-table-wrapper">
+              <table class="managed-properties-table">
+                <thead>
+                  <tr>
+                    <th>Order</th>
+                    <th>Project</th>
+                    <th>Version</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (p of buildOrderProjects(); track p.path; let i = $index) {
+                    <tr>
+                      <td>{{ i + 1 }}</td>
+                      <td>{{ p.artifactId }}</td>
+                      <td>{{ p.version }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          }
+        </div>
+        <div class="dependency-graph-section">
+          <div class="graph-header">
+            <h4>Dependency Graph</h4>
+            <div class="graph-actions">
+              <button class="icon-button" (click)="zoomIn()" title="Zoom In">+</button>
+              <button class="icon-button" (click)="zoomOut()" title="Zoom Out">-</button>
+              <button class="icon-button" (click)="resetZoom()" title="Reset Zoom">⟲</button>
+              <button class="primary-button small" (click)="saveAsImage()">Save as Image</button>
+            </div>
+          </div>
+          <div id="dependency-graph-container" class="mermaid-graph-container">
+            <div id="dependency-graph" class="mermaid-graph"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="secondary-button" (click)="closeBuildOrderModal()">Close</button>
       </div>
     </div>
   </div>

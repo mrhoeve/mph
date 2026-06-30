@@ -5,6 +5,8 @@ import { FileSystemService } from './services/file-system-service';
 import { MavenProjectService, ProjectAnalysis, ManagedProperty } from './services/maven-project-service';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import mermaid from 'mermaid';
+import svgPanZoom from 'svg-pan-zoom';
 
 @Component({
   selector: 'app-root',
@@ -45,6 +47,12 @@ export class App implements OnInit {
   protected readonly propertySearchQuery = signal('');
   protected readonly showOnlyOverrides = signal(false);
 
+  protected readonly isBuildOrderModalOpen = signal(false);
+  protected readonly buildOrderProjects = signal<ProjectAnalysis[]>([]);
+  protected readonly isLoadingBuildOrder = signal(false);
+
+  private panZoomInstance: SvgPanZoom.Instance | null = null;
+
   protected readonly filteredProperties = computed(() => {
     const props = this.versionsModalProperties();
     const query = this.propertySearchQuery().toLowerCase();
@@ -81,6 +89,11 @@ export class App implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
 
   ngOnInit(): void {
+    mermaid.initialize({ 
+      startOnLoad: false, 
+      theme: 'neutral',
+      flowchart: { useMaxWidth: false }
+    });
     const subscription = this.fileSystemService.current().subscribe({
       next: (folder) => {
         if (folder.remembered) {
@@ -357,6 +370,196 @@ export class App implements OnInit {
       }
     });
     this.destroyRef.onDestroy(() => subscription.unsubscribe());
+  }
+
+  protected openBuildOrderModal(): void {
+    this.isBuildOrderModalOpen.set(true);
+    this.isLoadingBuildOrder.set(true);
+    this.buildOrderProjects.set([]);
+
+    const subscription = this.mavenProjectService.getBuildOrder().subscribe({
+      next: (projects) => {
+        this.buildOrderProjects.set(projects);
+        this.isLoadingBuildOrder.set(false);
+        setTimeout(() => this.renderDependencyGraph(), 100);
+      },
+      error: () => {
+        this.errorMessage.set('Failed to load build order.');
+        this.isLoadingBuildOrder.set(false);
+        this.isBuildOrderModalOpen.set(false);
+      }
+    });
+    this.destroyRef.onDestroy(() => subscription.unsubscribe());
+  }
+
+  protected closeBuildOrderModal(): void {
+    this.isBuildOrderModalOpen.set(false);
+    if (this.panZoomInstance) {
+      this.panZoomInstance.destroy();
+      this.panZoomInstance = null;
+    }
+  }
+
+  protected downloadExcel(): void {
+    window.open(this.mavenProjectService.getExcelUrl(), '_blank');
+  }
+
+  protected zoomIn(): void {
+    this.panZoomInstance?.zoomIn();
+  }
+
+  protected zoomOut(): void {
+    this.panZoomInstance?.zoomOut();
+  }
+
+  protected resetZoom(): void {
+    this.panZoomInstance?.reset();
+    this.panZoomInstance?.center();
+  }
+
+  protected saveAsImage(): void {
+    const svgElement = document.querySelector('#dependency-graph svg') as SVGSVGElement;
+    if (!svgElement) return;
+
+    // We need to clone it to avoid modifying the original one during export
+    const clonedSvg = svgElement.cloneNode(true) as SVGSVGElement;
+    
+    // Ensure the SVG has explicit dimensions for the canvas
+    const bbox = svgElement.getBBox();
+    const width = bbox.width + 40;
+    const height = bbox.height + 40;
+    
+    clonedSvg.setAttribute('width', width.toString());
+    clonedSvg.setAttribute('height', height.toString());
+    clonedSvg.setAttribute('viewBox', `${bbox.x - 20} ${bbox.y - 20} ${width} ${height}`);
+
+    const svgData = new XMLSerializer().serializeToString(clonedSvg);
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const img = new Image();
+
+    // High res scale
+    const scale = 2;
+    canvas.width = width * scale;
+    canvas.height = height * scale;
+
+    img.onload = () => {
+      if (ctx) {
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        
+        try {
+          const pngFile = canvas.toDataURL('image/png');
+          const downloadLink = document.createElement('a');
+          downloadLink.download = `dependency-graph-${new Date().getTime()}.png`;
+          downloadLink.href = pngFile;
+          downloadLink.click();
+        } catch (e) {
+          this.errorMessage.set('Failed to export image. Try a different browser.');
+        }
+      }
+    };
+
+    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+  }
+
+  private renderDependencyGraph(): void {
+    const projects = this.buildOrderProjects();
+    if (projects.length === 0) return;
+
+    let mermaidContent = 'graph TD\n';
+    
+    // Add nodes
+    projects.forEach(p => {
+      const id = this.sanitizeId(`${p.groupId}:${p.artifactId}`);
+      mermaidContent += `  ${id}["${p.artifactId}"]\n`;
+    });
+
+    // Add edges based on usages
+    projects.forEach(p => {
+      const pId = this.sanitizeId(`${p.groupId}:${p.artifactId}`);
+      const allModules = this.flatten(p);
+      allModules.forEach(m => {
+        m.usages.forEach(u => {
+          const dependentRoot = this.findRootForUsage(projects, u.path);
+          if (dependentRoot && dependentRoot.path !== p.path) {
+            const depId = this.sanitizeId(`${dependentRoot.groupId}:${dependentRoot.artifactId}`);
+            mermaidContent += `  ${pId} --> ${depId}\n`;
+          }
+        });
+      });
+    });
+
+    const element = document.getElementById('dependency-graph');
+    if (element) {
+      mermaid.render('graph-svg', mermaidContent).then(({ svg }) => {
+        // Remove fixed width/height to allow the graph to fill its container
+        const processedSvg = svg
+          .replace(/width="[\d.]+(px)?"/, '')
+          .replace(/height="[\d.]+(px)?"/, '')
+          .replace(/style="max-width: [\d.]+(px)?;"/, '');
+        
+        element.innerHTML = processedSvg;
+
+        const svgElement = element.querySelector('svg');
+        if (svgElement) {
+          svgElement.setAttribute('width', '100%');
+          svgElement.setAttribute('height', '100%');
+          svgElement.style.maxWidth = 'none';
+        }
+
+        this.initializeZoom();
+        this.addTooltips(projects);
+      });
+    }
+  }
+
+  private initializeZoom(): void {
+    const svgElement = document.querySelector('#dependency-graph svg') as SVGSVGElement;
+    if (!svgElement) return;
+
+    if (this.panZoomInstance) {
+      this.panZoomInstance.destroy();
+    }
+
+    this.panZoomInstance = svgPanZoom(svgElement, {
+      zoomEnabled: true,
+      controlIconsEnabled: false,
+      fit: true,
+      center: true,
+      minZoom: 0.1,
+      maxZoom: 10
+    });
+  }
+
+  private addTooltips(projects: ProjectAnalysis[]): void {
+    const svg = document.querySelector('#dependency-graph svg');
+    if (!svg) return;
+
+    projects.forEach(p => {
+      const id = this.sanitizeId(`${p.groupId}:${p.artifactId}`);
+      const nodes = svg.querySelectorAll('.node');
+      nodes.forEach(node => {
+        if (node.id.includes(id)) {
+          const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+          title.textContent = `Group: ${p.groupId}\nArtifact: ${p.artifactId}\nVersion: ${p.version}\nPath: ${p.path}`;
+          node.appendChild(title);
+        }
+      });
+    });
+  }
+
+  private sanitizeId(id: string): string {
+    return id.replace(/[^a-zA-Z0-9]/g, '_');
+  }
+
+  private flatten(p: ProjectAnalysis): ProjectAnalysis[] {
+    return [p, ...p.modules.flatMap(m => this.flatten(m))];
+  }
+
+  private findRootForUsage(roots: ProjectAnalysis[], path: string): ProjectAnalysis | null {
+    return roots.find(r => this.flatten(r).some(m => m.path === path)) || null;
   }
 
   private updateProjectsData(projects: ProjectAnalysis[]): void {

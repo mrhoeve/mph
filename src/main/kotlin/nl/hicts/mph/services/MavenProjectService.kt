@@ -5,13 +5,15 @@ import nl.hicts.mph.models.getAppropiateArtifactId
 import nl.hicts.mph.models.getAppropiateGroupId
 import nl.hicts.mph.models.getAppropiateVersion
 import org.apache.maven.model.Model
+import org.apache.poi.xssf.usermodel.XSSFWorkbook
 import org.springframework.stereotype.Service
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
-import java.util.Properties
+import java.util.*
 
 data class ManagedProperty(
     val name: String,
@@ -514,6 +516,93 @@ class MavenProjectService(
 
         val (props, error) = resolveManagedPropertiesWithError(project, allProjects)
         return props
+    }
+
+    fun getBuildOrder(basePath: Path, maxDepth: Int): List<ProjectAnalysis> {
+        val rootProjects = scanAndAnalyze(basePath, maxDepth)
+        val rootByKey = rootProjects.associateBy { "${it.groupId}:${it.artifactId}" }
+        val dependencies = mutableMapOf<String, MutableSet<String>>() // Dependent -> Dependencies
+
+        rootProjects.forEach { root ->
+            val allModules = flattenAnalysis(root)
+            allModules.forEach { module ->
+                module.usages.forEach { usage ->
+                    val dependentRoot = findRootAnalysisByPath(rootProjects, usage.path)
+                    if (dependentRoot != null && dependentRoot != root) {
+                        val rootKey = "${root.groupId}:${root.artifactId}"
+                        val depKey = "${dependentRoot.groupId}:${dependentRoot.artifactId}"
+                        dependencies.getOrPut(depKey) { mutableSetOf() }.add(rootKey)
+                    }
+                }
+            }
+        }
+
+        val sortedKeys = topologicalSort(rootByKey.keys, dependencies)
+        return sortedKeys.mapNotNull { rootByKey[it] }
+    }
+
+    fun exportToExcel(projects: List<ProjectAnalysis>): ByteArray {
+        val workbook = XSSFWorkbook()
+        val sheet = workbook.createSheet("Build Order")
+
+        val header = sheet.createRow(0)
+        header.createCell(0).setCellValue("Build Order")
+        header.createCell(1).setCellValue("Project Name")
+        header.createCell(2).setCellValue("Group ID")
+        header.createCell(3).setCellValue("Artifact ID")
+        header.createCell(4).setCellValue("Current Version")
+
+        projects.forEachIndexed { index, project ->
+            val row = sheet.createRow(index + 1)
+            row.createCell(0).setCellValue((index + 1).toDouble())
+            row.createCell(1).setCellValue(project.artifactId)
+            row.createCell(2).setCellValue(project.groupId)
+            row.createCell(3).setCellValue(project.artifactId)
+            row.createCell(4).setCellValue(project.version)
+        }
+
+        // Auto size columns
+        for (i in 0..4) {
+            sheet.autoSizeColumn(i)
+        }
+
+        val out = ByteArrayOutputStream()
+        workbook.write(out)
+        workbook.close()
+        return out.toByteArray()
+    }
+
+    private fun flattenAnalysis(project: ProjectAnalysis): List<ProjectAnalysis> {
+        return listOf(project) + project.modules.flatMap { flattenAnalysis(it) }
+    }
+
+    private fun findRootAnalysisByPath(roots: List<ProjectAnalysis>, path: String): ProjectAnalysis? {
+        val normalizedPath = Paths.get(path).toAbsolutePath().normalize().toString()
+        return roots.find { root ->
+            flattenAnalysis(root).any { 
+                Paths.get(it.path).toAbsolutePath().normalize().toString() == normalizedPath 
+            }
+        }
+    }
+
+    private fun topologicalSort(nodes: Set<String>, dependencies: Map<String, Set<String>>): List<String> {
+        val result = mutableListOf<String>()
+        val visited = mutableSetOf<String>()
+        val tempVisited = mutableSetOf<String>()
+
+        fun visit(node: String) {
+            if (visited.contains(node)) return
+            if (tempVisited.contains(node)) return // Cycle, skip
+
+            tempVisited.add(node)
+            dependencies[node]?.forEach { visit(it) }
+            tempVisited.remove(node)
+            visited.add(node)
+            result.add(node)
+        }
+
+        nodes.sorted().forEach { visit(it) } // Sort nodes for deterministic output
+        return result
     }
 
     private fun findUsages(targetProject: MavenProject, allProjects: List<MavenProject>): List<ProjectUsage> {
