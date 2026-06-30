@@ -1,24 +1,36 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+  This project was created and is maintained with the assistance of Junie,
+  an AI Software Engineer by JetBrains.
+-->
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
 	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
 	<modelVersion>4.0.0</modelVersion>
 	<parent>
 		<groupId>org.springframework.boot</groupId>
 		<artifactId>spring-boot-starter-parent</artifactId>
-		<version>4.0.6</version>
+		<version>4.1.0</version>
 		<relativePath/> <!-- lookup parent from repository -->
 	</parent>
 	<groupId>nl.hicts</groupId>
 	<artifactId>mph</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<name/>
-	<description/>
+	<name>mph</name>
+	<description>Maven Project Helper - Created using Junie (AI Agent by JetBrains)</description>
 	<url/>
 	<licenses>
 		<license/>
 	</licenses>
 	<developers>
-		<developer/>
+		<developer>
+			<id>mrhoeve</id>
+			<name>Marc Hoeve</name>
+			<email>mrhoeve@gmail.com</email>
+			<roles>
+				<role>developer</role>
+				<role>maintainer</role>
+			</roles>
+		</developer>
 	</developers>
 	<scm>
 		<connection/>
@@ -29,6 +41,13 @@
 	<properties>
 		<java.version>21</java.version>
 		<kotlin.version>2.2.21</kotlin.version>
+		<maven.version>3.9.16</maven.version>
+		<maven-resolver.version>1.9.27</maven-resolver.version>
+		<poi.version>5.5.1</poi.version>
+		<mockk.version>1.14.11</mockk.version>
+		<exec-maven-plugin.version>3.6.3</exec-maven-plugin.version>
+		<skipTests>false</skipTests>
+		<skipUTs>${skipTests}</skipUTs>
 	</properties>
 	<dependencies>
 		<dependency>
@@ -58,32 +77,32 @@
 		<dependency>
 			<groupId>org.apache.maven</groupId>
 			<artifactId>maven-model</artifactId>
-			<version>3.9.11</version>
+			<version>${maven.version}</version>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.maven</groupId>
 			<artifactId>maven-model-builder</artifactId>
-			<version>3.9.11</version>
+			<version>${maven.version}</version>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.maven</groupId>
 			<artifactId>maven-resolver-provider</artifactId>
-			<version>3.9.11</version>
+			<version>${maven.version}</version>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.maven.resolver</groupId>
 			<artifactId>maven-resolver-connector-basic</artifactId>
-			<version>1.9.22</version>
+			<version>${maven-resolver.version}</version>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.maven.resolver</groupId>
 			<artifactId>maven-resolver-transport-file</artifactId>
-			<version>1.9.22</version>
+			<version>${maven-resolver.version}</version>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.maven.resolver</groupId>
 			<artifactId>maven-resolver-transport-http</artifactId>
-			<version>1.9.22</version>
+			<version>${maven-resolver.version}</version>
 		</dependency>
 
 		<dependency>
@@ -120,17 +139,18 @@
 		<dependency>
 			<groupId>io.mockk</groupId>
 			<artifactId>mockk-jvm</artifactId>
-			<version>1.13.12</version>
+			<version>${mockk.version}</version>
 			<scope>test</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.poi</groupId>
 			<artifactId>poi-ooxml</artifactId>
-			<version>5.2.3</version>
+			<version>${poi.version}</version>
 		</dependency>
 	</dependencies>
 
 	<build>
+		<finalName>mph</finalName>
 		<sourceDirectory>${project.basedir}/src/main/kotlin</sourceDirectory>
 		<testSourceDirectory>${project.basedir}/src/test/kotlin</testSourceDirectory>
 		<resources>
@@ -148,9 +168,17 @@
 				<artifactId>spring-boot-maven-plugin</artifactId>
 			</plugin>
 			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+				<configuration>
+					<skipTests>${skipUTs}</skipTests>
+				</configuration>
+			</plugin>
+			<plugin>
 				<groupId>org.jetbrains.kotlin</groupId>
 				<artifactId>kotlin-maven-plugin</artifactId>
 				<configuration>
+					<jvmTarget>${java.version}</jvmTarget>
 					<args>
 						<arg>-Xjsr305=strict</arg>
 						<arg>-Xannotation-default-target=param-property</arg>
@@ -170,7 +198,7 @@
 			<plugin>
 				<groupId>org.codehaus.mojo</groupId>
 				<artifactId>exec-maven-plugin</artifactId>
-				<version>3.0.0</version>
+				<version>${exec-maven-plugin.version}</version>
 				<executions>
 					<execution>
 						<phase>generate-resources</phase>
@@ -184,6 +212,8 @@
 					<workingDirectory>${project.basedir}/frontend/mph</workingDirectory>
 					<arguments>
 						<argument>build</argument>
+						<argument>--configuration</argument>
+						<argument>production</argument>
 					</arguments>
 				</configuration>
 			</plugin>

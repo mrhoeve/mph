@@ -1,0 +1,92 @@
+<div class="modal-overlay" (click)="close.emit()">
+  <div class="modal-content wide" (click)="$event.stopPropagation()">
+    <div class="modal-header">
+      <h3>Managed Component Versions</h3>
+      <button class="close-icon" (click)="close.emit()">×</button>
+    </div>
+    
+    <p>Managed properties for <strong>{{ project().artifactId }}</strong>.</p>
+    
+    @if (project().error; as error) {
+      <div class="error-banner">
+        <p><strong>Warning:</strong> Failed to resolve effective model. Some inherited properties may be missing.</p>
+        <p class="error-details">{{ error }}</p>
+        <p>Try running <code>mvn install</code> on the project to ensure all parents and BOMs are in your local repository.</p>
+      </div>
+    }
+
+    <div class="search-container">
+      <input type="text" 
+             class="search-input" 
+             placeholder="Search properties or versions..." 
+             [ngModel]="propertySearchQuery()" 
+             (ngModelChange)="propertySearchQuery.set($event)">
+      
+      <label class="filter-checkbox">
+        <input type="checkbox" [ngModel]="showOnlyOverrides()" (ngModelChange)="showOnlyOverrides.set($event)">
+        Show only overrides
+      </label>
+    </div>
+
+    <div class="modal-table-container">
+      @if (isLoading()) {
+        <div class="loading-container">
+          <div class="spinner"></div>
+          <p>Resolving managed properties...</p>
+        </div>
+      } @else if (filteredProperties().length > 0) {
+        <table class="managed-properties-table">
+          <thead>
+            <tr>
+              <th>Property</th>
+              <th>Value</th>
+              <th>Source</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (prop of filteredProperties(); track prop.name) {
+              <tr [class.overridden]="prop.isOverridden">
+                <td class="prop-name-cell">
+                  <span class="prop-name">{{ prop.name }}</span>
+                  @if (prop.comment) {
+                    <div class="prop-comment" [title]="prop.comment">/* {{ prop.comment }} */</div>
+                  }
+                </td>
+                <td class="prop-value-cell">
+                  <span class="prop-value" [title]="prop.value">{{ prop.value }}</span>
+                  @if (prop.isOverridden && prop.inheritedValue) {
+                    <div class="inherited-value" [title]="'Inherited: ' + prop.inheritedValue">Inherited: {{ prop.inheritedValue }}</div>
+                  }
+                </td>
+                <td>
+                  <span class="source-badge" [class.source-local]="prop.source === 'Local POM'">
+                    {{ prop.source }}
+                  </span>
+                </td>
+                <td>
+                  <div class="action-buttons">
+                    <button class="secondary-button small" (click)="onOverride(prop)">
+                      {{ prop.isOverridden ? 'Edit' : 'Override' }}
+                    </button>
+                    @if (prop.isOverridden) {
+                      <button class="danger-button small" (click)="onRemoveOverride(prop)">
+                        Remove
+                      </button>
+                    }
+                  </div>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      } @else {
+        <p class="no-results">No properties match your search.</p>
+      }
+    </div>
+    
+    <div class="modal-actions">
+      <button class="secondary-button" (click)="close.emit()">Close</button>
+    </div>
+  </div>
+</div>

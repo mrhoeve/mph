@@ -1,0 +1,21 @@
+<div class="modal-overlay" (click)="close.emit()">
+  <div class="modal-content" (click)="$event.stopPropagation()">
+    <h3>Override Property</h3>
+    <p>Set a local override for <strong>{{ prop().name }}</strong>.</p>
+    
+    <div class="form-group">
+      <label for="newValue">New Version</label>
+      <input type="text" id="newValue" [ngModel]="overrideNewValue()" (ngModelChange)="overrideNewValue.set($event)" placeholder="e.g. 3.4.0">
+    </div>
+
+    <div class="form-group">
+      <label for="remark">Remark (optional comment)</label>
+      <input type="text" id="remark" [ngModel]="overrideRemark()" (ngModelChange)="overrideRemark.set($event)" placeholder="e.g. overridden due to CVE">
+    </div>
+    
+    <div class="modal-actions">
+      <button class="secondary-button" (click)="close.emit()">Cancel</button>
+      <button class="primary-button" [disabled]="!overrideNewValue()" (click)="onExecute()">Apply Override</button>
+    </div>
+  </div>
+</div>

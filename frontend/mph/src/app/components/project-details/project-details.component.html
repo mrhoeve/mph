@@ -1,0 +1,116 @@
+<section class="content">
+  @if (projectState.isScanning()) {
+    <div class="loading-container">
+      <div class="spinner"></div>
+      <p>Scanning and analyzing projects...</p>
+    </div>
+  } @else if (projectState.selectedProject(); as project) {
+    <div class="project-details">
+      <header class="details-header">
+        <div class="title-row">
+          <h2>{{ project.artifactId }}</h2>
+        </div>
+        <div class="actions-row">
+          <div class="version-badges">
+            <span class="version-badge">{{ project.version }}</span>
+            @if (project.hasSpringBootParent) {
+              <span class="version-badge spring-badge">🍃 {{ project.springBootVersion }}</span>
+            }
+          </div>
+          @if (project.modules.length > 0) {
+            <button class="primary-button small" (click)="updateAllModules.emit(project)">
+              Update all modules & usages
+            </button>
+          }
+        </div>
+      </header>
+      
+      <p class="details-path"><code>{{ project.path }}</code></p>
+
+      @if (project.hasSpringBootParent) {
+        <div class="spring-upgrade-section">
+          <button class="spring-manage-button" (click)="manageProperties.emit(project)">
+            <span class="icon">⚙️</span> Manage spring component versions
+          </button>
+          <button class="spring-button" (click)="upgradeSpringBoot.emit(project)">
+            <span class="icon">🍃</span> Upgrade Spring Boot
+          </button>
+        </div>
+      }
+
+      <div class="details-section">
+        <h3>Usages</h3>
+        @if (project.usages.length > 0 || projectState.selectedProjectModuleUsages().length > 0) {
+          @if (project.usages.length > 0) {
+            <table class="usages-table">
+              <thead>
+                <tr>
+                  <th>Used in</th>
+                  <th>Version used</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (usage of project.usages; track usage.path) {
+                  <tr>
+                    <td>
+                      @if (usage.usedVersion !== project.version) {
+                        <span class="outdated-icon" title="Version mismatch">❗</span>
+                      }
+                      {{ usage.usedInArtifactId }}
+                    </td>
+                    <td [class.version-mismatch]="usage.usedVersion !== project.version"
+                        [class.version-match]="usage.usedVersion === project.version">
+                      {{ usage.usedVersion }}
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+            <div class="actions">
+              <button class="primary-button" (click)="updateToLatest.emit(project)">Update all to {{ project.version }}</button>
+            </div>
+          }
+
+          @for (module of projectState.selectedProjectModuleUsages(); track module.path) {
+            <div class="module-usages">
+              <h4>Module: {{ module.artifactId }}</h4>
+              <table class="usages-table">
+                <thead>
+                  <tr>
+                    <th>Used in</th>
+                    <th>Version used</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (usage of module.usages; track usage.path) {
+                    <tr>
+                      <td>
+                        @if (usage.usedVersion !== module.version) {
+                          <span class="outdated-icon" title="Version mismatch">❗</span>
+                        }
+                        {{ usage.usedInArtifactId }}
+                      </td>
+                      <td [class.version-mismatch]="usage.usedVersion !== module.version"
+                          [class.version-match]="usage.usedVersion === module.version">
+                        {{ usage.usedVersion }}
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+              <div class="actions">
+                <button class="primary-button small" (click)="updateToLatest.emit(module)">Update all to {{ module.version }}</button>
+              </div>
+            </div>
+          }
+        } @else {
+          <p>No usages found in scanned projects.</p>
+        }
+      </div>
+    </div>
+  } @else {
+    <div class="empty-state">
+      Select a project from the list to see details.
+    </div>
+  }
+</section>

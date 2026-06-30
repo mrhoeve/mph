@@ -7,7 +7,7 @@
     </p>
   </header>
 
-  @if (errorMessage(); as message) {
+  @if (projectState.errorMessage(); as message) {
     <div class="error-message" role="alert">
       {{ message }}
     </div>
@@ -24,426 +24,64 @@
     </section>
   } @else {
     <div class="main-layout">
-      <aside class="sidebar">
-        <div class="sidebar-header">
-          <h3>Projects</h3>
-          <button class="secondary-button" (click)="changeFolder()">Change Folder</button>
-        </div>
+      <app-project-list
+        (bulkUpdate)="isBulkModalOpen.set(true)"
+        (changeFolder)="changeFolder()">
+      </app-project-list>
 
-        <div class="sidebar-actions">
-          <button class="build-order-button" (click)="openBuildOrderModal()">
-            <span class="icon">📊</span> Show Build Order
-          </button>
-          
-          <div class="bulk-row">
-            <label class="select-all">
-              <input type="checkbox" [checked]="isAllSelected()" (change)="toggleSelectAll()">
-              Select All
-            </label>
-            <button class="bulk-button" [disabled]="selectedRootProjects().size === 0" (click)="openBulkModal()">
-              Bulk Update ({{ selectedRootProjects().size }})
-            </button>
-          </div>
-        </div>
-
-        <div class="project-list">
-          <ng-container *ngTemplateOutlet="projectTree; context: { $implicit: projects(), isRoot: true }"></ng-container>
-        </div>
-      </aside>
-
-      <section class="content">
-        @if (isScanning()) {
-          <div class="loading-container">
-            <div class="spinner"></div>
-            <p>Scanning and analyzing projects...</p>
-          </div>
-        } @else if (selectedProject(); as project) {
-          <div class="project-details">
-            <header class="details-header">
-              <h2>{{ project.artifactId }}</h2>
-              <div class="version-badges">
-                <span class="version-badge">{{ project.version }}</span>
-                @if (project.hasSpringBootParent) {
-                  <span class="version-badge spring-badge">🍃 {{ project.springBootVersion }}</span>
-                }
-              </div>
-              @if (project.modules.length > 0) {
-                <button class="primary-button small" (click)="updateAllModulesAndUsages(project)" style="margin-left: auto;">
-                  Update all modules & usages
-                </button>
-              }
-            </header>
-            
-            <p class="details-path"><code>{{ project.path }}</code></p>
-
-            @if (project.hasSpringBootParent) {
-              <div class="spring-upgrade-section">
-                <button class="spring-manage-button" (click)="openVersionsModal(project)">
-                  <span class="icon">⚙️</span> Manage spring component versions
-                </button>
-                <button class="spring-button" (click)="openSpringBootModal(project)">
-                  <span class="icon">🍃</span> Upgrade Spring Boot
-                </button>
-              </div>
-            }
-
-            <div class="details-section">
-              <h3>Usages</h3>
-              @if (project.usages.length > 0 || selectedProjectModuleUsages().length > 0) {
-                @if (project.usages.length > 0) {
-                  <table class="usages-table">
-                    <thead>
-                      <tr>
-                        <th>Used in</th>
-                        <th>Version used</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      @for (usage of project.usages; track usage.path) {
-                        <tr>
-                          <td>{{ usage.usedInArtifactId }}</td>
-                          <td [class.version-mismatch]="usage.usedVersion !== project.version">
-                            {{ usage.usedVersion }}
-                          </td>
-                        </tr>
-                      }
-                    </tbody>
-                  </table>
-                  <div class="actions">
-                    <button class="primary-button" (click)="updateToLatest(project)">Update all to {{ project.version }}</button>
-                  </div>
-                }
-
-                @for (module of selectedProjectModuleUsages(); track module.path) {
-                  <div class="module-usages">
-                    <h4>Module: {{ module.artifactId }}</h4>
-                    <table class="usages-table">
-                      <thead>
-                        <tr>
-                          <th>Used in</th>
-                          <th>Version used</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        @for (usage of module.usages; track usage.path) {
-                          <tr>
-                            <td>{{ usage.usedInArtifactId }}</td>
-                            <td [class.version-mismatch]="usage.usedVersion !== module.version">
-                              {{ usage.usedVersion }}
-                            </td>
-                          </tr>
-                        }
-                      </tbody>
-                    </table>
-                    <div class="actions">
-                      <button class="primary-button small" (click)="updateToLatest(module)">Update all to {{ module.version }}</button>
-                    </div>
-                  </div>
-                }
-              } @else {
-                <p>No usages found in scanned projects.</p>
-              }
-            </div>
-          </div>
-        } @else {
-          <div class="empty-state">
-            Select a project from the list to see details.
-          </div>
-        }
-      </section>
+      <app-project-details
+        (updateAllModules)="updateAllModulesAndUsages($event)"
+        (manageProperties)="openVersionsModal($event)"
+        (upgradeSpringBoot)="isSpringBootModalOpen.set(true)"
+        (updateToLatest)="updateToLatest($event)">
+      </app-project-details>
     </div>
   }
 </main>
 
 @if (isBulkModalOpen()) {
-  <div class="modal-overlay" (click)="closeBulkModal()">
-    <div class="modal-content" (click)="$event.stopPropagation()">
-      <h3>Bulk Version Update</h3>
-      <p>Modify the version of {{ selectedRootProjects().size }} selected projects.</p>
-      
-      <div class="form-group radio-group">
-        <label>
-          <input type="radio" name="bulkMode" value="ADD_PREFIX" [ngModel]="bulkMode()" (ngModelChange)="bulkMode.set($event)">
-          Add Prefix
-        </label>
-        <label>
-          <input type="radio" name="bulkMode" value="REMOVE_PREFIX" [ngModel]="bulkMode()" (ngModelChange)="bulkMode.set($event)">
-          Remove Prefix
-        </label>
-      </div>
-
-      <div class="form-group">
-        <label for="prefix">Version Prefix</label>
-        <input type="text" id="prefix" [ngModel]="bulkPrefix()" (ngModelChange)="bulkPrefix.set($event)" placeholder="e.g. DEV-">
-      </div>
-      
-      <div class="form-group checkbox-group">
-        <input type="checkbox" id="updateDependents" [ngModel]="bulkUpdateDependents()" (ngModelChange)="bulkUpdateDependents.set($event)">
-        <label for="updateDependents">Update version in dependent projects</label>
-      </div>
-      
-      <div class="modal-actions">
-        <button class="secondary-button" (click)="closeBulkModal()">Cancel</button>
-        <button class="primary-button" [disabled]="!bulkPrefix()" (click)="executeBulkUpdate()">Apply Update</button>
-      </div>
-    </div>
-  </div>
+  <app-bulk-update-modal
+    (close)="isBulkModalOpen.set(false)"
+    (execute)="executeBulkUpdate($event)">
+  </app-bulk-update-modal>
 }
 
 @if (isSpringBootModalOpen()) {
-  <div class="modal-overlay" (click)="closeSpringBootModal()">
-    <div class="modal-content" (click)="$event.stopPropagation()">
-      <h3>Upgrade Spring Boot</h3>
-      
-      @if (isLoadingSuggestions()) {
-        <div class="loading-container">
-          <div class="spinner"></div>
-          <p>Fetching latest Spring Boot versions...</p>
-        </div>
-      } @else if (springBootSuggestions(); as suggestions) {
-        <p>Current version: <strong>{{ suggestions.currentVersion }}</strong></p>
-        
-        @if (!suggestions.latestInSeries && !suggestions.latestOverall) {
-          <p class="success-text">You are already on the latest version of Spring Boot!</p>
-        } @else {
-          <div class="suggestion-list">
-            @if (suggestions.latestInSeries) {
-              <div class="suggestion-item">
-                <div class="suggestion-info">
-                  <span class="suggestion-label">Latest in current series</span>
-                  <span class="suggestion-version">{{ suggestions.latestInSeries }}</span>
-                </div>
-                <button class="primary-button small" (click)="upgradeSpringBoot(suggestions.latestInSeries)">Upgrade</button>
-              </div>
-            }
-            
-            @if (suggestions.latestOverall) {
-              <div class="suggestion-item">
-                <div class="suggestion-info">
-                  <span class="suggestion-label">Latest absolute version</span>
-                  <span class="suggestion-version">{{ suggestions.latestOverall }}</span>
-                </div>
-                <button class="primary-button small" (click)="upgradeSpringBoot(suggestions.latestOverall)">Upgrade</button>
-              </div>
-            }
-          </div>
-        }
-      }
-
-      <div class="modal-actions">
-        <button class="secondary-button" (click)="closeSpringBootModal()">Close</button>
-      </div>
-    </div>
-  </div>
+  @if (projectState.selectedProject(); as selected) {
+    <app-spring-boot-upgrade-modal
+      [project]="selected"
+      (close)="isSpringBootModalOpen.set(false)"
+      (upgrade)="upgradeSpringBoot($event)">
+    </app-spring-boot-upgrade-modal>
+  }
 }
 
-@if (isVersionsModalOpen(); as isOpen) {
-  <div class="modal-overlay" (click)="closeVersionsModal()">
-    <div class="modal-content wide" (click)="$event.stopPropagation()">
-      <div class="modal-header">
-        <h3>Managed Component Versions</h3>
-        <button class="close-icon" (click)="closeVersionsModal()">×</button>
-      </div>
-      
-      <p>Managed properties for <strong>{{ versionsModalProject()?.artifactId }}</strong>.</p>
-      
-      @if (versionsModalProject()?.error; as error) {
-        <div class="error-banner">
-          <p><strong>Warning:</strong> Failed to resolve effective model. Some inherited properties may be missing.</p>
-          <p class="error-details">{{ error }}</p>
-          <p>Try running <code>mvn install</code> on the project to ensure all parents and BOMs are in your local repository.</p>
-        </div>
-      }
-
-      <div class="search-container">
-        <input type="text" 
-               class="search-input" 
-               placeholder="Search properties or versions..." 
-               [ngModel]="propertySearchQuery()" 
-               (ngModelChange)="propertySearchQuery.set($event)">
-        
-        <label class="filter-checkbox">
-          <input type="checkbox" [ngModel]="showOnlyOverrides()" (ngModelChange)="showOnlyOverrides.set($event)">
-          Show only overrides
-        </label>
-      </div>
-
-      <div class="modal-table-container">
-        @if (isLoadingProperties()) {
-          <div class="loading-container">
-            <div class="spinner"></div>
-            <p>Resolving managed properties...</p>
-          </div>
-        } @else if (filteredProperties().length > 0) {
-          <table class="managed-properties-table">
-            <thead>
-              <tr>
-                <th>Property</th>
-                <th>Value</th>
-                <th>Source</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (prop of filteredProperties(); track prop.name) {
-                <tr [class.overridden]="prop.isOverridden">
-                  <td class="prop-name-cell">
-                    <span class="prop-name">{{ prop.name }}</span>
-                    @if (prop.comment) {
-                      <div class="prop-comment" [title]="prop.comment">/* {{ prop.comment }} */</div>
-                    }
-                  </td>
-                  <td class="prop-value-cell">
-                    <span class="prop-value" [title]="prop.value">{{ prop.value }}</span>
-                    @if (prop.isOverridden && prop.inheritedValue) {
-                      <div class="inherited-value" [title]="'Inherited: ' + prop.inheritedValue">Inherited: {{ prop.inheritedValue }}</div>
-                    }
-                  </td>
-                  <td>
-                    <span class="source-badge" [class.source-local]="prop.source === 'Local POM'">
-                      {{ prop.source }}
-                    </span>
-                  </td>
-                  <td>
-                    <div class="action-buttons">
-                      <button class="secondary-button small" (click)="openOverrideModal(versionsModalProject()!, prop)">
-                        {{ prop.isOverridden ? 'Edit' : 'Override' }}
-                      </button>
-                      @if (prop.isOverridden) {
-                        <button class="danger-button small" (click)="removeOverride(versionsModalProject()!, prop)">
-                          Remove
-                        </button>
-                      }
-                    </div>
-                  </td>
-                </tr>
-              }
-            </tbody>
-          </table>
-        } @else {
-          <p class="no-results">No properties match your search.</p>
-        }
-      </div>
-      
-      <div class="modal-actions">
-        <button class="secondary-button" (click)="closeVersionsModal()">Close</button>
-      </div>
-    </div>
-  </div>
+@if (isVersionsModalOpen()) {
+  @if (versionsModalProject(); as project) {
+    <app-managed-properties-modal
+      [project]="project"
+      (close)="isVersionsModalOpen.set(false)"
+      (override)="openOverrideModal($event)"
+      (removeOverride)="removeOverride($event)">
+    </app-managed-properties-modal>
+  }
 }
 
-@if (isOverrideModalOpen(); as isOpen) {
-  <div class="modal-overlay" (click)="closeOverrideModal()">
-    <div class="modal-content" (click)="$event.stopPropagation()">
-      <h3>Override Property</h3>
-      <p>Set a local override for <strong>{{ overridePropertyData()?.prop?.name }}</strong>.</p>
-      
-      <div class="form-group">
-        <label for="newValue">New Version</label>
-        <input type="text" id="newValue" [ngModel]="overrideNewValue()" (ngModelChange)="overrideNewValue.set($event)" placeholder="e.g. 3.4.0">
-      </div>
-
-      <div class="form-group">
-        <label for="remark">Remark (optional comment)</label>
-        <input type="text" id="remark" [ngModel]="overrideRemark()" (ngModelChange)="overrideRemark.set($event)" placeholder="e.g. overridden due to CVE">
-      </div>
-      
-      <div class="modal-actions">
-        <button class="secondary-button" (click)="closeOverrideModal()">Cancel</button>
-        <button class="primary-button" [disabled]="!overrideNewValue()" (click)="executeOverride()">Apply Override</button>
-      </div>
-    </div>
-  </div>
+@if (isOverrideModalOpen()) {
+  @if (overridePropertyData(); as data) {
+    <app-property-override-modal
+      [project]="data.project"
+      [prop]="data.prop"
+      (close)="isOverrideModalOpen.set(false)"
+      (execute)="executeOverride($event)">
+    </app-property-override-modal>
+  }
 }
 
-@if (isBuildOrderModalOpen()) {
-  <div class="modal-overlay" (click)="closeBuildOrderModal()">
-    <div class="modal-content wide" (click)="$event.stopPropagation()">
-      <div class="modal-header">
-        <h3>Project Build Order</h3>
-        <button class="close-icon" (click)="closeBuildOrderModal()">×</button>
-      </div>
-
-      <div class="build-order-container">
-        <div class="build-order-main">
-          @if (isLoadingBuildOrder()) {
-            <div class="loading-container">
-              <div class="spinner"></div>
-              <p>Calculating build order...</p>
-            </div>
-          } @else {
-            <div class="actions" style="margin-bottom: 16px;">
-              <button class="primary-button" (click)="downloadExcel()">Export to Excel</button>
-            </div>
-            <div class="build-order-table-wrapper">
-              <table class="managed-properties-table">
-                <thead>
-                  <tr>
-                    <th>Order</th>
-                    <th>Project</th>
-                    <th>Version</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  @for (p of buildOrderProjects(); track p.path; let i = $index) {
-                    <tr>
-                      <td>{{ i + 1 }}</td>
-                      <td>{{ p.artifactId }}</td>
-                      <td>{{ p.version }}</td>
-                    </tr>
-                  }
-                </tbody>
-              </table>
-            </div>
-          }
-        </div>
-        <div class="dependency-graph-section">
-          <div class="graph-header">
-            <h4>Dependency Graph</h4>
-            <div class="graph-actions">
-              <button class="icon-button" (click)="zoomIn()" title="Zoom In">+</button>
-              <button class="icon-button" (click)="zoomOut()" title="Zoom Out">-</button>
-              <button class="icon-button" (click)="resetZoom()" title="Reset Zoom">⟲</button>
-              <button class="primary-button small" (click)="saveAsImage()">Save as Image</button>
-            </div>
-          </div>
-          <div id="dependency-graph-container" class="mermaid-graph-container">
-            <div id="dependency-graph" class="mermaid-graph"></div>
-          </div>
-        </div>
-      </div>
-
-      <div class="modal-actions">
-        <button class="secondary-button" (click)="closeBuildOrderModal()">Close</button>
-      </div>
-    </div>
-  </div>
+@if (projectState.isBuildOrderModalOpen()) {
+  <app-build-order-modal
+    (close)="projectState.isBuildOrderModalOpen.set(false)">
+  </app-build-order-modal>
 }
-
-<ng-template #projectTree let-items let-isRoot="isRoot">
-  <ul>
-    @for (item of items; track item.path) {
-      <li class="project-item" [class.root-project]="isRoot">
-        <div class="project-item-header" [class.selected]="selectedProject()?.path === item.path" (click)="selectProject(item)">
-          @if (isRoot) {
-            <input type="checkbox" class="project-checkbox" [checked]="isProjectSelected(item)" (change)="toggleProjectSelection(item)" (click)="$event.stopPropagation()">
-          }
-          <span class="project-icon">{{ isRoot ? '📂' : '📦' }}</span>
-          <span class="project-name">
-            {{ item.artifactId }}
-            @if (item.hasSpringBootParent) {
-              <span class="spring-boot-icon" title="Spring Boot Project">🍃</span>
-            }
-          </span>
-        </div>
-        @if (item.modules.length > 0) {
-          <div class="project-modules">
-            <ng-container *ngTemplateOutlet="projectTree; context: { $implicit: item.modules, isRoot: false }"></ng-container>
-          </div>
-        }
-      </li>
-    }
-  </ul>
-</ng-template>
 
 <router-outlet />

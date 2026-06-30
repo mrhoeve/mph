@@ -1,0 +1,32 @@
+<div class="modal-overlay" (click)="close.emit()">
+  <div class="modal-content" (click)="$event.stopPropagation()">
+    <h3>Bulk Version Update</h3>
+    <p>Modify the version of {{ projectState.selectedRootProjects().size }} selected projects.</p>
+    
+    <div class="form-group radio-group">
+      <label>
+        <input type="radio" name="bulkMode" value="ADD_PREFIX" [ngModel]="bulkMode()" (ngModelChange)="bulkMode.set($event)">
+        Add Prefix
+      </label>
+      <label>
+        <input type="radio" name="bulkMode" value="REMOVE_PREFIX" [ngModel]="bulkMode()" (ngModelChange)="bulkMode.set($event)">
+        Remove Prefix
+      </label>
+    </div>
+
+    <div class="form-group">
+      <label for="prefix">Version Prefix</label>
+      <input type="text" id="prefix" [ngModel]="bulkPrefix()" (ngModelChange)="bulkPrefix.set($event)" placeholder="e.g. DEV-">
+    </div>
+    
+    <div class="form-group checkbox-group">
+      <input type="checkbox" id="updateDependents" [ngModel]="bulkUpdateDependents()" (ngModelChange)="bulkUpdateDependents.set($event)">
+      <label for="updateDependents">Update version in dependent projects</label>
+    </div>
+    
+    <div class="modal-actions">
+      <button class="secondary-button" (click)="close.emit()">Cancel</button>
+      <button class="primary-button" [disabled]="!bulkPrefix()" (click)="onExecute()">Apply Update</button>
+    </div>
+  </div>
+</div>

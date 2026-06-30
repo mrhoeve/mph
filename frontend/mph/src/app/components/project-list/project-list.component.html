@@ -1,0 +1,52 @@
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <h3>Projects</h3>
+    <button class="secondary-button" (click)="changeFolder.emit()">Change Folder</button>
+  </div>
+
+  <div class="sidebar-actions">
+    <button class="build-order-button" (click)="projectState.isBuildOrderModalOpen.set(true)">
+      <span class="icon">📊</span> Show Build Order
+    </button>
+    
+    <div class="bulk-row">
+      <label class="select-all">
+        <input type="checkbox" [checked]="projectState.isAllSelected()" (change)="projectState.toggleSelectAll()">
+        Select All
+      </label>
+      <button class="bulk-button" [disabled]="projectState.selectedRootProjects().size === 0" (click)="bulkUpdate.emit()">
+        Bulk Update ({{ projectState.selectedRootProjects().size }})
+      </button>
+    </div>
+  </div>
+
+  <div class="project-list">
+    <ng-container *ngTemplateOutlet="projectTree; context: { $implicit: projectState.projects(), isRoot: true }"></ng-container>
+  </div>
+</aside>
+
+<ng-template #projectTree let-items let-isRoot="isRoot">
+  <ul>
+    @for (item of items; track item.path) {
+      <li class="project-item" [class.root-project]="isRoot">
+        <div class="project-item-header" [class.selected]="projectState.selectedProject()?.path === item.path" (click)="selectProject(item)">
+          @if (isRoot) {
+            <input type="checkbox" class="project-checkbox" [checked]="isProjectSelected(item)" (change)="toggleProjectSelection(item)" (click)="$event.stopPropagation()">
+          }
+          <span class="project-icon">{{ isRoot ? '📂' : '📦' }}</span>
+          <span class="project-name">
+            {{ item.artifactId }}
+            @if (item.hasSpringBootParent) {
+              <span class="spring-boot-icon" title="Spring Boot Project">🍃</span>
+            }
+          </span>
+        </div>
+        @if (item.modules.length > 0) {
+          <div class="project-modules">
+            <ng-container *ngTemplateOutlet="projectTree; context: { $implicit: item.modules, isRoot: false }"></ng-container>
+          </div>
+        }
+      </li>
+    }
+  </ul>
+</ng-template>

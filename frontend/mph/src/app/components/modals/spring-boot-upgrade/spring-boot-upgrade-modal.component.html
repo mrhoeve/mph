@@ -1,0 +1,46 @@
+<div class="modal-overlay" (click)="close.emit()">
+  <div class="modal-content" (click)="$event.stopPropagation()">
+    <h3>Upgrade Spring Boot</h3>
+    
+    @if (isLoading()) {
+      <div class="loading-container">
+        <div class="spinner"></div>
+        <p>Fetching latest Spring Boot versions...</p>
+      </div>
+    } @else if (errorMessage()) {
+      <p class="error-text">{{ errorMessage() }}</p>
+    } @else if (suggestions(); as sug) {
+      <p>Current version: <strong>{{ sug.currentVersion }}</strong></p>
+      
+      @if (!sug.latestInSeries && !sug.latestOverall) {
+        <p class="success-text">You are already on the latest version of Spring Boot!</p>
+      } @else {
+        <div class="suggestion-list">
+          @if (sug.latestInSeries) {
+            <div class="suggestion-item">
+              <div class="suggestion-info">
+                <span class="suggestion-label">Latest in current series</span>
+                <span class="suggestion-version">{{ sug.latestInSeries }}</span>
+              </div>
+              <button class="primary-button small" (click)="onUpgrade(sug.latestInSeries)">Upgrade</button>
+            </div>
+          }
+          
+          @if (sug.latestOverall) {
+            <div class="suggestion-item">
+              <div class="suggestion-info">
+                <span class="suggestion-label">Latest absolute version</span>
+                <span class="suggestion-version">{{ sug.latestOverall }}</span>
+              </div>
+              <button class="primary-button small" (click)="onUpgrade(sug.latestOverall)">Upgrade</button>
+            </div>
+          }
+        </div>
+      }
+    }
+
+    <div class="modal-actions">
+      <button class="secondary-button" (click)="close.emit()">Close</button>
+    </div>
+  </div>
+</div>
