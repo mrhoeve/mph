@@ -368,6 +368,30 @@ code {
   border-bottom: 1px solid rgba(148, 163, 184, 0.1);
 }
 
+.module-usages {
+  margin-top: 2.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px dashed rgba(148, 163, 184, 0.3);
+}
+
+.module-usages h4 {
+  margin-bottom: 1rem;
+  color: #475569;
+  font-size: 1.1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.module-usages h4::before {
+  content: '📦';
+  font-size: 1rem;
+}
+
+.module-usages .usages-table {
+  margin-bottom: 1rem;
+}
+
 .version-mismatch {
   color: #b91c1c;
   font-weight: 600;

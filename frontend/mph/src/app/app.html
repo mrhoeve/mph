@@ -61,6 +61,11 @@
                   <span class="version-badge spring-badge">🍃 {{ project.springBootVersion }}</span>
                 }
               </div>
+              @if (project.modules.length > 0) {
+                <button class="primary-button small" (click)="updateAllModulesAndUsages(project)" style="margin-left: auto;">
+                  Update all modules & usages
+                </button>
+              }
             </header>
             
             <p class="details-path"><code>{{ project.path }}</code></p>
@@ -78,28 +83,57 @@
 
             <div class="details-section">
               <h3>Usages</h3>
-              @if (project.usages.length > 0) {
-                <table class="usages-table">
-                  <thead>
-                    <tr>
-                      <th>Used in</th>
-                      <th>Version used</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    @for (usage of project.usages; track usage.path) {
+              @if (project.usages.length > 0 || selectedProjectModuleUsages().length > 0) {
+                @if (project.usages.length > 0) {
+                  <table class="usages-table">
+                    <thead>
                       <tr>
-                        <td>{{ usage.usedInArtifactId }}</td>
-                        <td [class.version-mismatch]="usage.usedVersion !== project.version">
-                          {{ usage.usedVersion }}
-                        </td>
+                        <th>Used in</th>
+                        <th>Version used</th>
                       </tr>
-                    }
-                  </tbody>
-                </table>
-                <div class="actions">
-                  <button class="primary-button" (click)="updateToLatest(project)">Update all to {{ project.version }}</button>
-                </div>
+                    </thead>
+                    <tbody>
+                      @for (usage of project.usages; track usage.path) {
+                        <tr>
+                          <td>{{ usage.usedInArtifactId }}</td>
+                          <td [class.version-mismatch]="usage.usedVersion !== project.version">
+                            {{ usage.usedVersion }}
+                          </td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                  <div class="actions">
+                    <button class="primary-button" (click)="updateToLatest(project)">Update all to {{ project.version }}</button>
+                  </div>
+                }
+
+                @for (module of selectedProjectModuleUsages(); track module.path) {
+                  <div class="module-usages">
+                    <h4>Module: {{ module.artifactId }}</h4>
+                    <table class="usages-table">
+                      <thead>
+                        <tr>
+                          <th>Used in</th>
+                          <th>Version used</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        @for (usage of module.usages; track usage.path) {
+                          <tr>
+                            <td>{{ usage.usedInArtifactId }}</td>
+                            <td [class.version-mismatch]="usage.usedVersion !== module.version">
+                              {{ usage.usedVersion }}
+                            </td>
+                          </tr>
+                        }
+                      </tbody>
+                    </table>
+                    <div class="actions">
+                      <button class="primary-button small" (click)="updateToLatest(module)">Update all to {{ module.version }}</button>
+                    </div>
+                  </div>
+                }
               } @else {
                 <p>No usages found in scanned projects.</p>
               }

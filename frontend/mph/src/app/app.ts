@@ -59,6 +59,23 @@ export class App implements OnInit {
     });
   });
 
+  protected readonly selectedProjectModuleUsages = computed(() => {
+    const project = this.selectedProject();
+    if (!project) return [];
+    
+    const result: ProjectAnalysis[] = [];
+    const collect = (p: ProjectAnalysis) => {
+      for (const m of p.modules) {
+        if (m.usages.length > 0) {
+          result.push(m);
+        }
+        collect(m);
+      }
+    };
+    collect(project);
+    return result;
+  });
+
   private readonly fileSystemService = inject(FileSystemService);
   private readonly mavenProjectService = inject(MavenProjectService);
   private readonly destroyRef = inject(DestroyRef);
@@ -189,6 +206,23 @@ export class App implements OnInit {
       },
       error: () => {
         this.errorMessage.set('Failed to update versions.');
+        this.isScanning.set(false);
+      }
+    });
+    this.destroyRef.onDestroy(() => subscription.unsubscribe());
+  }
+
+  protected updateAllModulesAndUsages(project: ProjectAnalysis): void {
+    if (!project) return;
+
+    this.isScanning.set(true);
+    const subscription = this.mavenProjectService.bulkUpdateVersion([project.path], '', true, 'ADD_PREFIX').subscribe({
+      next: (projects) => {
+        this.updateProjectsData(projects);
+        this.isScanning.set(false);
+      },
+      error: () => {
+        this.errorMessage.set('Failed to update all modules.');
         this.isScanning.set(false);
       }
     });

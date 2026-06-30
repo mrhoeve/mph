@@ -114,4 +114,75 @@ class PomSurgicalEditorTest {
         
         tempFile.delete()
     }
+
+    @Test
+    fun `should not update dependency version when project version is missing`() {
+        val pomContent = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <project xmlns="http://maven.apache.org/POM/4.0.0">
+                <modelVersion>4.0.0</modelVersion>
+                <parent>
+                    <groupId>com.example</groupId>
+                    <artifactId>parent</artifactId>
+                    <version>1.0.0</version>
+                </parent>
+                <artifactId>child</artifactId>
+                <dependencies>
+                    <dependency>
+                        <groupId>org.jetbrains.kotlin</groupId>
+                        <artifactId>kotlin-stdlib-jdk8</artifactId>
+                        <version>1.0.0</version>
+                    </dependency>
+                </dependencies>
+            </project>
+        """.trimIndent()
+
+        val tempFile = Files.createTempFile("pom", ".xml").toFile()
+        tempFile.writeText(pomContent)
+
+        PomSurgicalEditor.edit(tempFile) {
+            updateProjectVersion("2.0.0")
+        }
+
+        val updatedContent = tempFile.readText()
+        // If bug exists, it will update kotlin-stdlib-jdk8 version to 2.0.0
+        assertTrue(updatedContent.contains("<version>1.0.0</version>"), "Dependency version should not be updated. Content: \n${'$'}updatedContent")
+        assertTrue(!updatedContent.contains("<version>2.0.0</version>"), "Should not contain new version in dependency. Content: \n${'$'}updatedContent")
+        
+        tempFile.delete()
+    }
+
+    @Test
+    fun `should only update property in properties block`() {
+        val pomContent = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <project xmlns="http://maven.apache.org/POM/4.0.0">
+                <properties>
+                    <foo.version>1.0.0</foo.version>
+                </properties>
+                <build>
+                    <plugins>
+                        <plugin>
+                            <configuration>
+                                <foo.version>bar</foo.version>
+                            </configuration>
+                        </plugin>
+                    </plugins>
+                </build>
+            </project>
+        """.trimIndent()
+
+        val tempFile = Files.createTempFile("pom", ".xml").toFile()
+        tempFile.writeText(pomContent)
+
+        PomSurgicalEditor.edit(tempFile) {
+            updateProperty("foo.version", "2.0.0")
+        }
+
+        val updatedContent = tempFile.readText()
+        assertTrue(updatedContent.contains("<foo.version>2.0.0</foo.version>"), "Property in properties block should be updated")
+        assertTrue(updatedContent.contains("<foo.version>bar</foo.version>"), "Tag in configuration block should NOT be updated")
+        
+        tempFile.delete()
+    }
 }

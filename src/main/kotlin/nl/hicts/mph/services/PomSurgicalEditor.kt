@@ -9,16 +9,21 @@ object PomSurgicalEditor {
         var modified = false
 
         fun updateProjectVersion(newVersion: String) {
-            val parentMatch = Regex("(?s)<parent>.*?</parent>").find(content)
-            val parentRange = parentMatch?.range
+            val excludeTags = listOf("parent", "dependencies", "dependencyManagement", "build", "profiles", "properties", "reporting", "modules", "repositories", "pluginRepositories", "distributionManagement")
+            val excludeRanges = excludeTags.flatMap { tag ->
+                Regex("(?s)<$tag>.*?</$tag>").findAll(content).map { it.range }
+            }
             
             val versionRegex = Regex("<version>(.*?)</version>")
             val matches = versionRegex.findAll(content)
             
             for (match in matches) {
-                if (parentRange == null || match.range.first < parentRange.start || match.range.first > parentRange.endInclusive) {
-                    content = content.replaceRange(match.groups[1]!!.range, newVersion)
-                    modified = true
+                if (excludeRanges.none { range -> match.range.first in range }) {
+                    val oldVersion = match.groups[1]!!.value
+                    if (oldVersion != newVersion) {
+                        content = content.replaceRange(match.groups[1]!!.range, newVersion)
+                        modified = true
+                    }
                     return
                 }
             }
@@ -33,18 +38,33 @@ object PomSurgicalEditor {
                 val versionRegex = Regex("<version>(.*?)</version>")
                 val versionMatch = versionRegex.find(parentContent) ?: return
                 
-                val versionRange = versionMatch.groups[1]!!.range
-                val globalVersionRange = IntRange(parentMatch.range.first + versionRange.first, parentMatch.range.first + versionRange.last)
-                content = content.replaceRange(globalVersionRange, newVersion)
-                modified = true
+                val oldVersion = versionMatch.groups[1]!!.value
+                if (oldVersion != newVersion) {
+                    val versionRange = versionMatch.groups[1]!!.range
+                    val globalVersionRange = IntRange(parentMatch.range.first + versionRange.first, parentMatch.range.first + versionRange.last)
+                    content = content.replaceRange(globalVersionRange, newVersion)
+                    modified = true
+                }
             }
         }
 
         fun updateProperty(propertyName: String, newValue: String) {
-            val propRegex = Regex("<${Regex.escape(propertyName)}>(.*?)</${Regex.escape(propertyName)}>")
-            val match = propRegex.find(content) ?: return
-            content = content.replaceRange(match.groups[1]!!.range, newValue)
-            modified = true
+            val propertiesBlocks = Regex("(?s)<properties>.*?</properties>").findAll(content)
+            for (propBlock in propertiesBlocks) {
+                val propRegex = Regex("<${Regex.escape(propertyName)}>(.*?)</${Regex.escape(propertyName)}>")
+                val match = propRegex.find(propBlock.value)
+                if (match != null) {
+                    val oldValue = match.groups[1]!!.value
+                    if (oldValue != newValue) {
+                        val globalRange = IntRange(propBlock.range.first + match.groups[1]!!.range.first, propBlock.range.first + match.groups[1]!!.range.last)
+                        content = content.replaceRange(globalRange, newValue)
+                        modified = true
+                    }
+                    // We only update the first one we find in the current file to stay safe, 
+                    // though usually property names are unique per block.
+                    return
+                }
+            }
         }
 
         fun upsertProperty(propertyName: String, newValue: String, remark: String?) {
@@ -99,10 +119,13 @@ object PomSurgicalEditor {
                 if (containsElement(blockContent, "groupId", groupId) && containsElement(blockContent, "artifactId", artifactId)) {
                     val versionMatch = Regex("<version>(.*?)</version>").find(blockContent)
                     if (versionMatch != null) {
-                        val versionRange = versionMatch.groups[1]!!.range
-                        val globalVersionRange = IntRange(block.range.first + versionRange.first, block.range.first + versionRange.last)
-                        content = content.replaceRange(globalVersionRange, newVersion)
-                        modified = true
+                        val oldVersion = versionMatch.groups[1]!!.value
+                        if (oldVersion != newVersion) {
+                            val versionRange = versionMatch.groups[1]!!.range
+                            val globalVersionRange = IntRange(block.range.first + versionRange.first, block.range.first + versionRange.last)
+                            content = content.replaceRange(globalVersionRange, newVersion)
+                            modified = true
+                        }
                     }
                 }
             }
