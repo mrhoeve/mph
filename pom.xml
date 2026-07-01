@@ -46,7 +46,7 @@
 		<poi.version>5.5.1</poi.version>
 		<mockk.version>1.14.11</mockk.version>
 		<exec-maven-plugin.version>3.6.3</exec-maven-plugin.version>
-		<jgit.version>6.10.0.202406032230-r</jgit.version>
+		<jgit.version>7.7.0.202606012155-r</jgit.version>
 		<skipTests>false</skipTests>
 		<skipUTs>${skipTests}</skipUTs>
 	</properties>
