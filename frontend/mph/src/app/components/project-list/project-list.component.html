@@ -9,6 +9,10 @@
       <span class="icon">📊</span> Show Build Order
     </button>
     
+    <button class="build-order-button" style="margin-top: 0.5rem;" (click)="mavenBuild.emit()">
+      <span class="icon">🛠️</span> Maven Build
+    </button>
+    
     <div class="bulk-row">
       <label class="select-all">
         <input type="checkbox" [checked]="projectState.isAllSelected()" (change)="projectState.toggleSelectAll()">

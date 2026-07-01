@@ -26,7 +26,8 @@
     <div class="main-layout">
       <app-project-list
         (bulkUpdate)="isBulkModalOpen.set(true)"
-        (changeFolder)="changeFolder()">
+        (changeFolder)="changeFolder()"
+        (mavenBuild)="projectState.isMavenBuildModalOpen.set(true)">
       </app-project-list>
 
       <app-project-details
@@ -82,6 +83,12 @@
   <app-build-order-modal
     (close)="projectState.isBuildOrderModalOpen.set(false)">
   </app-build-order-modal>
+}
+
+@if (projectState.isMavenBuildModalOpen()) {
+  <app-maven-build-modal
+    (close)="projectState.isMavenBuildModalOpen.set(false)">
+  </app-maven-build-modal>
 }
 
 <router-outlet />

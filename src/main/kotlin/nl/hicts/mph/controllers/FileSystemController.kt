@@ -1,6 +1,7 @@
 package nl.hicts.mph.controllers
 
 import nl.hicts.mph.models.Settings
+import nl.hicts.mph.services.SettingsService
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
@@ -18,14 +19,13 @@ import kotlin.io.path.exists
 import kotlin.io.path.isDirectory
 
 @RestController
-class FileSystemController {
-
-    private val settingsDirectory: Path = Paths.get(System.getProperty("user.home"), ".mph")
-    private val settingsFile: Path = settingsDirectory.resolve("settings.properties")
+class FileSystemController(
+    private val settingsService: SettingsService
+) {
 
     @GetMapping("/api/filesystem/current")
     fun current(): FolderResponse {
-        val settings = loadSettings()
+        val settings = settingsService.loadSettings()
         val rememberedBasePath = settings.basePath
 
         return if (rememberedBasePath != null) {
@@ -37,7 +37,7 @@ class FileSystemController {
 
     @GetMapping("/api/filesystem/folders")
     fun folders(@RequestParam path: String): FolderResponse {
-        val settings = loadSettings()
+        val settings = settingsService.loadSettings()
         return folderResponse(Paths.get(path), remembered = false, maxScanDepth = settings.maxScanDepth)
     }
 
@@ -49,7 +49,7 @@ class FileSystemController {
             throw InvalidFolderException("Folder does not exist or is not a directory: ${request.path}")
         }
 
-        saveSettings(path, request.maxScanDepth)
+        settingsService.saveSettings(path, request.maxScanDepth)
 
         return folderResponse(path, remembered = true, maxScanDepth = request.maxScanDepth)
     }
@@ -87,39 +87,6 @@ class FileSystemController {
             maxScanDepth = maxScanDepth,
             children = children
         )
-    }
-
-    private fun loadSettings(): Settings {
-        if (!settingsFile.exists()) {
-            return Settings(null, 3)
-        }
-
-        val properties = Properties()
-
-        Files.newInputStream(settingsFile).use { inputStream ->
-            properties.load(inputStream)
-        }
-
-        val basePathStr = properties.getProperty("basePath")
-            ?.takeIf { it.isNotBlank() }
-        
-        val maxScanDepth = properties.getProperty("maxScanDepth")?.toIntOrNull() ?: 3
-
-        val path = basePathStr?.let { Paths.get(it) }?.takeIf { it.exists() && it.isDirectory() }
-
-        return Settings(path, maxScanDepth)
-    }
-
-    private fun saveSettings(path: Path, maxScanDepth: Int) {
-        Files.createDirectories(settingsDirectory)
-
-        val properties = Properties()
-        properties.setProperty("basePath", path.toAbsolutePath().normalize().absolutePathString())
-        properties.setProperty("maxScanDepth", maxScanDepth.toString())
-
-        Files.newOutputStream(settingsFile).use { outputStream ->
-            properties.store(outputStream, "MPH settings")
-        }
     }
 }
 

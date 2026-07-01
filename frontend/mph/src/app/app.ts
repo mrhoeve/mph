@@ -15,6 +15,7 @@ import { SpringBootUpgradeModalComponent } from './components/modals/spring-boot
 import { ManagedPropertiesModalComponent } from './components/modals/managed-properties/managed-properties-modal.component';
 import { BuildOrderModalComponent } from './components/modals/build-order/build-order-modal.component';
 import { PropertyOverrideModalComponent } from './components/modals/property-override/property-override-modal.component';
+import { MavenBuildModalComponent } from './components/modals/maven-build/maven-build-modal.component';
 
 @Component({
   selector: 'app-root',
@@ -30,7 +31,8 @@ import { PropertyOverrideModalComponent } from './components/modals/property-ove
     SpringBootUpgradeModalComponent,
     ManagedPropertiesModalComponent,
     BuildOrderModalComponent,
-    PropertyOverrideModalComponent
+    PropertyOverrideModalComponent,
+    MavenBuildModalComponent
   ],
   templateUrl: './app.html',
   styleUrl: './app.css',

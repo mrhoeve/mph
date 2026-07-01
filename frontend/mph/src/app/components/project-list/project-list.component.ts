@@ -15,6 +15,7 @@ export class ProjectListComponent {
 
   @Output() bulkUpdate = new EventEmitter<void>();
   @Output() changeFolder = new EventEmitter<void>();
+  @Output() mavenBuild = new EventEmitter<void>();
 
   selectProject(project: ProjectAnalysis): void {
     this.projectState.selectedProject.set(project);

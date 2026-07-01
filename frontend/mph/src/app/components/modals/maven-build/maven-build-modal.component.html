@@ -1,0 +1,99 @@
+<div class="modal-overlay" (click)="close.emit()">
+  <div class="modal-content maven-build-modal" (click)="$event.stopPropagation()">
+    <div class="modal-header">
+      <h2>Maven Build</h2>
+      <button class="close-button" (click)="close.emit()">&times;</button>
+    </div>
+
+    <div class="modal-body">
+      @if (isLoading()) {
+        <div class="loading-state">Loading projects...</div>
+      } @else if (errorMessage()) {
+        <div class="error-message">{{ errorMessage() }}</div>
+      } @else {
+        <div class="maven-build-layout">
+          <div class="project-selection-section">
+            <div class="section-header">
+              <h3>Select Projects</h3>
+              <label class="select-all">
+                <input type="checkbox" [checked]="isAllSelected()" (change)="toggleSelectAll($event)" [disabled]="isBuilding()">
+                Select All
+              </label>
+            </div>
+            
+            <div class="project-list-scroll">
+              <ul class="build-project-list">
+                @for (p of projects(); track p.project.path) {
+                  <li class="build-project-item" [class.selected]="selectedProjectPath() === p.project.path" (click)="selectProject(p)">
+                    <input type="checkbox" [checked]="p.selected" [disabled]="isBuilding()" (change)="p.selected = !p.selected; $event.stopPropagation()">
+                    <span class="status-icon" [title]="p.status">
+                      @if (p.status === 'PENDING') { ⏳ }
+                      @else if (p.status === 'RUNNING') { 🔄 }
+                      @else if (p.status === 'SUCCESS') { ✅ }
+                      @else if (p.status === 'FAILED') { ❌ }
+                      @else if (p.status === 'SKIPPED') { ⏭️ }
+                    </span>
+                    <span class="project-name">{{ p.project.artifactId }}</span>
+                  </li>
+                }
+              </ul>
+            </div>
+          </div>
+
+          <div class="build-controls-section">
+            <div class="options-group">
+              <h4>Build Options</h4>
+              <div class="option-item">
+                <label>
+                  <input type="checkbox" [checked]="skipUTs()" (change)="setSkipUTs($event)">
+                  Don't run UT (-DskipUTs)
+                </label>
+              </div>
+              <div class="option-item">
+                <label>
+                  <input type="checkbox" [checked]="skipITs()" (change)="setSkipITs($event)">
+                  Don't run IT (-DskipITs)
+                </label>
+              </div>
+              <div class="option-item">
+                <label>
+                  <input type="checkbox" [checked]="parallel()" (change)="setParallel($event)">
+                  Run parallel where possible
+                </label>
+              </div>
+            </div>
+
+            <div class="actions">
+              @if (!isBuilding()) {
+                <button class="primary-button" (click)="startBuild()" [disabled]="projects().filter(p => p.selected).length === 0">
+                  Run Build
+                </button>
+              } @else {
+                <button class="danger-button" (click)="stopBuild()">
+                  Stop Build
+                </button>
+              }
+            </div>
+          </div>
+
+          <div class="log-viewer-section">
+            <div class="section-header">
+              <h3>Build Logs @if (selectedProjectPath()) { - {{ projects().find(p => p.project.path === selectedProjectPath())?.project?.artifactId }} }</h3>
+            </div>
+            <div class="log-container" #logContainer (scroll)="onLogScroll()">
+              @if (selectedProjectPath()) {
+                @for (line of getSelectedProjectLogs(); track $index) {
+                  <div class="log-line" [class.error-line]="line.includes('[ERROR]')">{{ line }}</div>
+                } @empty {
+                  <div class="empty-logs">No logs for this project.</div>
+                }
+              } @else {
+                <div class="empty-logs">Select a project to see its logs.</div>
+              }
+            </div>
+          </div>
+        </div>
+      }
+    </div>
+  </div>
+</div>

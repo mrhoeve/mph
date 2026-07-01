@@ -13,6 +13,7 @@ export class ProjectStateService {
   readonly selectedRootProjects = signal<Set<string>>(new Set());
   readonly isScanning = signal(false);
   isBuildOrderModalOpen = signal(false);
+  isMavenBuildModalOpen = signal(false);
   readonly errorMessage = signal<string | null>(null);
 
   readonly isAllSelected = computed(() => {
