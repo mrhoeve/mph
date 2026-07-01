@@ -14,7 +14,8 @@
           </div>
         } @else if (errorMessage(); as error) {
           <div class="error-banner">
-            <p>{{ error }}</p>
+            <span class="error-icon">⚠️</span>
+            <span>{{ error }}</span>
           </div>
         } @else {
           <div class="actions" style="margin-bottom: 16px;">

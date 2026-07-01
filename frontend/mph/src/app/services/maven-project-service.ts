@@ -34,6 +34,12 @@ export interface ProjectUsage {
 }
 
 
+export interface SyncDevelopResponse {
+  projects: ProjectAnalysis[];
+  messages: string[];
+}
+
+
 @Injectable({
   providedIn: 'root',
 })
@@ -53,12 +59,13 @@ export class MavenProjectService {
     });
   }
 
-  bulkUpdateVersion(rootProjectPaths: string[], prefix: string, updateDependents: boolean, mode: string = 'ADD_PREFIX'): Observable<ProjectAnalysis[]> {
+  bulkUpdateVersion(rootProjectPaths: string[], prefix: string, updateDependents: boolean, mode: string = 'ADD_PREFIX', branchName: string | null = null): Observable<ProjectAnalysis[]> {
     return this.http.post<ProjectAnalysis[]>(`${this.apiBaseUrl}/api/projects/bulk-update-version`, {
       rootProjectPaths,
       prefix,
       updateDependents,
       mode,
+      branchName
     });
   }
 
@@ -94,6 +101,12 @@ export class MavenProjectService {
 
   getBuildOrder(): Observable<ProjectAnalysis[]> {
     return this.http.get<ProjectAnalysis[]>(`${this.apiBaseUrl}/api/projects/build-order`);
+  }
+
+  syncDevelop(rootProjectPaths: string[]): Observable<SyncDevelopResponse> {
+    return this.http.post<SyncDevelopResponse>(`${this.apiBaseUrl}/api/projects/sync-develop`, {
+      rootProjectPaths
+    });
   }
 
   getExcelUrl(): string {

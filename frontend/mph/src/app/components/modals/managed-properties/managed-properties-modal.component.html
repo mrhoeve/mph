@@ -9,9 +9,12 @@
     
     @if (project().error; as error) {
       <div class="error-banner">
-        <p><strong>Warning:</strong> Failed to resolve effective model. Some inherited properties may be missing.</p>
-        <p class="error-details">{{ error }}</p>
-        <p>Try running <code>mvn install</code> on the project to ensure all parents and BOMs are in your local repository.</p>
+        <span class="error-icon">⚠️</span>
+        <div>
+          <p><strong>Warning:</strong> Failed to resolve effective model. Some inherited properties may be missing.</p>
+          <p class="error-details">{{ error }}</p>
+          <p>Try running <code>mvn install</code> on the project to ensure all parents and BOMs are in your local repository.</p>
+        </div>
       </div>
     }
 

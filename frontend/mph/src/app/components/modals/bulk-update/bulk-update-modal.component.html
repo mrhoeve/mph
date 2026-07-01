@@ -23,6 +23,11 @@
       <input type="checkbox" id="updateDependents" [ngModel]="bulkUpdateDependents()" (ngModelChange)="bulkUpdateDependents.set($event)">
       <label for="updateDependents">Update version in dependent projects</label>
     </div>
+
+    <div class="form-group">
+      <label for="branchName">Git Branch Name (Optional)</label>
+      <input type="text" id="branchName" [ngModel]="gitBranchName()" (ngModelChange)="gitBranchName.set($event)" placeholder="e.g. feature/version-bump">
+    </div>
     
     <div class="modal-actions">
       <button class="secondary-button" (click)="close.emit()">Cancel</button>

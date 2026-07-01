@@ -3,6 +3,7 @@ import { RouterOutlet } from '@angular/router';
 import { FolderSelector } from './components/folder-selector/folder-selector';
 import { FileSystemService } from './services/file-system-service';
 import { MavenProjectService, ProjectAnalysis, ManagedProperty } from './services/maven-project-service';
+import { SystemService, SystemInfo } from './services/system-service';
 import { ProjectStateService } from './services/project-state-service';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -47,12 +48,14 @@ export class App implements OnInit {
   protected readonly isSpringBootModalOpen = signal(false);
   protected readonly isVersionsModalOpen = signal(false);
   protected readonly isOverrideModalOpen = signal(false);
+  protected readonly systemInfo = signal<SystemInfo | null>(null);
 
   protected readonly versionsModalProject = signal<ProjectAnalysis | null>(null);
   protected readonly overridePropertyData = signal<{project: ProjectAnalysis, prop: ManagedProperty} | null>(null);
 
   private readonly fileSystemService = inject(FileSystemService);
   private readonly mavenProjectService = inject(MavenProjectService);
+  private readonly systemService = inject(SystemService);
   protected readonly projectState = inject(ProjectStateService);
   private readonly destroyRef = inject(DestroyRef);
 
@@ -63,6 +66,9 @@ export class App implements OnInit {
       maxTextSize: 100000,
       flowchart: { useMaxWidth: false }
     });
+
+    this.loadSystemInfo();
+
     const subscription = this.fileSystemService.current().subscribe({
       next: (folder) => {
         if (folder.remembered) {
@@ -77,12 +83,20 @@ export class App implements OnInit {
         this.isLoadingBaseFolder.set(false);
       },
       error: () => {
-        this.projectState.errorMessage.set('Could not load the configured base folder.');
+        this.projectState.setError('Could not load the configured base folder.');
         this.isSelectingFolder.set(true);
         this.isLoadingBaseFolder.set(false);
       },
     });
 
+    this.destroyRef.onDestroy(() => subscription.unsubscribe());
+  }
+
+  private loadSystemInfo(): void {
+    const subscription = this.systemService.getInfo().subscribe({
+      next: (info) => this.systemInfo.set(info),
+      error: (err) => console.error('Failed to load system info', err)
+    });
     this.destroyRef.onDestroy(() => subscription.unsubscribe());
   }
 
@@ -96,18 +110,40 @@ export class App implements OnInit {
     this.isSelectingFolder.set(true);
   }
 
-  protected executeBulkUpdate(data: {paths: string[], prefix: string, updateDependents: boolean, mode: string}): void {
+  protected executeBulkUpdate(data: {paths: string[], prefix: string, updateDependents: boolean, mode: string, branchName: string}): void {
     this.isBulkModalOpen.set(false);
     this.projectState.isScanning.set(true);
 
-    const subscription = this.mavenProjectService.bulkUpdateVersion(data.paths, data.prefix, data.updateDependents, data.mode).subscribe({
+    const subscription = this.mavenProjectService.bulkUpdateVersion(data.paths, data.prefix, data.updateDependents, data.mode, data.branchName).subscribe({
       next: (projects) => {
         this.projectState.updateProjectsData(projects);
         this.projectState.isScanning.set(false);
         this.projectState.selectedRootProjects.set(new Set());
       },
       error: () => {
-        this.projectState.errorMessage.set('Bulk update failed.');
+        this.projectState.setError('Bulk update failed.');
+        this.projectState.isScanning.set(false);
+      }
+    });
+    this.destroyRef.onDestroy(() => subscription.unsubscribe());
+  }
+
+  protected executeSyncDevelop(): void {
+    const selectedPaths = Array.from(this.projectState.selectedRootProjects());
+    if (selectedPaths.length === 0) return;
+
+    this.projectState.isScanning.set(true);
+    const subscription = this.mavenProjectService.syncDevelop(selectedPaths).subscribe({
+      next: (response) => {
+        this.projectState.updateProjectsData(response.projects);
+        this.projectState.isScanning.set(false);
+        this.projectState.selectedRootProjects.set(new Set());
+        if (response.messages && response.messages.length > 0) {
+          this.projectState.setInfo(response.messages.join('\n'));
+        }
+      },
+      error: (err) => {
+        this.projectState.setError(`Sync develop failed: ${err.error?.message || err.message}`);
         this.projectState.isScanning.set(false);
       }
     });
@@ -122,7 +158,7 @@ export class App implements OnInit {
         this.projectState.isScanning.set(false);
       },
       error: () => {
-        this.projectState.errorMessage.set('Failed to update versions.');
+        this.projectState.setError('Failed to update versions.');
         this.projectState.isScanning.set(false);
       }
     });
@@ -137,7 +173,7 @@ export class App implements OnInit {
         this.projectState.isScanning.set(false);
       },
       error: () => {
-        this.projectState.errorMessage.set('Failed to update all modules.');
+        this.projectState.setError('Failed to update all modules.');
         this.projectState.isScanning.set(false);
       }
     });
@@ -157,7 +193,7 @@ export class App implements OnInit {
         this.projectState.isScanning.set(false);
       },
       error: () => {
-        this.projectState.errorMessage.set('Spring Boot upgrade failed.');
+        this.projectState.setError('Spring Boot upgrade failed.');
         this.projectState.isScanning.set(false);
       }
     });
@@ -207,7 +243,7 @@ export class App implements OnInit {
         }
       },
       error: () => {
-        this.projectState.errorMessage.set('Property override failed.');
+        this.projectState.setError('Property override failed.');
         this.projectState.isScanning.set(false);
       }
     });
@@ -236,7 +272,7 @@ export class App implements OnInit {
         setTimeout(() => this.versionsModalProject.set(p), 0);
       },
       error: () => {
-        this.projectState.errorMessage.set('Failed to remove property override.');
+        this.projectState.setError('Failed to remove property override.');
         this.projectState.isScanning.set(false);
       }
     });

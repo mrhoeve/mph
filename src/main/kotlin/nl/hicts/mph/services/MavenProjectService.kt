@@ -1,11 +1,9 @@
 package nl.hicts.mph.services
 
-import nl.hicts.mph.models.MavenProject
-import nl.hicts.mph.models.getAppropiateArtifactId
-import nl.hicts.mph.models.getAppropiateGroupId
-import nl.hicts.mph.models.getAppropiateVersion
+import nl.hicts.mph.models.*
 import org.apache.maven.model.Model
 import org.apache.poi.xssf.usermodel.XSSFWorkbook
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -26,8 +24,10 @@ data class ManagedProperty(
 
 @Service
 class MavenProjectService(
-    private val mavenCommandService: MavenCommandService
+    private val mavenCommandService: MavenCommandService,
+    private val gitService: GitService
 ) {
+    private val logger = LoggerFactory.getLogger(MavenProjectService::class.java)
 
     private var modelResolver = MavenModelResolver()
 
@@ -62,10 +62,28 @@ class MavenProjectService(
         rootProjectPaths: List<String>,
         prefix: String,
         updateDependents: Boolean,
-        mode: String = "ADD_PREFIX"
+        mode: String = "ADD_PREFIX",
+        branchName: String? = null
     ) {
         val rootProjects = ScanProjectUtil.searchAllMavenProjects(basePath.toFile(), maxDepth)
         val allProjects = flattenProjects(rootProjects)
+
+        // Prepare branch if requested
+        if (!branchName.isNullOrBlank()) {
+            for (rootPath in rootProjectPaths) {
+                try {
+                    gitService.prepareBranch(rootPath, branchName)
+                } catch (e: Exception) {
+                    throw RuntimeException("Failed to prepare Git branch for $rootPath: ${e.message}")
+                }
+            }
+        }
+
+        // If no prefix but branch name given, we just wanted to create branches
+        if (prefix.isBlank() && !branchName.isNullOrBlank()) {
+            logger.info("Prefix is blank and branch name is given. Skipping version update.")
+            return
+        }
 
         val versionMap = mutableMapOf<Pair<String, String>, String>()
 
@@ -157,6 +175,20 @@ class MavenProjectService(
                 }
             }
         }
+    }
+
+    fun syncDevelop(rootProjectPaths: List<String>): List<String> {
+        val messages = mutableListOf<String>()
+        for (rootPath in rootProjectPaths) {
+            try {
+                gitService.syncDevelop(rootPath)?.let {
+                    messages.add(it)
+                }
+            } catch (e: Exception) {
+                messages.add("Failed to sync develop for $rootPath: ${e.message}")
+            }
+        }
+        return messages
     }
 
     private fun flattenProjects(projects: List<MavenProject>): List<MavenProject> {

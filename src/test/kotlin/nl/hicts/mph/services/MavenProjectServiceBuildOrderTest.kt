@@ -13,7 +13,8 @@ import java.nio.file.Paths
 class MavenProjectServiceBuildOrderTest {
 
     private val mavenCommandService = mockk<MavenCommandService>()
-    private val service = MavenProjectService(mavenCommandService)
+    private val gitService = mockk<GitService>()
+    private val service = MavenProjectService(mavenCommandService, gitService)
 
     @Test
     fun `should determine correct build order`() {

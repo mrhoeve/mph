@@ -129,17 +129,11 @@ button:disabled {
   font-size: 0.8rem;
 }
 
-.folder-empty,
-.error-message {
+.folder-empty {
   border-radius: 0.9rem;
   padding: 1rem;
   color: #64748b;
   background: rgba(248, 250, 252, 0.9);
-}
-
-.error-message {
-  color: #991b1b;
-  background: #fef2f2;
 }
 
 @media (max-width: 760px) {

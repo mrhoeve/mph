@@ -15,6 +15,47 @@ export class ProjectStateService {
   isBuildOrderModalOpen = signal(false);
   isMavenBuildModalOpen = signal(false);
   readonly errorMessage = signal<string | null>(null);
+  readonly infoMessage = signal<string | null>(null);
+  private errorTimeout: any;
+  private infoTimeout: any;
+
+  clearError(): void {
+    this.errorMessage.set(null);
+    if (this.errorTimeout) {
+      clearTimeout(this.errorTimeout);
+      this.errorTimeout = null;
+    }
+  }
+
+  clearInfo(): void {
+    this.infoMessage.set(null);
+    if (this.infoTimeout) {
+      clearTimeout(this.infoTimeout);
+      this.infoTimeout = null;
+    }
+  }
+
+  setError(message: string): void {
+    this.errorMessage.set(message);
+    if (this.errorTimeout) {
+      clearTimeout(this.errorTimeout);
+    }
+    this.errorTimeout = setTimeout(() => {
+      this.errorMessage.set(null);
+      this.errorTimeout = null;
+    }, 10000); // 10 seconds
+  }
+
+  setInfo(message: string): void {
+    this.infoMessage.set(message);
+    if (this.infoTimeout) {
+      clearTimeout(this.infoTimeout);
+    }
+    this.infoTimeout = setTimeout(() => {
+      this.infoMessage.set(null);
+      this.infoTimeout = null;
+    }, 10000); // 10 seconds
+  }
 
   readonly isAllSelected = computed(() => {
     const projs = this.projects();
@@ -40,14 +81,14 @@ export class ProjectStateService {
 
   scan(): void {
     this.isScanning.set(true);
-    this.errorMessage.set(null);
+    this.clearError();
     const subscription = this.mavenProjectService.analyze().subscribe({
       next: (projects) => {
         this.updateProjectsData(projects);
         this.isScanning.set(false);
       },
       error: () => {
-        this.errorMessage.set('Scanning failed. Make sure the folder contains valid Maven projects.');
+        this.setError('Scanning failed. Make sure the folder contains valid Maven projects.');
         this.isScanning.set(false);
       }
     });

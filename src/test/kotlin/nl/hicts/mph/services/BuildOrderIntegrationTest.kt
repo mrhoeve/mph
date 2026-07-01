@@ -8,7 +8,8 @@ import java.nio.file.Paths
 class BuildOrderIntegrationTest {
 
     private val mavenCommandService = mockk<MavenCommandService>()
-    private val service = MavenProjectService(mavenCommandService)
+    private val gitService = mockk<GitService>()
+    private val service = MavenProjectService(mavenCommandService, gitService)
 
     @Test
     fun `should only contain root projects and have correct order`() {

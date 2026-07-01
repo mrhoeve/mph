@@ -9,7 +9,10 @@
       @if (isLoading()) {
         <div class="loading-state">Loading projects...</div>
       } @else if (errorMessage()) {
-        <div class="error-message">{{ errorMessage() }}</div>
+        <div class="error-message">
+          <span class="error-icon">⚠️</span>
+          <span>{{ errorMessage() }}</span>
+        </div>
       } @else {
         <div class="maven-build-layout" [class.options-collapsed]="!showOptions()">
           <div class="project-selection-section">

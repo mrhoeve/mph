@@ -22,6 +22,12 @@
         Bulk Update ({{ projectState.selectedRootProjects().size }})
       </button>
     </div>
+
+    <div class="bulk-row" style="margin-top: 0.5rem;">
+      <button class="bulk-button" [disabled]="projectState.selectedRootProjects().size === 0" (click)="syncDevelop.emit()">
+        Sync develop ({{ projectState.selectedRootProjects().size }})
+      </button>
+    </div>
   </div>
 
   <div class="project-list">
@@ -34,9 +40,20 @@
     @for (item of items; track item.path) {
       <li class="project-item" [class.root-project]="isRoot">
         <div class="project-item-header" [class.selected]="projectState.selectedProject()?.path === item.path" (click)="selectProject(item)">
-          @if (isRoot) {
-            <input type="checkbox" class="project-checkbox" [checked]="isProjectSelected(item)" (change)="toggleProjectSelection(item)" (click)="$event.stopPropagation()">
-          }
+          <div class="header-left">
+            @if (item.modules.length > 0) {
+              <span class="expand-icon" [class.expanded]="isExpanded(item)" (click)="toggleExpand(item, $event)">
+                ▶
+              </span>
+            } @else {
+              <span class="expand-spacer"></span>
+            }
+            
+            @if (isRoot) {
+              <input type="checkbox" class="project-checkbox" [checked]="isProjectSelected(item)" (change)="toggleProjectSelection(item)" (click)="$event.stopPropagation()">
+            }
+          </div>
+
           <span class="project-icon">{{ isRoot ? '📂' : '📦' }}</span>
           <span class="project-name">
             {{ item.artifactId }}
@@ -45,7 +62,7 @@
             }
           </span>
         </div>
-        @if (item.modules.length > 0) {
+        @if (item.modules.length > 0 && isExpanded(item)) {
           <div class="project-modules">
             <ng-container *ngTemplateOutlet="projectTree; context: { $implicit: item.modules, isRoot: false }"></ng-container>
           </div>

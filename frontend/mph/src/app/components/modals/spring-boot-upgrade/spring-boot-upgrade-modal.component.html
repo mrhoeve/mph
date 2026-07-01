@@ -8,7 +8,10 @@
         <p>Fetching latest Spring Boot versions...</p>
       </div>
     } @else if (errorMessage()) {
-      <p class="error-text">{{ errorMessage() }}</p>
+      <div class="error-text">
+        <span class="error-icon">⚠️</span>
+        <span>{{ errorMessage() }}</span>
+      </div>
     } @else if (suggestions(); as sug) {
       <p>Current version: <strong>{{ sug.currentVersion }}</strong></p>
       

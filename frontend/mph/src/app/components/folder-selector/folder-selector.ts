@@ -1,5 +1,6 @@
 import { Component, DestroyRef, inject, OnInit, output, signal } from '@angular/core';
 import { FileSystemService, FolderItem } from '../../services/file-system-service';
+import { ProjectStateService } from '../../services/project-state-service';
 
 @Component({
   selector: 'app-folder-selector',
@@ -14,9 +15,9 @@ export class FolderSelector implements OnInit {
   protected readonly maxScanDepth = signal(3);
   protected readonly folders = signal<FolderItem[]>([]);
   protected readonly isLoading = signal(false);
-  protected readonly errorMessage = signal<string | null>(null);
 
   private readonly fileSystemService = inject(FileSystemService);
+  private readonly projectState = inject(ProjectStateService);
   private readonly destroyRef = inject(DestroyRef);
 
   ngOnInit(): void {
@@ -41,7 +42,7 @@ export class FolderSelector implements OnInit {
     }
 
     this.isLoading.set(true);
-    this.errorMessage.set(null);
+    this.projectState.clearError();
 
     const subscription = this.fileSystemService.saveBase(path, depth).subscribe({
       next: (folder) => {
@@ -49,7 +50,7 @@ export class FolderSelector implements OnInit {
         this.folderSelected.emit(folder.path);
       },
       error: () => {
-        this.errorMessage.set('Could not save the selected folder.');
+        this.projectState.setError('Could not save the selected folder.');
         this.isLoading.set(false);
       },
     });
@@ -63,14 +64,14 @@ export class FolderSelector implements OnInit {
 
   private loadFolder(requestFactory: () => ReturnType<FileSystemService['current']>): void {
     this.isLoading.set(true);
-    this.errorMessage.set(null);
+    this.projectState.clearError();
 
     const subscription = requestFactory().subscribe({
       next: (folder) => {
         this.updateState(folder);
       },
       error: () => {
-        this.errorMessage.set('Could not load the selected folder.');
+        this.projectState.setError('Could not load the selected folder.');
         this.isLoading.set(false);
       },
     });

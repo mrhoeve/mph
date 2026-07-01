@@ -1,15 +1,46 @@
 <main class="app-shell">
-  <header class="hero">
-    <div class="hero__badge">Maven Project Helper v0.1</div>
-    <h1>{{ title() }}</h1>
-    <p class="hero__subtitle">
-      Manage and update Maven project versions with ease.
-    </p>
+  <header class="app-header">
+    <div class="header-logo">
+      <div class="maven-icon-container">
+        <svg class="maven-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path fill="#C71A36" d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+        </svg>
+        <div class="helper-badge">?</div>
+      </div>
+      <div class="header-title-group">
+        <h1 class="header-title">Maven Project Helper</h1>
+        <span class="app-version">{{ systemInfo()?.version || '0.1' }}</span>
+      </div>
+    </div>
   </header>
 
   @if (projectState.errorMessage(); as message) {
-    <div class="error-message" role="alert">
-      {{ message }}
+    <div class="toast-container">
+      <div class="toast error" role="alert">
+        <div class="toast-icon">⚠️</div>
+        <div class="toast-body">
+          <div class="toast-header">
+            <span class="toast-title">Operation Failed</span>
+            <button class="toast-close" (click)="projectState.clearError()">×</button>
+          </div>
+          <div class="toast-message">{{ message }}</div>
+        </div>
+      </div>
+    </div>
+  }
+
+  @if (projectState.infoMessage(); as message) {
+    <div class="toast-container info-toast">
+      <div class="toast info" role="alert">
+        <div class="toast-icon">ℹ️</div>
+        <div class="toast-body">
+          <div class="toast-header">
+            <span class="toast-title">Information</span>
+            <button class="toast-close" (click)="projectState.clearInfo()">×</button>
+          </div>
+          <div class="toast-message">{{ message }}</div>
+        </div>
+      </div>
     </div>
   }
 
@@ -27,7 +58,8 @@
       <app-project-list
         (bulkUpdate)="isBulkModalOpen.set(true)"
         (changeFolder)="changeFolder()"
-        (mavenBuild)="projectState.isMavenBuildModalOpen.set(true)">
+        (mavenBuild)="projectState.isMavenBuildModalOpen.set(true)"
+        (syncDevelop)="executeSyncDevelop()">
       </app-project-list>
 
       <app-project-details

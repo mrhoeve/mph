@@ -56,7 +56,8 @@ class MavenProjectController(
             request.rootProjectPaths,
             request.prefix,
             request.updateDependents,
-            request.mode ?: "ADD_PREFIX"
+            request.mode ?: "ADD_PREFIX",
+            request.branchName
         )
         return mavenProjectService.scanAndAnalyze(basePath, settings.maxScanDepth)
     }
@@ -113,6 +114,15 @@ class MavenProjectController(
     }
 
 
+    @PostMapping("/api/projects/sync-develop")
+    fun syncDevelop(@RequestBody request: SyncDevelopRequest): SyncDevelopResponse {
+        val settings = settingsService.loadSettings()
+        val basePath = settings.basePath ?: throw RuntimeException("Base path not set")
+        val messages = mavenProjectService.syncDevelop(request.rootProjectPaths)
+        val projects = mavenProjectService.scanAndAnalyze(basePath, settings.maxScanDepth)
+        return SyncDevelopResponse(projects, messages)
+    }
+
     @GetMapping("/api/projects/export-excel")
     fun exportExcel(): ResponseEntity<ByteArray> {
         val settings = settingsService.loadSettings()
@@ -137,7 +147,8 @@ data class BulkUpdateVersionRequest(
     val rootProjectPaths: List<String>,
     val prefix: String,
     val updateDependents: Boolean,
-    val mode: String? = "ADD_PREFIX"
+    val mode: String? = "ADD_PREFIX",
+    val branchName: String? = null
 )
 
 data class UpgradeSpringBootRequest(
@@ -155,4 +166,13 @@ data class OverridePropertyRequest(
 data class RemovePropertyOverrideRequest(
     val path: String,
     val propertyName: String
+)
+
+data class SyncDevelopRequest(
+    val rootProjectPaths: List<String>
+)
+
+data class SyncDevelopResponse(
+    val projects: List<ProjectAnalysis>,
+    val messages: List<String>
 )

@@ -16,7 +16,7 @@
 }
 
 .sidebar-header {
-  padding: 1.5rem 1rem;
+  padding: 1rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -31,11 +31,11 @@
 }
 
 .sidebar-actions {
-  padding: 1rem;
+  padding: 0.75rem 1rem;
   border-bottom: 1px solid rgba(148, 163, 184, 0.1);
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.5rem;
   background: rgba(248, 250, 252, 0.5);
 }
 
@@ -43,17 +43,18 @@
   background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
   color: white;
   border: none;
-  padding: 0.6rem 1rem;
-  border-radius: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: 0.4rem;
   font-weight: 600;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  box-shadow: 0 2px 4px rgba(79, 70, 229, 0.2);
+  box-shadow: 0 1px 2px rgba(79, 70, 229, 0.1);
   transition: all 0.2s ease;
   width: 100%;
+  font-size: 0.85rem;
 }
 
 .build-order-button:hover {
@@ -116,7 +117,7 @@
 }
 
 .project-item-header {
-  padding: 0.6rem 1rem;
+  padding: 0.4rem 0.75rem;
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -125,7 +126,41 @@
   border-radius: 0 2rem 2rem 0;
   margin-right: 0.5rem;
   color: #475569;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 2.5rem;
+}
+
+.expand-icon {
+  font-size: 0.7rem;
+  padding: 0.2rem;
+  cursor: pointer;
+  transition: transform 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  color: #94a3b8;
+}
+
+.expand-icon:hover {
+  color: #6366f1;
+  background: rgba(99, 102, 241, 0.1);
+  border-radius: 4px;
+}
+
+.expand-icon.expanded {
+  transform: rotate(90deg);
+}
+
+.expand-spacer {
+  width: 1rem;
 }
 
 .project-item-header:hover {
@@ -163,9 +198,13 @@
 }
 
 .project-modules {
-  padding-left: 1.5rem;
+  padding-left: 1.2rem;
   border-left: 1px dashed #e2e8f0;
-  margin-left: 1.45rem;
+  margin-left: 1.25rem;
+}
+
+.project-modules.collapsed {
+  display: none;
 }
 
 .secondary-button {

@@ -20,11 +20,6 @@
     </button>
   </div>
 
-  @if (errorMessage(); as message) {
-    <div class="error-message" role="alert">
-      {{ message }}
-    </div>
-  }
 
   @if (isLoading()) {
     <div class="folder-empty" role="status">
