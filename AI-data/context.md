@@ -26,6 +26,9 @@ Location: `src/test/resources/test-data/`
   - **Versioning**: All dependency versions are managed via `<properties>` in the POM files (e.g., `${a-project-client.version}`).
 
 #### Operational State
+- **Target Audience**: Individual Java/Kotlin developers.
+- **Environment**: Local developer machine. The app leverages the host's existing development tools (JDK, Maven, etc.).
+- **Usage**: Intended to simplify and automate manual tasks (like bulk version updates and build order analysis).
 - Scans are always fresh; no data is cached for the application's runtime.
 - Configuration (base path, scan depth) is stored in `~/.mph/settings.properties`.
 - Default scan depth: 3.
