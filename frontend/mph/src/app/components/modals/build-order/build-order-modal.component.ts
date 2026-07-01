@@ -110,27 +110,27 @@ export class BuildOrderModalComponent implements OnInit {
   }
 
   private renderDependencyGraph(): void {
-    const projects = this.buildOrderProjects();
-    if (projects.length === 0) return;
+    const allProjects = this.buildOrderProjects();
+    if (allProjects.length === 0) return;
 
     let mermaidContent = 'graph TD\n';
     
-    projects.forEach(p => {
-      const id = this.sanitizeId(`${p.groupId}:${p.artifactId}`);
-      mermaidContent += `  ${id}["${p.artifactId}"]\n`;
+    // Render roots and their modules recursively
+    const roots = allProjects.filter(p => p.isRoot);
+    roots.forEach(root => {
+      mermaidContent += this.renderProjectNode(root, 1);
     });
 
-    projects.forEach(p => {
-      const pId = this.sanitizeId(`${p.groupId}:${p.artifactId}`);
-      const allModules = this.flatten(p);
-      allModules.forEach(m => {
-        m.usages.forEach(u => {
-          const dependentRoot = this.findRootForUsage(projects, u.path);
-          if (dependentRoot && dependentRoot.path !== p.path) {
-            const depId = this.sanitizeId(`${dependentRoot.groupId}:${dependentRoot.artifactId}`);
-            mermaidContent += `  ${pId} --> ${depId}\n`;
-          }
-        });
+    // Add dependency edges between all projects
+    allProjects.forEach(p => {
+      const pId = this.getActiveNodeId(p);
+      p.usages.forEach(u => {
+        const dependentProject = allProjects.find(ap => ap.path === u.path);
+        if (dependentProject && dependentProject.path !== p.path) {
+          const depId = this.getActiveNodeId(dependentProject);
+          // In build order terms: p must be built before depId
+          mermaidContent += `  ${pId} --> ${depId}\n`;
+        }
       });
     });
 
@@ -152,9 +152,38 @@ export class BuildOrderModalComponent implements OnInit {
         }
 
         this.initializeZoom();
-        this.addTooltips(projects);
+        this.addTooltips(allProjects);
       });
     }
+  }
+
+  private renderProjectNode(p: ProjectAnalysis, indent: number): string {
+    const id = this.sanitizeId(`${p.groupId}:${p.artifactId}`);
+    const spaces = '  '.repeat(indent);
+    let content = '';
+    
+    if (p.modules && p.modules.length > 0) {
+      content += `${spaces}subgraph ${id} ["${p.artifactId}"]\n`;
+      // Add the project itself as a node if it has modules (representing the parent POM)
+      content += `${spaces}  ${id}_node["${p.artifactId} (parent)"]\n`;
+      
+      p.modules.forEach(m => {
+        content += this.renderProjectNode(m, indent + 1);
+        // Link parent to module for visual clarity
+        const mNodeId = this.getActiveNodeId(m);
+        // If m has modules, mNodeId is a node inside a nested subgraph
+        content += `${spaces}  ${id}_node -.-> ${mNodeId}\n`;
+      });
+      content += `${spaces}end\n`;
+    } else {
+      content += `${spaces}${id}["${p.artifactId}"]\n`;
+    }
+    return content;
+  }
+
+  private getActiveNodeId(p: ProjectAnalysis): string {
+    const id = this.sanitizeId(`${p.groupId}:${p.artifactId}`);
+    return p.modules && p.modules.length > 0 ? `${id}_node` : id;
   }
 
   private initializeZoom(): void {
@@ -175,15 +204,17 @@ export class BuildOrderModalComponent implements OnInit {
     });
   }
 
-  private addTooltips(projects: ProjectAnalysis[]): void {
+  private addTooltips(allProjects: ProjectAnalysis[]): void {
     const svg = document.querySelector('#dependency-graph svg');
     if (!svg) return;
 
-    projects.forEach(p => {
+    allProjects.forEach(p => {
       const id = this.sanitizeId(`${p.groupId}:${p.artifactId}`);
-      const nodes = svg.querySelectorAll('.node');
+      const nodes = svg.querySelectorAll('.node, .cluster');
       nodes.forEach(node => {
-        if (node.id.includes(id)) {
+        const nodeId = node.id;
+        // Match both normal nodes and subgraph nodes
+        if (nodeId.includes(id)) {
           const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
           title.textContent = `Group: ${p.groupId}\nArtifact: ${p.artifactId}\nVersion: ${p.version}\nPath: ${p.path}`;
           node.appendChild(title);

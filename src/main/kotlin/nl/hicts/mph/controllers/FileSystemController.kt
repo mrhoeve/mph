@@ -1,5 +1,6 @@
 package nl.hicts.mph.controllers
 
+import nl.hicts.mph.models.Settings
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
@@ -121,11 +122,6 @@ class FileSystemController {
         }
     }
 }
-
-data class Settings(
-    val basePath: Path?,
-    val maxScanDepth: Int
-)
 
 data class FolderResponse(
     val path: String,

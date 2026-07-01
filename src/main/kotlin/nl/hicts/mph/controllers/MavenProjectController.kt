@@ -1,10 +1,9 @@
 package nl.hicts.mph.controllers
 
+import nl.hicts.mph.models.Settings
 import nl.hicts.mph.services.MavenProjectService
 import nl.hicts.mph.services.ManagedProperty
 import nl.hicts.mph.services.ProjectAnalysis
-import nl.hicts.mph.services.SpringBootUpgradeSuggestions
-import nl.hicts.mph.services.SpringBootVersionService
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
@@ -13,7 +12,6 @@ import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
-import reactor.core.publisher.Mono
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -22,8 +20,7 @@ import kotlin.io.path.exists
 
 @RestController
 class MavenProjectController(
-    private val mavenProjectService: MavenProjectService,
-    private val springBootVersionService: SpringBootVersionService
+    private val mavenProjectService: MavenProjectService
 ) {
     private val settingsDirectory: Path = Paths.get(System.getProperty("user.home"), ".mph")
     private val settingsFile: Path = settingsDirectory.resolve("settings.properties")
@@ -64,10 +61,6 @@ class MavenProjectController(
         return mavenProjectService.scanAndAnalyze(basePath, settings.maxScanDepth)
     }
 
-    @GetMapping("/api/projects/spring-boot-suggestions")
-    fun getSpringBootSuggestions(@RequestParam currentVersion: String): Mono<SpringBootUpgradeSuggestions> {
-        return springBootVersionService.getSuggestions(currentVersion)
-    }
 
     @PostMapping("/api/projects/upgrade-spring-boot")
     fun upgradeSpringBoot(@RequestBody request: UpgradeSpringBootRequest): List<ProjectAnalysis> {
@@ -118,6 +111,7 @@ class MavenProjectController(
         val basePath = settings.basePath ?: throw RuntimeException("Base path not set")
         return mavenProjectService.getBuildOrder(basePath, settings.maxScanDepth)
     }
+
 
     @GetMapping("/api/projects/export-excel")
     fun exportExcel(): ResponseEntity<ByteArray> {

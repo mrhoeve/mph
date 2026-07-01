@@ -46,7 +46,7 @@ class MavenProjectService(
         }
         modelResolver = MavenModelResolver(workspaceMap)
 
-        return rootProjects.map { analyzeProject(it, allProjects, projectMap, false) }.sortedBy { it.artifactId }
+        return rootProjects.map { analyzeProject(it, allProjects, projectMap, false, true) }.sortedBy { it.artifactId }
     }
 
     fun updateVersions(basePath: Path, maxDepth: Int, groupId: String, artifactId: String, newVersion: String) {
@@ -187,7 +187,7 @@ class MavenProjectService(
         return false
     }
 
-    fun analyzeProject(project: MavenProject, allProjects: List<MavenProject>, projectMap: Map<String, MavenProject>, resolveProps: Boolean): ProjectAnalysis {
+    fun analyzeProject(project: MavenProject, allProjects: List<MavenProject>, projectMap: Map<String, MavenProject>, resolveProps: Boolean, isRoot: Boolean = false): ProjectAnalysis {
         val groupId = project.groupId()
         val artifactId = project.artifactId()
         val version = project.version()
@@ -209,12 +209,13 @@ class MavenProjectService(
             artifactId = artifactId,
             version = version,
             path = project.pomLocation.absolutePath,
-            modules = project.modules.map { analyzeProject(it, allProjects, projectMap, resolveProps) }.sortedBy { it.artifactId },
+            modules = project.modules.map { analyzeProject(it, allProjects, projectMap, resolveProps, false) }.sortedBy { it.artifactId },
             usages = usages,
             hasSpringBootParent = hasSpringBootParent,
             springBootVersion = springBootVersion,
             managedProperties = managedProperties,
-            error = error
+            error = error,
+            isRoot = isRoot
         )
     }
 
@@ -520,25 +521,34 @@ class MavenProjectService(
 
     fun getBuildOrder(basePath: Path, maxDepth: Int): List<ProjectAnalysis> {
         val rootProjects = scanAndAnalyze(basePath, maxDepth)
-        val rootByKey = rootProjects.associateBy { "${it.groupId}:${it.artifactId}" }
+        val allProjects = rootProjects.flatMap { flattenAnalysis(it) }
+        val projectByKey = allProjects.associateBy { "${it.groupId}:${it.artifactId}" }
         val dependencies = mutableMapOf<String, MutableSet<String>>() // Dependent -> Dependencies
 
-        rootProjects.forEach { root ->
-            val allModules = flattenAnalysis(root)
-            allModules.forEach { module ->
-                module.usages.forEach { usage ->
-                    val dependentRoot = findRootAnalysisByPath(rootProjects, usage.path)
-                    if (dependentRoot != null && dependentRoot != root) {
-                        val rootKey = "${root.groupId}:${root.artifactId}"
-                        val depKey = "${dependentRoot.groupId}:${dependentRoot.artifactId}"
-                        dependencies.getOrPut(depKey) { mutableSetOf() }.add(rootKey)
-                    }
+        allProjects.forEach { project ->
+            val projectKey = "${project.groupId}:${project.artifactId}"
+            
+            // Dependencies from usages
+            project.usages.forEach { usage ->
+                val dependentProject = allProjects.find { 
+                    Paths.get(it.path).toAbsolutePath().normalize().toString() == 
+                    Paths.get(usage.path).toAbsolutePath().normalize().toString() 
                 }
+                if (dependentProject != null && dependentProject != project) {
+                    val depKey = "${dependentProject.groupId}:${dependentProject.artifactId}"
+                    dependencies.getOrPut(depKey) { mutableSetOf() }.add(projectKey)
+                }
+            }
+            
+            // Parent-child dependency for build order
+            project.modules.forEach { module ->
+                val moduleKey = "${module.groupId}:${module.artifactId}"
+                dependencies.getOrPut(moduleKey) { mutableSetOf() }.add(projectKey)
             }
         }
 
-        val sortedKeys = topologicalSort(rootByKey.keys, dependencies)
-        return sortedKeys.mapNotNull { rootByKey[it] }
+        val sortedKeys = topologicalSort(projectByKey.keys, dependencies)
+        return sortedKeys.mapNotNull { projectByKey[it] }
     }
 
     fun exportToExcel(projects: List<ProjectAnalysis>): ByteArray {
@@ -552,7 +562,7 @@ class MavenProjectService(
         header.createCell(3).setCellValue("Artifact ID")
         header.createCell(4).setCellValue("Current Version")
 
-        projects.forEachIndexed { index, project ->
+        projects.filter { it.isRoot }.forEachIndexed { index, project ->
             val row = sheet.createRow(index + 1)
             row.createCell(0).setCellValue((index + 1).toDouble())
             row.createCell(1).setCellValue(project.artifactId)
@@ -612,8 +622,8 @@ class MavenProjectService(
 
         val usages = mutableListOf<ProjectUsage>()
         for (proj in allProjects) {
-            // Skip if it's the same project or within the same root project
-            if (proj.rootPomPath() == targetRootPath) continue
+            // Skip if it's the same project
+            if (proj.pomLocation.absolutePath == targetProject.pomLocation.absolutePath) continue
 
             val model = proj.model
             
@@ -688,7 +698,8 @@ data class ProjectAnalysis(
     val hasSpringBootParent: Boolean = false,
     val springBootVersion: String? = null,
     val managedProperties: List<ManagedProperty> = emptyList(),
-    val error: String? = null
+    val error: String? = null,
+    val isRoot: Boolean = false
 )
 
 data class ProjectUsage(

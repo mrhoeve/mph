@@ -14,6 +14,7 @@ export interface ProjectAnalysis {
   springBootVersion?: string;
   managedProperties: ManagedProperty[];
   error?: string;
+  isRoot: boolean;
 }
 
 export interface ManagedProperty {
@@ -32,11 +33,6 @@ export interface ProjectUsage {
   path: string;
 }
 
-export interface SpringBootUpgradeSuggestions {
-  currentVersion: string;
-  latestInSeries: string | null;
-  latestOverall: string | null;
-}
 
 @Injectable({
   providedIn: 'root',
@@ -66,11 +62,6 @@ export class MavenProjectService {
     });
   }
 
-  getSpringBootSuggestions(currentVersion: string): Observable<SpringBootUpgradeSuggestions> {
-    return this.http.get<SpringBootUpgradeSuggestions>(`${this.apiBaseUrl}/api/projects/spring-boot-suggestions`, {
-      params: { currentVersion }
-    });
-  }
 
   upgradeSpringBoot(path: string, newVersion: string): Observable<ProjectAnalysis[]> {
     return this.http.post<ProjectAnalysis[]>(`${this.apiBaseUrl}/api/projects/upgrade-spring-boot`, {

@@ -45,11 +45,7 @@ export class FolderSelector implements OnInit {
 
     const subscription = this.fileSystemService.saveBase(path, depth).subscribe({
       next: (folder) => {
-        this.currentPath.set(folder.path);
-        this.parentPath.set(folder.parentPath);
-        this.maxScanDepth.set(folder.maxScanDepth);
-        this.folders.set(folder.children);
-        this.isLoading.set(false);
+        this.updateState(folder);
         this.folderSelected.emit(folder.path);
       },
       error: () => {
@@ -71,11 +67,7 @@ export class FolderSelector implements OnInit {
 
     const subscription = requestFactory().subscribe({
       next: (folder) => {
-        this.currentPath.set(folder.path);
-        this.parentPath.set(folder.parentPath);
-        this.maxScanDepth.set(folder.maxScanDepth);
-        this.folders.set(folder.children);
-        this.isLoading.set(false);
+        this.updateState(folder);
       },
       error: () => {
         this.errorMessage.set('Could not load the selected folder.');
@@ -84,5 +76,13 @@ export class FolderSelector implements OnInit {
     });
 
     this.destroyRef.onDestroy(() => subscription.unsubscribe());
+  }
+
+  private updateState(folder: any): void {
+    this.currentPath.set(folder.path);
+    this.parentPath.set(folder.parentPath);
+    this.maxScanDepth.set(folder.maxScanDepth);
+    this.folders.set(folder.children);
+    this.isLoading.set(false);
   }
 }

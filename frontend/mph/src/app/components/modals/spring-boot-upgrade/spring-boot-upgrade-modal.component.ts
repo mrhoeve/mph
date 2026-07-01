@@ -1,6 +1,7 @@
 import { Component, EventEmitter, Output, input, inject, OnInit, signal, DestroyRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ProjectAnalysis, MavenProjectService, SpringBootUpgradeSuggestions } from '../../../services/maven-project-service';
+import { ProjectAnalysis, MavenProjectService } from '../../../services/maven-project-service';
+import { SpringBootDiscoveryService, SpringBootUpgradeSuggestions } from '../../../services/spring-boot-discovery.service';
 
 @Component({
   selector: 'app-spring-boot-upgrade-modal',
@@ -9,7 +10,7 @@ import { ProjectAnalysis, MavenProjectService, SpringBootUpgradeSuggestions } fr
   templateUrl: './spring-boot-upgrade-modal.component.html'
 })
 export class SpringBootUpgradeModalComponent implements OnInit {
-  private readonly mavenProjectService = inject(MavenProjectService);
+  private readonly springBootDiscoveryService = inject(SpringBootDiscoveryService);
   private readonly destroyRef = inject(DestroyRef);
 
   project = input.required<ProjectAnalysis>();
@@ -22,9 +23,20 @@ export class SpringBootUpgradeModalComponent implements OnInit {
   @Output() upgrade = new EventEmitter<string>();
 
   ngOnInit(): void {
-    const subscription = this.mavenProjectService.getSpringBootSuggestions(this.project().springBootVersion || '').subscribe({
-      next: (s) => {
-        this.suggestions.set(s);
+    this.loadFromBrowser();
+  }
+
+  private loadFromBrowser(): void {
+    this.isLoading.set(true);
+    const currentVersion = this.project().springBootVersion || '';
+    const subscription = this.springBootDiscoveryService.getVersionsFromInitializr().subscribe({
+      next: (versions) => {
+        if (versions.length > 0) {
+          const s = this.springBootDiscoveryService.getSuggestions(currentVersion, versions);
+          this.suggestions.set(s);
+        } else {
+          this.errorMessage.set('Failed to retrieve Spring Boot versions.');
+        }
         this.isLoading.set(false);
       },
       error: () => {

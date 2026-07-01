@@ -10,6 +10,7 @@
       <input id="maxScanDepth" type="number" min="1" max="10" [value]="maxScanDepth()" (change)="onDepthChange($event)">
     </div>
 
+
     <button
       type="button"
       [disabled]="!currentPath() || isLoading()"
