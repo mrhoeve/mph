@@ -36,6 +36,12 @@ export class BuildOrderModalComponent implements OnInit {
     sortedRoots.forEach(root => process(root, 0));
     return list;
   });
+
+  readonly focusedProjectName = computed(() => {
+    const path = this.selectedProjectPath();
+    if (path === 'all') return null;
+    return this.allProjectsFlattened().find(p => p.path === path)?.artifactId || null;
+  });
   
   private panZoomInstance: SvgPanZoom.Instance | null = null;
 
@@ -117,7 +123,9 @@ export class BuildOrderModalComponent implements OnInit {
         try {
           const pngFile = canvas.toDataURL('image/png');
           const downloadLink = document.createElement('a');
-          downloadLink.download = `dependency-graph-${new Date().getTime()}.png`;
+          const timestamp = this.getFormattedTimestamp();
+          const prefix = this.focusedProjectName() || 'dependency-graph';
+          downloadLink.download = `${prefix}-${timestamp}.png`;
           downloadLink.href = pngFile;
           downloadLink.click();
         } catch (e) {
@@ -127,6 +135,18 @@ export class BuildOrderModalComponent implements OnInit {
     };
 
     img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+  }
+
+  private getFormattedTimestamp(): string {
+    const now = new Date();
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    const yy = now.getFullYear().toString().slice(-2);
+    const mm = pad(now.getMonth() + 1);
+    const dd = pad(now.getDate());
+    const hh = pad(now.getHours());
+    const min = pad(now.getMinutes());
+    const ss = pad(now.getSeconds());
+    return `${yy}${mm}${dd}${hh}${min}${ss}`;
   }
 
   private renderDependencyGraph(): void {
@@ -181,27 +201,33 @@ export class BuildOrderModalComponent implements OnInit {
       }
     }
 
-    let mermaidContent = 'graph TD\n';
+    const focusName = this.focusedProjectName();
+    let mermaidContent = focusName ? `---\ntitle: Focus on ${focusName}\n---\n` : '';
+    mermaidContent += 'graph TD\n';
     mermaidContent += '  classDef parentNode font-weight:bold,fill:#f1f5f9,stroke:#334155,stroke-width:2px\n';
     mermaidContent += '  classDef moduleNode fill:#fff,stroke:#cbd5e1\n';
+    mermaidContent += '  classDef focusedNode fill:#dbeafe,stroke:#2563eb,color:#1e3a8a\n';
     
     // Render roots and their modules recursively (only if included)
     const roots = allProjects.filter(p => p.isRoot);
     roots.forEach(root => {
-      mermaidContent += this.renderProjectNode(root, 1, includedPaths);
+      mermaidContent += this.renderProjectNode(root, 1, includedPaths, allFlattened);
     });
 
     // Add dependency edges between included projects
     allFlattened.forEach(p => {
       if (!includedPaths.has(p.path)) return;
+      if (!this.isUsefulProject(p, allFlattened, includedPaths)) return;
       
-      const pId = this.getActiveNodeId(p, includedPaths);
+      const pId = this.getActiveNodeId(p);
       p.usages.forEach(u => {
         if (!includedPaths.has(u.path)) return;
         
         const dependentProject = allFlattened.find(ap => ap.path === u.path);
         if (dependentProject && dependentProject.path !== p.path) {
-          const depId = this.getActiveNodeId(dependentProject, includedPaths);
+          if (!this.isUsefulProject(dependentProject, allFlattened, includedPaths)) return;
+          
+          const depId = this.getActiveNodeId(dependentProject);
           mermaidContent += `  ${pId} --> ${depId}\n`;
         }
       });
@@ -230,37 +256,70 @@ export class BuildOrderModalComponent implements OnInit {
     }
   }
 
-  private renderProjectNode(p: ProjectAnalysis, indent: number, includedPaths: Set<string>): string {
+  private renderProjectNode(p: ProjectAnalysis, indent: number, includedPaths: Set<string>, allFlattened: ProjectAnalysis[]): string {
     if (!includedPaths.has(p.path)) return '';
 
-    const id = this.sanitizeId(`${p.groupId}:${p.artifactId}`);
+    if (!this.isUsefulProject(p, allFlattened, includedPaths)) {
+      return p.modules.map(m => this.renderProjectNode(m, indent, includedPaths, allFlattened)).join('');
+    }
+
+    const id = this.getActiveNodeId(p);
+    const isFocused = p.path === this.selectedProjectPath();
+    const isParent = this.flatten(p).some(d => d.path !== p.path && includedPaths.has(d.path) && this.isUsefulProject(d, allFlattened, includedPaths));
     const spaces = '  '.repeat(indent);
     let content = '';
     
-    const includedModules = p.modules.filter(m => includedPaths.has(m.path));
-
-    if (includedModules.length > 0) {
-      // Use bold label for the parent node
-      content += `${spaces}${id}_node["<b>${p.artifactId}</b>"]\n`;
-      content += `${spaces}class ${id}_node parentNode\n`;
-      
-      includedModules.forEach(m => {
-        content += this.renderProjectNode(m, indent + 1, includedPaths);
-        // Link parent to module for visual clarity
-        const mNodeId = this.getActiveNodeId(m, includedPaths);
-        content += `${spaces}${id}_node -. module .-> ${mNodeId}\n`;
-      });
+    // Always provide a label with artifactId
+    const label = isParent ? `<b>${p.artifactId}</b>` : p.artifactId;
+    content += `${spaces}${id}["${label}"]\n`;
+    
+    if (isParent) {
+      content += `${spaces}class ${id} parentNode\n`;
     } else {
-      content += `${spaces}${id}["${p.artifactId}"]\n`;
       content += `${spaces}class ${id} moduleNode\n`;
     }
+
+    if (isFocused) {
+      content += `${spaces}class ${id} focusedNode\n`;
+    }
+    
+    p.modules.forEach(m => {
+      content += this.renderProjectNode(m, indent + 1, includedPaths, allFlattened);
+      if (includedPaths.has(m.path) && this.isUsefulProject(m, allFlattened, includedPaths)) {
+        const mNodeId = this.getActiveNodeId(m);
+        content += `${spaces}${id} -. module .-> ${mNodeId}\n`;
+      }
+    });
+
     return content;
   }
 
-  private getActiveNodeId(p: ProjectAnalysis, includedPaths: Set<string>): string {
-    const id = this.sanitizeId(`${p.groupId}:${p.artifactId}`);
-    const includedModules = p.modules.filter(m => includedPaths.has(m.path));
-    return includedModules.length > 0 ? `${id}_node` : id;
+  private getActiveNodeId(p: ProjectAnalysis): string {
+    return this.sanitizeId(`${p.groupId}:${p.artifactId}`);
+  }
+
+  private isUsefulProject(p: ProjectAnalysis, allFlattened: ProjectAnalysis[], includedPaths: Set<string>): boolean {
+    return p.modules.length === 0 || this.isUsefulParent(p, allFlattened, includedPaths);
+  }
+
+  private isUsefulParent(p: ProjectAnalysis, allFlattened: ProjectAnalysis[], includedPaths: Set<string>): boolean {
+    if (p.path === this.selectedProjectPath()) return true;
+
+    const descendants = this.flatten(p).map(d => d.path);
+    
+    // 1. External usages from INCLUDED projects (not from its own descendants)
+    const hasExternalUsages = p.usages.some(u => includedPaths.has(u.path) && !descendants.includes(u.path));
+    if (hasExternalUsages) return true;
+
+    // 2. Outgoing dependencies to INCLUDED projects (p depends on someone else who is not itself or its descendant)
+    const hasOutgoingDependencies = allFlattened.some(other => 
+      includedPaths.has(other.path) && 
+      !descendants.includes(other.path) && 
+      other.usages.some(u => u.path === p.path)
+    );
+    if (hasOutgoingDependencies) return true;
+
+    return false;
   }
 
   private initializeZoom(): void {
