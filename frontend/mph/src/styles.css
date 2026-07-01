@@ -550,15 +550,30 @@ p {
 
 .maven-build-modal {
   width: min(1200px, 98vw);
+  height: 95vh;
   padding: 1.5rem;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.maven-build-modal .modal-header {
+  margin-bottom: 1rem;
+}
+
+.maven-build-modal .modal-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .maven-build-layout {
   display: grid;
   grid-template-columns: 280px 240px 1fr;
   gap: 1rem;
-  height: 70vh;
-  min-height: 500px;
+  flex: 1;
+  min-height: 0;
   transition: grid-template-columns 0.3s ease;
 }
 
@@ -580,9 +595,23 @@ p {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1rem;
+  margin-bottom: 0.75rem;
   padding-bottom: 0.5rem;
   border-bottom: 1px solid #e2e8f0;
+}
+
+.follow-log {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: #64748b;
+  cursor: pointer;
+  user-select: none;
+}
+
+.follow-log input {
+  cursor: pointer;
 }
 
 .section-header h3 {

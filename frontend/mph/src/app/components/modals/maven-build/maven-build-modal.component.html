@@ -90,11 +90,15 @@
           <div class="log-viewer-section">
             <div class="section-header">
               <h3>Build Logs @if (selectedProjectPath()) { - {{ projects().find(p => p.project.path === selectedProjectPath())?.project?.artifactId }} }</h3>
+              <label class="follow-log">
+                <input type="checkbox" [checked]="followLog()" (change)="setFollowLog($event)">
+                Follow log
+              </label>
             </div>
             <div class="log-container" #logContainer (scroll)="onLogScroll()">
               @if (selectedProjectPath()) {
-                @for (line of getSelectedProjectLogs(); track $index) {
-                  <div class="log-line" [class.error-line]="line.includes('[ERROR]')">{{ line }}</div>
+                @for (line of getSelectedProjectLogs(); track line.id) {
+                  <div #logLine class="log-line" [class.error-line]="line.text.includes('[ERROR]')">{{ line.text }}</div>
                 } @empty {
                   <div class="empty-logs">No logs for this project.</div>
                 }

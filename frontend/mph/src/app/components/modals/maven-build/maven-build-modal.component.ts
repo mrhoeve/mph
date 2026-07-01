@@ -1,9 +1,14 @@
-import { Component, EventEmitter, Output, signal, inject, OnInit, DestroyRef, computed, ElementRef, ViewChild, AfterViewChecked } from '@angular/core';
+import { Component, EventEmitter, Output, signal, inject, OnInit, DestroyRef, computed, ElementRef, ViewChild, ViewChildren, QueryList, AfterViewInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ProjectAnalysis, MavenProjectService } from '../../../services/maven-project-service';
 import { MavenBuildService, BuildStatus, BuildOptions, ProjectProgress } from '../../../services/maven-build.service';
 import { Subscription } from 'rxjs';
+
+interface LogLine {
+  id: number;
+  text: string;
+}
 
 interface ProjectBuildInfo {
   project: ProjectAnalysis;
@@ -18,7 +23,7 @@ interface ProjectBuildInfo {
   imports: [CommonModule, FormsModule],
   templateUrl: './maven-build-modal.component.html'
 })
-export class MavenBuildModalComponent implements OnInit, AfterViewChecked {
+export class MavenBuildModalComponent implements OnInit, AfterViewInit, OnDestroy {
   private readonly mavenProjectService = inject(MavenProjectService);
   private readonly mavenBuildService = inject(MavenBuildService);
   private readonly destroyRef = inject(DestroyRef);
@@ -33,9 +38,14 @@ export class MavenBuildModalComponent implements OnInit, AfterViewChecked {
   readonly parallel = signal(true);
   readonly maxParallel = signal(8);
   readonly showOptions = signal(true);
+  readonly followLog = signal(true);
 
   readonly selectedProjectPath = signal<string | null>(null);
-  readonly projectLogs = signal<Record<string, string[]>>({});
+  readonly projectLogs = signal<Record<string, LogLine[]>>({});
+  private logIdCounter = 0;
+
+  private lastScrollTop = 0;
+  private isAutoScrolling = false;
 
   readonly groupedProjects = computed(() => {
     const list = [...this.projects()];
@@ -68,19 +78,28 @@ export class MavenBuildModalComponent implements OnInit, AfterViewChecked {
   });
   
   private eventsSubscription?: Subscription;
-  private autoScroll = true;
+  private logLinesSubscription?: Subscription;
 
   @ViewChild('logContainer') private logContainer?: ElementRef;
+  @ViewChildren('logLine') private logLines?: QueryList<ElementRef>;
   @Output() close = new EventEmitter<void>();
 
   ngOnInit(): void {
     this.loadProjects();
   }
 
-  ngAfterViewChecked(): void {
-    if (this.autoScroll) {
-      this.scrollToBottom();
-    }
+  ngAfterViewInit(): void {
+    this.logLinesSubscription = this.logLines?.changes.subscribe(() => {
+      if (this.followLog()) {
+        this.scrollToBottom();
+      }
+    });
+  }
+
+  ngOnDestroy(): void {
+    this.eventsSubscription?.unsubscribe();
+    this.logLinesSubscription?.unsubscribe();
+    this.stopBuild();
   }
 
   loadProjects(): void {
@@ -121,6 +140,7 @@ export class MavenBuildModalComponent implements OnInit, AfterViewChecked {
     this.isBuilding.set(true);
     this.showOptions.set(false);
     this.projectLogs.set({});
+    this.followLog.set(true);
     this.projects.update(list => list.map(p => ({ ...p, status: p.selected ? BuildStatus.PENDING : BuildStatus.SKIPPED })));
 
     if (this.eventsSubscription) {
@@ -171,7 +191,8 @@ export class MavenBuildModalComponent implements OnInit, AfterViewChecked {
     if (event.logLine) {
       this.projectLogs.update(logs => {
         const projectLogs = logs[event.projectPath] || [];
-        return { ...logs, [event.projectPath]: [...projectLogs, event.logLine!] };
+        const newLine: LogLine = { id: ++this.logIdCounter, text: event.logLine! };
+        return { ...logs, [event.projectPath]: [...projectLogs, newLine].slice(-1000) };
       });
     }
 
@@ -194,27 +215,59 @@ export class MavenBuildModalComponent implements OnInit, AfterViewChecked {
 
   selectProject(p: ProjectBuildInfo): void {
     this.selectedProjectPath.set(p.project.path);
-    this.autoScroll = true;
+    this.followLog.set(true);
+    this.scrollToBottom();
   }
 
-  getSelectedProjectLogs(): string[] {
+  getSelectedProjectLogs(): LogLine[] {
     const path = this.selectedProjectPath();
     return path ? (this.projectLogs()[path] || []) : [];
   }
 
   private scrollToBottom(): void {
     if (this.logContainer) {
-      try {
-        this.logContainer.nativeElement.scrollTop = this.logContainer.nativeElement.scrollHeight;
-      } catch (err) {}
+      const element = this.logContainer.nativeElement;
+      this.isAutoScrolling = true;
+      element.scrollTop = element.scrollHeight;
+      this.lastScrollTop = element.scrollTop;
+      
+      // Reset isAutoScrolling after a short delay to allow the scroll event to be processed
+      setTimeout(() => {
+        this.isAutoScrolling = false;
+      }, 50);
     }
   }
 
   onLogScroll(): void {
-    if (this.logContainer) {
+    if (this.logContainer && !this.isAutoScrolling) {
       const element = this.logContainer.nativeElement;
-      const atBottom = element.scrollHeight - element.scrollTop <= element.clientHeight + 10;
-      this.autoScroll = atBottom;
+      const currentScrollTop = element.scrollTop;
+      
+      // Use Math.ceil and a small tolerance to handle sub-pixel issues and zoom
+      const atBottom = Math.ceil(element.scrollTop + element.clientHeight) >= element.scrollHeight - 10;
+      
+      // If user scrolls UP and is not at bottom, stop following
+      if (currentScrollTop < this.lastScrollTop && !atBottom) {
+        if (this.followLog()) {
+          this.followLog.set(false);
+        }
+      } 
+      // If they reach the bottom manually, resume following
+      else if (atBottom) {
+        if (!this.followLog()) {
+          this.followLog.set(true);
+        }
+      }
+      
+      this.lastScrollTop = currentScrollTop;
+    }
+  }
+
+  setFollowLog(event: Event): void {
+    const checked = (event.target as HTMLInputElement).checked;
+    this.followLog.set(checked);
+    if (checked) {
+      this.scrollToBottom();
     }
   }
 
