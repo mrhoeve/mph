@@ -555,10 +555,15 @@ p {
 
 .maven-build-layout {
   display: grid;
-  grid-template-columns: 280px 220px 1fr;
+  grid-template-columns: 280px 240px 1fr;
   gap: 1rem;
   height: 70vh;
   min-height: 500px;
+  transition: grid-template-columns 0.3s ease;
+}
+
+.maven-build-layout.options-collapsed {
+  grid-template-columns: 280px 48px 1fr;
 }
 
 .project-selection-section, .build-controls-section, .log-viewer-section {
@@ -613,6 +618,21 @@ p {
   background: #e2e8f0;
   font-weight: 500;
 }
+  
+.build-group-header {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  margin-top: 1rem;
+  margin-bottom: 0.25rem;
+  padding-left: 0.5rem;
+  letter-spacing: 0.05em;
+}
+
+.build-group-header:first-child {
+  margin-top: 0;
+}
 
 .status-icon {
   width: 24px;
@@ -620,11 +640,78 @@ p {
 }
 
 .options-group {
-  margin-bottom: 2rem;
+  margin-bottom: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.options-collapsed .options-header {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  transform: rotate(180deg);
+  margin: 0;
+  height: 100%;
+  justify-content: center;
+}
+
+.options-collapsed .options-header h4 {
+  white-space: nowrap;
+}
+
+.options-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.options-header.expandable {
+  cursor: pointer;
+  padding: 4px;
+  margin: -4px;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.options-header:hover.expandable {
+  background: #f1f5f9;
+}
+
+.options-header h4 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.toggle-icon {
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+.number-input {
+  padding: 0.2rem 0.4rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.4rem;
+  font-size: 0.9rem;
+  width: 50px;
+  margin-left: 4px;
+}
+
+.option-item.nested {
+  margin-left: 1.5rem;
+  color: #475569;
 }
 
 .option-item {
   margin-bottom: 0.75rem;
+}
+
+.parameter-hint {
+  display: block;
+  font-size: 0.75rem;
+  color: #94a3b8;
+  margin-left: 1.5rem;
+  margin-top: 2px;
 }
 
 .option-item label {
@@ -662,10 +749,12 @@ p {
   margin-top: 2rem;
 }
 
-.actions {
-  margin-top: auto;
+.log-actions {
+  margin-top: 1rem;
 }
 
-.actions button {
+.log-actions button {
   width: 100%;
+  padding: 0.75rem;
+  font-weight: 600;
 }

@@ -29,7 +29,8 @@ data class ProjectProgress(
 data class BuildOptions(
     val skipUTs: Boolean = true,
     val skipITs: Boolean = true,
-    val parallel: Boolean = true
+    val parallel: Boolean = true,
+    val maxParallel: Int = 1
 )
 
 @Service
@@ -117,7 +118,22 @@ class MavenBuildService(
                 continue
             }
 
-            val toStart = if (options.parallel) readyToBuild else listOf(readyToBuild.first())
+            val toStart = if (options.parallel) {
+                val currentRunning = inProgress.size
+                val canStart = options.maxParallel - currentRunning
+                if (canStart > 0) {
+                    readyToBuild.take(canStart)
+                } else {
+                    emptyList()
+                }
+            } else {
+                if (inProgress.isEmpty()) listOf(readyToBuild.first()) else emptyList()
+            }
+
+            if (toStart.isEmpty() && inProgress.isNotEmpty()) {
+                Thread.sleep(500)
+                continue
+            }
 
             toStart.forEach { p ->
                 inProgress[p.path] = true

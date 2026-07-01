@@ -9,6 +9,7 @@ interface ProjectBuildInfo {
   project: ProjectAnalysis;
   status: BuildStatus;
   selected: boolean;
+  originalIndex: number;
 }
 
 @Component({
@@ -30,9 +31,41 @@ export class MavenBuildModalComponent implements OnInit, AfterViewChecked {
   readonly skipUTs = signal(true);
   readonly skipITs = signal(true);
   readonly parallel = signal(true);
+  readonly maxParallel = signal(8);
+  readonly showOptions = signal(true);
 
   readonly selectedProjectPath = signal<string | null>(null);
   readonly projectLogs = signal<Record<string, string[]>>({});
+
+  readonly groupedProjects = computed(() => {
+    const list = [...this.projects()];
+    const currentlyBuilding = this.isBuilding();
+    
+    const hasResults = list.some(p => p.status === BuildStatus.FAILED || p.status === BuildStatus.SUCCESS || p.status === BuildStatus.RUNNING);
+
+    if (!currentlyBuilding && !hasResults) {
+      return [{
+        name: '',
+        projects: list.sort((a, b) => a.originalIndex - b.originalIndex)
+      }];
+    }
+
+    const groups: { name: string, projects: ProjectBuildInfo[] }[] = [];
+    
+    const failed = list.filter(p => p.status === BuildStatus.FAILED).sort((a, b) => a.originalIndex - b.originalIndex);
+    if (failed.length > 0) groups.push({ name: 'Failed', projects: failed });
+
+    const running = list.filter(p => p.status === BuildStatus.RUNNING).sort((a, b) => a.originalIndex - b.originalIndex);
+    if (running.length > 0) groups.push({ name: 'Running', projects: running });
+
+    const pending = list.filter(p => p.status === BuildStatus.PENDING).sort((a, b) => a.originalIndex - b.originalIndex);
+    if (pending.length > 0) groups.push({ name: 'Pending', projects: pending });
+
+    const completed = list.filter(p => p.status === BuildStatus.SUCCESS || p.status === BuildStatus.SKIPPED).sort((a, b) => a.originalIndex - b.originalIndex);
+    if (completed.length > 0) groups.push({ name: 'Completed', projects: completed });
+
+    return groups;
+  });
   
   private eventsSubscription?: Subscription;
   private autoScroll = true;
@@ -54,10 +87,11 @@ export class MavenBuildModalComponent implements OnInit, AfterViewChecked {
     this.isLoading.set(true);
     const subscription = this.mavenProjectService.getBuildOrder().subscribe({
       next: (roots) => {
-        const all: ProjectBuildInfo[] = roots.map(r => ({
+        const all: ProjectBuildInfo[] = roots.map((r, index) => ({
           project: r,
           status: BuildStatus.PENDING,
-          selected: true
+          selected: true,
+          originalIndex: index
         }));
         this.projects.set(all);
         this.isLoading.set(false);
@@ -85,6 +119,7 @@ export class MavenBuildModalComponent implements OnInit, AfterViewChecked {
     if (selectedPaths.length === 0) return;
 
     this.isBuilding.set(true);
+    this.showOptions.set(false);
     this.projectLogs.set({});
     this.projects.update(list => list.map(p => ({ ...p, status: p.selected ? BuildStatus.PENDING : BuildStatus.SKIPPED })));
 
@@ -104,7 +139,8 @@ export class MavenBuildModalComponent implements OnInit, AfterViewChecked {
     const options: BuildOptions = {
       skipUTs: this.skipUTs(),
       skipITs: this.skipITs(),
-      parallel: this.parallel()
+      parallel: this.parallel(),
+      maxParallel: this.maxParallel()
     };
 
     this.mavenBuildService.startBuild(selectedPaths, options).subscribe({
@@ -146,12 +182,14 @@ export class MavenBuildModalComponent implements OnInit, AfterViewChecked {
     
     if (allFinished && this.isBuilding()) {
       this.isBuilding.set(false);
+      this.showOptions.set(true);
     }
   }
 
   stopBuild(): void {
     this.mavenBuildService.stopBuild().subscribe();
     this.isBuilding.set(false);
+    this.showOptions.set(true);
   }
 
   selectProject(p: ProjectBuildInfo): void {
@@ -190,5 +228,16 @@ export class MavenBuildModalComponent implements OnInit, AfterViewChecked {
 
   setParallel(event: Event): void {
     this.parallel.set((event.target as HTMLInputElement).checked);
+  }
+
+  setMaxParallel(event: Event): void {
+    const val = parseInt((event.target as HTMLInputElement).value, 10);
+    if (!isNaN(val) && val > 0) {
+      this.maxParallel.set(val);
+    }
+  }
+
+  toggleOptions(): void {
+    this.showOptions.update(v => !v);
   }
 }

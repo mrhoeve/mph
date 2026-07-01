@@ -15,6 +15,7 @@ export interface BuildOptions {
   skipUTs: boolean;
   skipITs: boolean;
   parallel: boolean;
+  maxParallel: number;
 }
 
 export interface ProjectProgress {
