@@ -123,4 +123,12 @@
   </app-maven-build-modal>
 }
 
+@if (projectState.isUpdateModulesModalOpen()) {
+  <app-update-modules-modal
+    [project]="projectState.projectForUpdateModules()!"
+    (close)="projectState.isUpdateModulesModalOpen.set(false)"
+    (execute)="executeUpdateModulesAndUsages($event)">
+  </app-update-modules-modal>
+}
+
 <router-outlet />

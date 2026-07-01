@@ -57,7 +57,8 @@ class MavenProjectController(
             request.prefix,
             request.updateDependents,
             request.mode ?: "ADD_PREFIX",
-            request.branchName
+            request.branchName,
+            request.updateProjects ?: true
         )
         return mavenProjectService.scanAndAnalyze(basePath, settings.maxScanDepth)
     }
@@ -148,7 +149,8 @@ data class BulkUpdateVersionRequest(
     val prefix: String,
     val updateDependents: Boolean,
     val mode: String? = "ADD_PREFIX",
-    val branchName: String? = null
+    val branchName: String? = null,
+    val updateProjects: Boolean? = true
 )
 
 data class UpgradeSpringBootRequest(

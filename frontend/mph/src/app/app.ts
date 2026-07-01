@@ -17,6 +17,7 @@ import { ManagedPropertiesModalComponent } from './components/modals/managed-pro
 import { BuildOrderModalComponent } from './components/modals/build-order/build-order-modal.component';
 import { PropertyOverrideModalComponent } from './components/modals/property-override/property-override-modal.component';
 import { MavenBuildModalComponent } from './components/modals/maven-build/maven-build-modal.component';
+import { UpdateModulesModalComponent } from './components/modals/update-modules/update-modules-modal.component';
 
 @Component({
   selector: 'app-root',
@@ -33,7 +34,8 @@ import { MavenBuildModalComponent } from './components/modals/maven-build/maven-
     ManagedPropertiesModalComponent,
     BuildOrderModalComponent,
     PropertyOverrideModalComponent,
-    MavenBuildModalComponent
+    MavenBuildModalComponent,
+    UpdateModulesModalComponent
   ],
   templateUrl: './app.html',
   styleUrl: './app.css',
@@ -114,7 +116,7 @@ export class App implements OnInit {
     this.isBulkModalOpen.set(false);
     this.projectState.isScanning.set(true);
 
-    const subscription = this.mavenProjectService.bulkUpdateVersion(data.paths, data.prefix, data.updateDependents, data.mode, data.branchName).subscribe({
+    const subscription = this.mavenProjectService.bulkUpdateVersion(data.paths, data.prefix, data.updateDependents, data.mode, data.branchName, true).subscribe({
       next: (projects) => {
         this.projectState.updateProjectsData(projects);
         this.projectState.isScanning.set(false);
@@ -151,29 +153,25 @@ export class App implements OnInit {
   }
 
   protected updateToLatest(project: ProjectAnalysis): void {
-    this.projectState.isScanning.set(true);
-    const subscription = this.mavenProjectService.updateVersion(project.groupId, project.artifactId, project.version).subscribe({
-      next: (projects) => {
-        this.projectState.updateProjectsData(projects);
-        this.projectState.isScanning.set(false);
-      },
-      error: () => {
-        this.projectState.setError('Failed to update versions.');
-        this.projectState.isScanning.set(false);
-      }
-    });
-    this.destroyRef.onDestroy(() => subscription.unsubscribe());
+    this.projectState.projectForUpdateModules.set(project);
+    this.projectState.isUpdateModulesModalOpen.set(true);
   }
 
   protected updateAllModulesAndUsages(project: ProjectAnalysis): void {
+    this.projectState.projectForUpdateModules.set(project);
+    this.projectState.isUpdateModulesModalOpen.set(true);
+  }
+
+  protected executeUpdateModulesAndUsages(data: {path: string, version: string}): void {
+    this.projectState.isUpdateModulesModalOpen.set(false);
     this.projectState.isScanning.set(true);
-    const subscription = this.mavenProjectService.bulkUpdateVersion([project.path], '', true, 'ADD_PREFIX').subscribe({
+    const subscription = this.mavenProjectService.bulkUpdateVersion([data.path], data.version, true, 'MANUAL', null, false).subscribe({
       next: (projects) => {
         this.projectState.updateProjectsData(projects);
         this.projectState.isScanning.set(false);
       },
-      error: () => {
-        this.projectState.setError('Failed to update all modules.');
+      error: (err) => {
+        this.projectState.setError(`Update failed: ${err.error?.message || err.message}`);
         this.projectState.isScanning.set(false);
       }
     });

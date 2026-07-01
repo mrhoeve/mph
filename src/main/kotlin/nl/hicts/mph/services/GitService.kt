@@ -2,9 +2,18 @@ package nl.hicts.mph.services
 
 import org.eclipse.jgit.api.Git
 import org.eclipse.jgit.api.ListBranchCommand
+import org.eclipse.jgit.lib.Repository
+import org.eclipse.jgit.revwalk.RevCommit
+import org.eclipse.jgit.revwalk.RevTag
+import org.eclipse.jgit.revwalk.RevWalk
+import org.eclipse.jgit.transport.TagOpt
+import org.eclipse.jgit.treewalk.TreeWalk
+import org.apache.maven.model.io.xpp3.MavenXpp3Reader
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import java.io.File
+import java.io.InputStreamReader
+import java.nio.charset.StandardCharsets
 
 @Service
 class GitService {
@@ -116,6 +125,78 @@ class GitService {
                 throw RuntimeException("Sync develop failed: ${e.message}")
             }
         }
+    }
+
+    fun getLatestTag(projectPath: String): String? {
+        val repoDir = findGitRoot(File(projectPath)) ?: return null
+        val gitRootPath = repoDir.toPath().toAbsolutePath().normalize()
+        val pomPath = File(projectPath).toPath().toAbsolutePath().normalize()
+        val relativePomPath = gitRootPath.relativize(pomPath).toString().replace(File.separator, "/")
+
+        return try {
+            Git.open(repoDir).use { git ->
+                // 1. Fetch tags from origin
+                try {
+                    git.fetch().setRemote("origin").setTagOpt(TagOpt.FETCH_TAGS).call()
+                } catch (e: Exception) {
+                    logger.warn("Could not fetch tags from origin for ${repoDir.absolutePath}: ${e.message}")
+                }
+
+                val tags = git.tagList().call()
+                if (tags.isEmpty()) return null
+
+                val repository = git.repository
+                val walk = RevWalk(repository)
+                try {
+                    val tagWithCommit = tags.mapNotNull { ref ->
+                        try {
+                            val obj = walk.parseAny(ref.objectId)
+                            val commit = if (obj is RevTag) {
+                                walk.parseCommit(obj.getObject())
+                            } else if (obj is RevCommit) {
+                                obj
+                            } else {
+                                null
+                            }
+                            commit?.let { it to it.commitTime }
+                        } catch (e: Exception) {
+                            null
+                        }
+                    }
+                    val latestCommit = tagWithCommit.maxByOrNull { it.second }?.first ?: return null
+                    
+                    // 2. Read the specific pom.xml from this commit
+                    readPomVersionFromCommit(repository, latestCommit, relativePomPath)
+                } finally {
+                    walk.dispose()
+                }
+            }
+        } catch (e: Exception) {
+            logger.warn("Failed to get latest tag version for $projectPath: ${e.message}")
+            null
+        }
+    }
+
+    private fun readPomVersionFromCommit(repository: Repository, commit: RevCommit, relativePomPath: String): String? {
+        val tree = commit.tree
+        TreeWalk(repository).use { treeWalk ->
+            treeWalk.addTree(tree)
+            treeWalk.isRecursive = true
+            while (treeWalk.next()) {
+                if (treeWalk.pathString == relativePomPath) {
+                    val objectId = treeWalk.getObjectId(0)
+                    val loader = repository.open(objectId)
+                    loader.openStream().use { inputStream ->
+                        val reader = MavenXpp3Reader()
+                        InputStreamReader(inputStream, StandardCharsets.UTF_8).use { readerStream ->
+                            val model = reader.read(readerStream)
+                            return model.version ?: model.parent?.version
+                        }
+                    }
+                }
+            }
+        }
+        return null
     }
 
     private fun findGitRoot(dir: File): File? {

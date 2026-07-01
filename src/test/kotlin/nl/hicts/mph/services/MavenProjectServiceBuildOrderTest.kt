@@ -18,6 +18,7 @@ class MavenProjectServiceBuildOrderTest {
 
     @Test
     fun `should determine correct build order`() {
+        io.mockk.every { gitService.getLatestTag(any()) } returns null
         // Project A (no dependencies)
         val modelA = Model().apply {
             groupId = "com.example"

@@ -1,0 +1,47 @@
+<div class="modal-overlay" (click)="close.emit()">
+  <div class="modal-content" (click)="$event.stopPropagation()">
+    <div class="modal-header">
+      <h3>Update all modules & usages</h3>
+      <button class="close-icon" (click)="close.emit()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p>Specify the version to use for <strong>{{project.artifactId}}</strong> and its usages.</p>
+      
+      <div class="radio-group">
+        <label class="radio-option">
+          <input type="radio" name="versionSource" value="current" 
+                 [checked]="selectedOption() === 'current'"
+                 (change)="selectedOption.set('current')">
+          Use current: {{project.version}}
+        </label>
+        
+        <label class="radio-option">
+          <input type="radio" name="versionSource" value="specified"
+                 [checked]="selectedOption() === 'specified'"
+                 (change)="selectedOption.set('specified')">
+          Use specified version
+        </label>
+
+        @if (selectedOption() === 'specified') {
+          <div class="version-input-container animate-fade-in">
+            <input type="text" id="version" 
+                   [ngModel]="specifiedVersion()" 
+                   (ngModelChange)="specifiedVersion.set($event)" 
+                   placeholder="e.g. 2.54"
+                   class="version-input">
+            
+            @if (project.latestTag) {
+              <div class="hint">
+                Latest Tag found: <a href="javascript:void(0)" (click)="specifiedVersion.set(project.latestTag)">{{project.latestTag}}</a>
+              </div>
+            }
+          </div>
+        }
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="secondary-button" (click)="close.emit()">Cancel</button>
+      <button class="primary-button" (click)="onExecute()" [disabled]="selectedOption() === 'specified' && !specifiedVersion()">Update</button>
+    </div>
+  </div>
+</div>

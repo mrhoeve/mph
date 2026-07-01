@@ -63,7 +63,8 @@ class MavenProjectService(
         prefix: String,
         updateDependents: Boolean,
         mode: String = "ADD_PREFIX",
-        branchName: String? = null
+        branchName: String? = null,
+        updateProjects: Boolean = true
     ) {
         val rootProjects = ScanProjectUtil.searchAllMavenProjects(basePath.toFile(), maxDepth)
         val allProjects = flattenProjects(rootProjects)
@@ -86,6 +87,7 @@ class MavenProjectService(
         }
 
         val versionMap = mutableMapOf<Pair<String, String>, String>()
+        val allProjectsToUpdate = mutableListOf<MavenProject>()
 
         // 1. Update the selected projects and their modules
         for (rootPath in rootProjectPaths) {
@@ -94,24 +96,29 @@ class MavenProjectService(
                 Paths.get(it.pomLocation.absolutePath).toAbsolutePath().normalize().toString() == normalizedRootPath 
             } ?: continue
             val projectsToUpdate = flattenProjects(listOf(rootProject))
+            allProjectsToUpdate.addAll(projectsToUpdate)
 
             for (project in projectsToUpdate) {
                 val oldVersion = project.version()
-                val newVersion = if (mode == "REMOVE_PREFIX") {
-                    if (oldVersion.startsWith(prefix)) {
-                        oldVersion.substring(prefix.length)
-                    } else {
-                        oldVersion
+                val newVersion = when (mode) {
+                    "REMOVE_PREFIX" -> {
+                        if (oldVersion.startsWith(prefix)) {
+                            oldVersion.substring(prefix.length)
+                        } else {
+                            oldVersion
+                        }
                     }
-                } else {
-                    prefix + oldVersion
+                    "MANUAL" -> prefix
+                    else -> prefix + oldVersion
                 }
                 
                 val groupId = project.groupId()
                 val artifactId = project.artifactId()
 
-                PomSurgicalEditor.edit(project.pomLocation) {
-                    updateProjectVersion(newVersion)
+                if (updateProjects) {
+                    PomSurgicalEditor.edit(project.pomLocation) {
+                        updateProjectVersion(newVersion)
+                    }
                 }
 
                 versionMap[Pair(groupId, artifactId)] = newVersion
@@ -120,7 +127,13 @@ class MavenProjectService(
 
         // 2. Update dependents if requested
         if (updateDependents && versionMap.isNotEmpty()) {
-            updateProjectsDependents(allProjects, versionMap)
+            val projectsToUpdateUsagesIn = if (updateProjects) {
+                allProjects
+            } else {
+                val updatedPaths = allProjectsToUpdate.map { it.pomLocation.absolutePath }.toSet()
+                allProjects.filter { !updatedPaths.contains(it.pomLocation.absolutePath) }
+            }
+            updateProjectsDependents(projectsToUpdateUsagesIn, versionMap)
         }
     }
 
@@ -144,7 +157,9 @@ class MavenProjectService(
                         val newVersion = versionMap[key]!!
                         if (dep.version != null && dep.version.startsWith("\${")) {
                             val propName = dep.version.substring(2, dep.version.length - 1)
-                            updateProperty(propName, newVersion)
+                            if (!isMavenInternalProperty(propName)) {
+                                updateProperty(propName, newVersion)
+                            }
                         } else if (dep.version != null) {
                             updateDependencyVersion(dep.groupId, dep.artifactId, newVersion)
                         }
@@ -158,7 +173,9 @@ class MavenProjectService(
                         val newVersion = versionMap[key]!!
                         if (dep.version != null && dep.version.startsWith("\${")) {
                             val propName = dep.version.substring(2, dep.version.length - 1)
-                            updateProperty(propName, newVersion)
+                            if (!isMavenInternalProperty(propName)) {
+                                updateProperty(propName, newVersion)
+                            }
                         } else if (dep.version != null) {
                             updateDependencyVersion(dep.groupId, dep.artifactId, newVersion)
                         }
@@ -189,6 +206,20 @@ class MavenProjectService(
             }
         }
         return messages
+    }
+
+    private fun isMavenInternalProperty(propName: String): Boolean {
+        val internalProps = setOf(
+            "project.version", "version",
+            "project.groupId", "groupId",
+            "project.artifactId", "artifactId",
+            "project.parent.version", "parent.version",
+            "project.parent.groupId", "parent.groupId",
+            "project.parent.artifactId", "parent.artifactId",
+            "project.basedir", "basedir",
+            "project.build.directory", "build.directory"
+        )
+        return internalProps.contains(propName)
     }
 
     private fun flattenProjects(projects: List<MavenProject>): List<MavenProject> {
@@ -236,6 +267,8 @@ class MavenProjectService(
             Pair(emptyList<ManagedProperty>(), null)
         }
 
+        val latestTag = gitService.getLatestTag(project.pomLocation.absolutePath)
+
         return ProjectAnalysis(
             groupId = groupId,
             artifactId = artifactId,
@@ -246,6 +279,7 @@ class MavenProjectService(
             hasSpringBootParent = hasSpringBootParent,
             springBootVersion = springBootVersion,
             managedProperties = managedProperties,
+            latestTag = latestTag,
             error = error,
             isRoot = isRoot
         )
@@ -763,6 +797,7 @@ data class ProjectAnalysis(
     val hasSpringBootParent: Boolean = false,
     val springBootVersion: String? = null,
     val managedProperties: List<ManagedProperty> = emptyList(),
+    val latestTag: String? = null,
     val error: String? = null,
     val isRoot: Boolean = false
 )

@@ -13,6 +13,7 @@ export interface ProjectAnalysis {
   hasSpringBootParent: boolean;
   springBootVersion?: string;
   managedProperties: ManagedProperty[];
+  latestTag?: string;
   error?: string;
   isRoot: boolean;
 }
@@ -59,13 +60,14 @@ export class MavenProjectService {
     });
   }
 
-  bulkUpdateVersion(rootProjectPaths: string[], prefix: string, updateDependents: boolean, mode: string = 'ADD_PREFIX', branchName: string | null = null): Observable<ProjectAnalysis[]> {
+  bulkUpdateVersion(rootProjectPaths: string[], prefix: string, updateDependents: boolean, mode: string = 'ADD_PREFIX', branchName: string | null = null, updateProjects: boolean = true): Observable<ProjectAnalysis[]> {
     return this.http.post<ProjectAnalysis[]>(`${this.apiBaseUrl}/api/projects/bulk-update-version`, {
       rootProjectPaths,
       prefix,
       updateDependents,
       mode,
-      branchName
+      branchName,
+      updateProjects
     });
   }
 

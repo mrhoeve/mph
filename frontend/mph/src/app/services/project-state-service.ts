@@ -14,6 +14,8 @@ export class ProjectStateService {
   readonly isScanning = signal(false);
   isBuildOrderModalOpen = signal(false);
   isMavenBuildModalOpen = signal(false);
+  isUpdateModulesModalOpen = signal(false);
+  projectForUpdateModules = signal<ProjectAnalysis | null>(null);
   readonly errorMessage = signal<string | null>(null);
   readonly infoMessage = signal<string | null>(null);
   private errorTimeout: any;
