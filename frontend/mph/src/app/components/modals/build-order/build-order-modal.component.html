@@ -44,7 +44,20 @@
       </div>
       <div class="dependency-graph-section">
         <div class="graph-header">
-          <h4>Dependency Graph</h4>
+          <div class="header-main">
+            <h4>Dependency Graph</h4>
+            <div class="focus-selector">
+              <label for="project-focus">Focus:</label>
+              <select id="project-focus" [value]="selectedProjectPath()" (change)="onProjectFocusChange($event)">
+                <option value="all">Full Graph</option>
+                @for (item of hierarchicalProjects(); track item.project.path) {
+                  <option [value]="item.project.path" [style.font-weight]="item.isParent ? 'bold' : 'normal'">
+                    {{ getProjectDisplayName(item) }}
+                  </option>
+                }
+              </select>
+            </div>
+          </div>
           <div class="graph-actions">
             <button class="icon-button" (click)="zoomIn()" title="Zoom In">+</button>
             <button class="icon-button" (click)="zoomOut()" title="Zoom Out">-</button>

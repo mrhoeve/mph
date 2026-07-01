@@ -522,33 +522,38 @@ class MavenProjectService(
     fun getBuildOrder(basePath: Path, maxDepth: Int): List<ProjectAnalysis> {
         val rootProjects = scanAndAnalyze(basePath, maxDepth)
         val allProjects = rootProjects.flatMap { flattenAnalysis(it) }
-        val projectByKey = allProjects.associateBy { "${it.groupId}:${it.artifactId}" }
-        val dependencies = mutableMapOf<String, MutableSet<String>>() // Dependent -> Dependencies
 
-        allProjects.forEach { project ->
-            val projectKey = "${project.groupId}:${project.artifactId}"
-            
-            // Dependencies from usages
-            project.usages.forEach { usage ->
-                val dependentProject = allProjects.find { 
-                    Paths.get(it.path).toAbsolutePath().normalize().toString() == 
-                    Paths.get(usage.path).toAbsolutePath().normalize().toString() 
-                }
-                if (dependentProject != null && dependentProject != project) {
-                    val depKey = "${dependentProject.groupId}:${dependentProject.artifactId}"
-                    dependencies.getOrPut(depKey) { mutableSetOf() }.add(projectKey)
-                }
-            }
-            
-            // Parent-child dependency for build order
-            project.modules.forEach { module ->
-                val moduleKey = "${module.groupId}:${module.artifactId}"
-                dependencies.getOrPut(moduleKey) { mutableSetOf() }.add(projectKey)
+        // Map each project's path to its root project
+        val projectPathToRoot = mutableMapOf<String, ProjectAnalysis>()
+        rootProjects.forEach { root ->
+            flattenAnalysis(root).forEach { project ->
+                val normalizedPath = Paths.get(project.path).toAbsolutePath().normalize().toString()
+                projectPathToRoot[normalizedPath] = root
             }
         }
 
-        val sortedKeys = topologicalSort(projectByKey.keys, dependencies)
-        return sortedKeys.mapNotNull { projectByKey[it] }
+        val dependencies = mutableMapOf<String, MutableSet<String>>() // Dependent Root Path -> Dependency Root Path
+
+        allProjects.forEach { project ->
+            val projectPath = Paths.get(project.path).toAbsolutePath().normalize().toString()
+            val rootOfProject = projectPathToRoot[projectPath] ?: return@forEach
+
+            project.usages.forEach { usage ->
+                val usagePath = Paths.get(usage.path).toAbsolutePath().normalize().toString()
+                val rootOfDependent = projectPathToRoot[usagePath]
+
+                if (rootOfDependent != null && rootOfDependent != rootOfProject) {
+                    // rootOfDependent depends on rootOfProject
+                    dependencies.getOrPut(rootOfDependent.path) { mutableSetOf() }.add(rootOfProject.path)
+                }
+            }
+        }
+
+        val rootPaths = rootProjects.map { it.path }.toSet()
+        val sortedRootPaths = topologicalSort(rootPaths, dependencies)
+
+        val rootByPath = rootProjects.associateBy { it.path }
+        return sortedRootPaths.mapNotNull { rootByPath[it] }
     }
 
     fun exportToExcel(projects: List<ProjectAnalysis>): ByteArray {
@@ -596,22 +601,50 @@ class MavenProjectService(
     }
 
     private fun topologicalSort(nodes: Set<String>, dependencies: Map<String, Set<String>>): List<String> {
-        val result = mutableListOf<String>()
-        val visited = mutableSetOf<String>()
-        val tempVisited = mutableSetOf<String>()
+        val inDegree = mutableMapOf<String, Int>()
+        val adj = mutableMapOf<String, MutableSet<String>>() // node -> things that depend on it
 
-        fun visit(node: String) {
-            if (visited.contains(node)) return
-            if (tempVisited.contains(node)) return // Cycle, skip
+        nodes.forEach { inDegree[it] = 0 }
 
-            tempVisited.add(node)
-            dependencies[node]?.forEach { visit(it) }
-            tempVisited.remove(node)
-            visited.add(node)
-            result.add(node)
+        dependencies.forEach { (dependent, deps) ->
+            deps.forEach { dep ->
+                if (nodes.contains(dep) && nodes.contains(dependent)) {
+                    if (adj.getOrPut(dep) { mutableSetOf() }.add(dependent)) {
+                        inDegree[dependent] = (inDegree[dependent] ?: 0) + 1
+                    }
+                }
+            }
         }
 
-        nodes.sorted().forEach { visit(it) } // Sort nodes for deterministic output
+        val outDegree = nodes.associateWith { adj[it]?.size ?: 0 }
+
+        // PriorityQueue to favor nodes that unblock others (higher out-degree) and then alphabetical
+        val queue = PriorityQueue<String> { a, b ->
+            val outA = outDegree[a] ?: 0
+            val outB = outDegree[b] ?: 0
+            if (outA != outB) outB.compareTo(outA)
+            else a.compareTo(b)
+        }
+        
+        nodes.forEach { if ((inDegree[it] ?: 0) == 0) queue.add(it) }
+
+        val result = mutableListOf<String>()
+        while (queue.isNotEmpty()) {
+            val u = queue.poll()
+            result.add(u)
+
+            adj[u]?.forEach { v ->
+                inDegree[v] = inDegree[v]!! - 1
+                if (inDegree[v] == 0) queue.add(v)
+            }
+        }
+
+        // Handle cycles or disconnected nodes
+        if (result.size < nodes.size) {
+            val remaining = nodes - result.toSet()
+            result.addAll(remaining.sorted())
+        }
+
         return result
     }
 

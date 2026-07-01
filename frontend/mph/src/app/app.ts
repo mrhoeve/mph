@@ -58,6 +58,7 @@ export class App implements OnInit {
     mermaid.initialize({ 
       startOnLoad: false, 
       theme: 'neutral',
+      maxTextSize: 100000,
       flowchart: { useMaxWidth: false }
     });
     const subscription = this.fileSystemService.current().subscribe({
