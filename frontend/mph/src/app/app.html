@@ -59,7 +59,8 @@
         (bulkUpdate)="isBulkModalOpen.set(true)"
         (changeFolder)="changeFolder()"
         (mavenBuild)="projectState.isMavenBuildModalOpen.set(true)"
-        (syncDevelop)="executeSyncDevelop()">
+        (syncDevelop)="executeSyncDevelop()"
+        (versionUpdate)="executeVersionUpdate()">
       </app-project-list>
 
       <app-project-details

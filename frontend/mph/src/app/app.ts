@@ -152,6 +152,32 @@ export class App implements OnInit {
     this.destroyRef.onDestroy(() => subscription.unsubscribe());
   }
 
+  protected executeVersionUpdate(): void {
+    const selectedPaths = Array.from(this.projectState.selectedRootProjects());
+    if (selectedPaths.length === 0) return;
+
+    this.projectState.isScanning.set(true);
+    const subscription = this.mavenProjectService.bulkUpdateVersion(
+      selectedPaths,
+      '',
+      true,
+      'CURRENT',
+      null,
+      false
+    ).subscribe({
+      next: (projects) => {
+        this.projectState.updateProjectsData(projects);
+        this.projectState.isScanning.set(false);
+        this.projectState.setInfo(`Updated versions for ${selectedPaths.length} projects and their dependents.`);
+      },
+      error: (err) => {
+        this.projectState.setError(`Version update failed: ${err.error?.message || err.message}`);
+        this.projectState.isScanning.set(false);
+      }
+    });
+    this.destroyRef.onDestroy(() => subscription.unsubscribe());
+  }
+
   protected updateToLatest(project: ProjectAnalysis): void {
     this.projectState.projectForUpdateModules.set(project);
     this.projectState.isUpdateModulesModalOpen.set(true);

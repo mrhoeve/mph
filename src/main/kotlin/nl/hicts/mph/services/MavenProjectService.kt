@@ -32,12 +32,16 @@ class MavenProjectService(
     private var modelResolver = MavenModelResolver()
 
     fun scanAndAnalyze(basePath: Path, maxDepth: Int): List<ProjectAnalysis> {
+        gitService.clearCache()
         val rootProjects = ScanProjectUtil.searchAllMavenProjects(basePath.toFile(), maxDepth)
         val allProjects = flattenProjects(rootProjects)
         
         val projectMap = allProjects.associateBy { 
             "${it.getAppropiateGroupId().value}:${it.getAppropiateArtifactId().value}:${it.getAppropiateVersion().value}" 
         }
+
+        // Pre-calculate usages for all projects to avoid O(N^2) complexity
+        val usageMap = buildUsageMap(allProjects)
 
         // Update model resolver with all found projects to handle multi-module dependencies
         val workspaceMap = allProjects.associate { project ->
@@ -46,10 +50,11 @@ class MavenProjectService(
         }
         modelResolver = MavenModelResolver(workspaceMap)
 
-        return rootProjects.map { analyzeProject(it, allProjects, projectMap, false, true) }.sortedBy { it.artifactId }
+        return rootProjects.map { analyzeProject(it, allProjects, projectMap, false, true, usageMap) }.sortedBy { it.artifactId }
     }
 
     fun updateVersions(basePath: Path, maxDepth: Int, groupId: String, artifactId: String, newVersion: String) {
+        gitService.clearCache()
         val rootProjects = ScanProjectUtil.searchAllMavenProjects(basePath.toFile(), maxDepth)
         val allProjects = flattenProjects(rootProjects)
 
@@ -66,6 +71,7 @@ class MavenProjectService(
         branchName: String? = null,
         updateProjects: Boolean = true
     ) {
+        gitService.clearCache()
         val rootProjects = ScanProjectUtil.searchAllMavenProjects(basePath.toFile(), maxDepth)
         val allProjects = flattenProjects(rootProjects)
 
@@ -109,6 +115,7 @@ class MavenProjectService(
                         }
                     }
                     "MANUAL" -> prefix
+                    "CURRENT" -> oldVersion
                     else -> prefix + oldVersion
                 }
                 
@@ -127,12 +134,9 @@ class MavenProjectService(
 
         // 2. Update dependents if requested
         if (updateDependents && versionMap.isNotEmpty()) {
-            val projectsToUpdateUsagesIn = if (updateProjects) {
-                allProjects
-            } else {
-                val updatedPaths = allProjectsToUpdate.map { it.pomLocation.absolutePath }.toSet()
-                allProjects.filter { !updatedPaths.contains(it.pomLocation.absolutePath) }
-            }
+            // Fix: even if updateProjects is false, we should still update usages in all projects
+            // including those that were "updated" (e.g. to update modules to use the correct parent version)
+            val projectsToUpdateUsagesIn = allProjects
             updateProjectsDependents(projectsToUpdateUsagesIn, versionMap)
         }
     }
@@ -250,12 +254,12 @@ class MavenProjectService(
         return false
     }
 
-    fun analyzeProject(project: MavenProject, allProjects: List<MavenProject>, projectMap: Map<String, MavenProject>, resolveProps: Boolean, isRoot: Boolean = false): ProjectAnalysis {
+    fun analyzeProject(project: MavenProject, allProjects: List<MavenProject>, projectMap: Map<String, MavenProject>, resolveProps: Boolean, isRoot: Boolean = false, usageMap: Map<Pair<String, String>, List<ProjectUsage>> = emptyMap()): ProjectAnalysis {
         val groupId = project.groupId()
         val artifactId = project.artifactId()
         val version = project.version()
         
-        val usages = findUsages(project, allProjects)
+        val usages = usageMap[Pair(groupId, artifactId)]?.filter { it.path != project.pomLocation.absolutePath } ?: emptyList()
         
         val hasSpringBootParent = isSpringBootProject(project, allProjects, projectMap)
         // Find Spring Boot version from the hierarchy
@@ -274,7 +278,7 @@ class MavenProjectService(
             artifactId = artifactId,
             version = version,
             path = project.pomLocation.absolutePath,
-            modules = project.modules.map { analyzeProject(it, allProjects, projectMap, resolveProps, false) }.sortedBy { it.artifactId },
+            modules = project.modules.map { analyzeProject(it, allProjects, projectMap, resolveProps, false, usageMap) }.sortedBy { it.artifactId },
             usages = usages,
             hasSpringBootParent = hasSpringBootParent,
             springBootVersion = springBootVersion,
@@ -550,6 +554,7 @@ class MavenProjectService(
         projectPath: String,
         propertyName: String
     ) {
+        gitService.clearCache()
         val normalizedPath = Paths.get(projectPath).toAbsolutePath().normalize().toString()
         val rootProjects = ScanProjectUtil.searchAllMavenProjects(basePath.toFile(), maxDepth)
         val allProjects = flattenProjects(rootProjects)
@@ -567,6 +572,7 @@ class MavenProjectService(
     }
 
     fun getManagedProperties(basePath: Path, maxDepth: Int, projectPath: String): List<ManagedProperty> {
+        gitService.clearCache()
         val rootProjects = ScanProjectUtil.searchAllMavenProjects(basePath.toFile(), maxDepth)
         val allProjects = flattenProjects(rootProjects)
         val normalizedPath = Paths.get(projectPath).toAbsolutePath().normalize().toString()
@@ -714,78 +720,39 @@ class MavenProjectService(
         return result
     }
 
-    private fun findUsages(targetProject: MavenProject, allProjects: List<MavenProject>): List<ProjectUsage> {
-        val groupId = targetProject.groupId()
-        val artifactId = targetProject.artifactId()
-        val targetRootPath = targetProject.rootPomPath()
-
-        val usages = mutableListOf<ProjectUsage>()
+    private fun buildUsageMap(allProjects: List<MavenProject>): Map<Pair<String, String>, List<ProjectUsage>> {
+        val result = mutableMapOf<Pair<String, String>, MutableList<ProjectUsage>>()
         for (proj in allProjects) {
-            // Skip if it's the same project
-            if (proj.pomLocation.absolutePath == targetProject.pomLocation.absolutePath) continue
-
             val model = proj.model
-            
-            // Avoid counting itself as a usage if it's just the declaration
-            // But actually we want to see where it's used as a dependency.
-            
-            var usedVersion: String? = null
+            val projGroupId = proj.groupId()
+            val projArtifactId = proj.artifactId()
+            val projPath = proj.pomLocation.absolutePath
 
-            // Check parent
-            if (model.parent?.groupId == groupId && model.parent?.artifactId == artifactId) {
-                usedVersion = model.parent.version
-            }
-
-            // Check dependencies
-            if (usedVersion == null) {
-                model.dependencies?.forEach { dep ->
-                    if (dep.groupId == groupId && dep.artifactId == artifactId) {
-                        usedVersion = dep.version ?: "managed"
-                    }
-                }
-            }
-
-            // Check dependency management
-            if (usedVersion == null) {
-                model.dependencyManagement?.dependencies?.forEach { dep ->
-                    if (dep.groupId == groupId && dep.artifactId == artifactId) {
-                        usedVersion = dep.version ?: "managed"
-                    }
-                }
-            }
-
-            if (usedVersion != null) {
-                // Resolve property if usedVersion is a property
-                val resolvedVersion = if (usedVersion!!.startsWith("\${")) {
-                    val propName = usedVersion!!.substring(2, usedVersion!!.length - 1)
-                    model.properties.getProperty(propName) ?: usedVersion!!
+            fun addUsage(groupId: String?, artifactId: String?, version: String?) {
+                if (groupId == null || artifactId == null) return
+                
+                val resolvedVersion = if (version != null && version.startsWith("\${")) {
+                    val propName = version.substring(2, version.length - 1)
+                    model.properties.getProperty(propName) ?: version
                 } else {
-                    usedVersion!!
+                    version ?: "managed"
                 }
-
-                usages.add(ProjectUsage(
-                    usedInGroupId = proj.groupId(),
-                    usedInArtifactId = proj.artifactId(),
-                    usedVersion = resolvedVersion,
-                    path = proj.pomLocation.absolutePath
-                ))
+                result.getOrPut(Pair(groupId, artifactId)) { mutableListOf() }.add(
+                    ProjectUsage(projGroupId, projArtifactId, resolvedVersion, projPath)
+                )
             }
+
+            model.parent?.let { addUsage(it.groupId, it.artifactId, it.version) }
+            model.dependencies?.forEach { addUsage(it.groupId, it.artifactId, it.version) }
+            model.dependencyManagement?.dependencies?.forEach { addUsage(it.groupId, it.artifactId, it.version) }
         }
-        return usages
+        return result
     }
 }
 
 private fun MavenProject.groupId() = this.getAppropiateGroupId().value
 private fun MavenProject.artifactId() = this.getAppropiateArtifactId().value
 private fun MavenProject.version() = this.getAppropiateVersion().value
-
-private fun MavenProject.rootPomPath(): String {
-    var current = this
-    while (current.moduleWithinProject != null) {
-        current = current.moduleWithinProject!!
-    }
-    return current.pomLocation.absolutePath
-}
 
 data class ProjectAnalysis(
     val groupId: String,

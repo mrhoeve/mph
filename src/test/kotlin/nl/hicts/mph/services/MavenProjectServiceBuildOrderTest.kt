@@ -44,8 +44,14 @@ class MavenProjectServiceBuildOrderTest {
         val allProjects = listOf(projectA, projectB)
         val projectMap = allProjects.associateBy { "${it.model.groupId}:${it.model.artifactId}:${it.model.version}" }
         
-        val analysisA = service.analyzeProject(projectA, allProjects, projectMap, false)
-        val analysisB = service.analyzeProject(projectB, allProjects, projectMap, false)
+        // Build usage map (internal in service)
+        val buildUsageMapMethod = service.javaClass.getDeclaredMethod("buildUsageMap", List::class.java)
+        buildUsageMapMethod.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val usageMap = buildUsageMapMethod.invoke(service, allProjects) as Map<Pair<String, String>, List<ProjectUsage>>
+
+        val analysisA = service.analyzeProject(projectA, allProjects, projectMap, false, false, usageMap)
+        val analysisB = service.analyzeProject(projectB, allProjects, projectMap, false, false, usageMap)
         
         // Root projects
         val roots = listOf(analysisA, analysisB)

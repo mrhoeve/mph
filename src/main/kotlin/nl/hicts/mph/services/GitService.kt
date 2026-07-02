@@ -18,6 +18,16 @@ import java.nio.charset.StandardCharsets
 @Service
 class GitService {
     private val logger = LoggerFactory.getLogger(GitService::class.java)
+    
+    private val tagCache = mutableMapOf<String, String?>() // path -> version
+    private val repoTagsCache = mutableMapOf<File, List<org.eclipse.jgit.lib.Ref>>()
+    private val fetchedRepos = mutableSetOf<File>()
+
+    fun clearCache() {
+        tagCache.clear()
+        repoTagsCache.clear()
+        fetchedRepos.clear()
+    }
 
     fun prepareBranch(projectPath: String, branchName: String) {
         if (branchName.isBlank()) return
@@ -129,21 +139,37 @@ class GitService {
 
     fun getLatestTag(projectPath: String): String? {
         val repoDir = findGitRoot(File(projectPath)) ?: return null
+        val normalizedProjectPath = File(projectPath).toPath().toAbsolutePath().normalize().toString()
+        
+        if (tagCache.containsKey(normalizedProjectPath)) {
+            return tagCache[normalizedProjectPath]
+        }
+
         val gitRootPath = repoDir.toPath().toAbsolutePath().normalize()
         val pomPath = File(projectPath).toPath().toAbsolutePath().normalize()
         val relativePomPath = gitRootPath.relativize(pomPath).toString().replace(File.separator, "/")
 
         return try {
             Git.open(repoDir).use { git ->
-                // 1. Fetch tags from origin
-                try {
-                    git.fetch().setRemote("origin").setTagOpt(TagOpt.FETCH_TAGS).call()
-                } catch (e: Exception) {
-                    logger.warn("Could not fetch tags from origin for ${repoDir.absolutePath}: ${e.message}")
+                // 1. Fetch tags from origin once per repo
+                if (!fetchedRepos.contains(repoDir)) {
+                    try {
+                        logger.info("Fetching tags for ${repoDir.absolutePath}")
+                        git.fetch().setRemote("origin").setTagOpt(TagOpt.FETCH_TAGS).call()
+                    } catch (e: Exception) {
+                        logger.warn("Could not fetch tags from origin for ${repoDir.absolutePath}: ${e.message}")
+                    }
+                    fetchedRepos.add(repoDir)
                 }
 
-                val tags = git.tagList().call()
-                if (tags.isEmpty()) return null
+                val tags = repoTagsCache.getOrPut(repoDir) {
+                    git.tagList().call()
+                }
+                
+                if (tags.isEmpty()) {
+                    tagCache[normalizedProjectPath] = null
+                    return null
+                }
 
                 val repository = git.repository
                 val walk = RevWalk(repository)
@@ -163,16 +189,22 @@ class GitService {
                             null
                         }
                     }
-                    val latestCommit = tagWithCommit.maxByOrNull { it.second }?.first ?: return null
+                    val latestCommit = tagWithCommit.maxByOrNull { it.second }?.first 
                     
-                    // 2. Read the specific pom.xml from this commit
-                    readPomVersionFromCommit(repository, latestCommit, relativePomPath)
+                    val version = if (latestCommit != null) {
+                        // 2. Read the specific pom.xml from this commit
+                        readPomVersionFromCommit(repository, latestCommit, relativePomPath)
+                    } else null
+                    
+                    tagCache[normalizedProjectPath] = version
+                    version
                 } finally {
                     walk.dispose()
                 }
             }
         } catch (e: Exception) {
             logger.warn("Failed to get latest tag version for $projectPath: ${e.message}")
+            tagCache[normalizedProjectPath] = null
             null
         }
     }

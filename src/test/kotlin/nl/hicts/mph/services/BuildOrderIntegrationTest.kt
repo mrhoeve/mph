@@ -14,6 +14,7 @@ class BuildOrderIntegrationTest {
     @Test
     fun `should only contain root projects and have correct order`() {
         io.mockk.every { gitService.getLatestTag(any()) } returns null
+        io.mockk.justRun { gitService.clearCache() }
         val testDataPath = Paths.get("src/test/resources/test-data")
         val buildOrder = service.getBuildOrder(testDataPath, 3)
 

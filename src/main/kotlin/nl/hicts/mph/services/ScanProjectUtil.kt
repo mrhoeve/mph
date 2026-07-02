@@ -45,13 +45,29 @@ class ScanProjectUtil {
         }
 
         private fun scanFolderForXMLFiles(folder: File, scanDepth: Int): MutableList<File> {
-            return folder
-                .walk(FileWalkDirection.TOP_DOWN)
-                .maxDepth(scanDepth)
-                .filter { it.extension == "xml" }
-                .filter { it.isFile }
-                .sortedBy { it.absolutePath }
-                .toMutableList()
+            if (folder.isFile) {
+                return if (scanDepth == 1 && folder.extension == "xml") {
+                    mutableListOf(folder)
+                } else {
+                    mutableListOf()
+                }
+            }
+
+            val result = mutableListOf<File>()
+            
+            fun visit(current: File, depth: Int) {
+                if (depth > scanDepth) return
+                if (depth == scanDepth) {
+                    if (current.isFile && current.extension == "xml") {
+                        result.add(current)
+                    }
+                } else if (current.isDirectory) {
+                    current.listFiles()?.forEach { visit(it, depth + 1) }
+                }
+            }
+            
+            visit(folder, 0)
+            return result.sortedBy { it.absolutePath }.toMutableList()
         }
 
         private fun readPOM(pomFile: File, parentProject: MavenProject?): MavenProject? {
