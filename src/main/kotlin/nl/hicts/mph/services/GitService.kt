@@ -39,7 +39,7 @@ class GitService {
         }
     }
     
-    private val tagCache = mutableMapOf<String, String?>() // path -> version
+    private val tagCache = mutableMapOf<String, TagInfo?>() // path -> TagInfo
     private val repoTagsCache = mutableMapOf<File, List<org.eclipse.jgit.lib.Ref>>()
     private val fetchedRepos = mutableSetOf<File>()
 
@@ -157,7 +157,7 @@ class GitService {
         }
     }
 
-    fun getLatestTag(projectPath: String): String? {
+    fun getLatestTagInfo(projectPath: String): TagInfo? {
         val repoDir = findGitRoot(File(projectPath)) ?: return null
         val normalizedProjectPath = File(projectPath).toPath().toAbsolutePath().normalize().toString()
         
@@ -183,7 +183,13 @@ class GitService {
                 }
 
                 val tags = repoTagsCache.getOrPut(repoDir) {
-                    git.tagList().call()
+                    val tagList = git.tagList().call()
+                    if (tagList.isNotEmpty()) {
+                        logger.info("Found ${tagList.size} tags in repository ${repoDir.absolutePath}. First few: ${tagList.take(5).map { it.name }}")
+                    } else {
+                        logger.info("No tags found in repository ${repoDir.absolutePath}")
+                    }
+                    tagList
                 }
                 
                 if (tags.isEmpty()) {
@@ -204,20 +210,34 @@ class GitService {
                             } else {
                                 null
                             }
-                            commit?.let { it to it.commitTime }
+                            commit?.let { TagCommitInfo(ref.name, it.commitTime, it) }
                         } catch (e: Exception) {
                             null
                         }
                     }
-                    val latestCommit = tagWithCommit.maxByOrNull { it.second }?.first 
                     
+                    // Sort by commit time descending
+                    val sortedTags = tagWithCommit.sortedByDescending { it.commitTime }
+                    val latestEntry = sortedTags.firstOrNull()
+                    val latestTagRefName = latestEntry?.tagName
+                    val latestCommit = latestEntry?.commit
+                    
+                    if (latestTagRefName != null) {
+                        logger.info("Latest tag in repo is $latestTagRefName on commit ${latestCommit?.name?.take(7)}")
+                    }
+
                     val version = if (latestCommit != null) {
                         // 2. Read the specific pom.xml from this commit
                         readPomVersionFromCommit(repository, latestCommit, relativePomPath)
                     } else null
                     
-                    tagCache[normalizedProjectPath] = version
-                    version
+                    val result = if (version != null && latestTagRefName != null) {
+                        logger.info("Version found for $relativePomPath in tag $latestTagRefName: $version")
+                        TagInfo(version, latestTagRefName.substringAfter("refs/tags/"))
+                    } else null
+                    
+                    tagCache[normalizedProjectPath] = result
+                    result
                 } finally {
                     walk.dispose()
                 }
@@ -228,6 +248,8 @@ class GitService {
             null
         }
     }
+
+    private data class TagCommitInfo(val tagName: String, val commitTime: Int, val commit: RevCommit)
 
     private fun readPomVersionFromCommit(repository: Repository, commit: RevCommit, relativePomPath: String): String? {
         val tree = commit.tree

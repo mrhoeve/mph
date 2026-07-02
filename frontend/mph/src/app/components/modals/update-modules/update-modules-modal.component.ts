@@ -1,7 +1,7 @@
-import { Component, EventEmitter, Output, signal, inject, Input, OnInit } from '@angular/core';
+import { Component, EventEmitter, Output, signal, inject, Input, OnInit, DestroyRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { ProjectAnalysis } from '../../../services/maven-project-service';
+import { ProjectAnalysis, MavenProjectService } from '../../../services/maven-project-service';
 
 @Component({
   selector: 'app-update-modules-modal',
@@ -48,6 +48,9 @@ import { ProjectAnalysis } from '../../../services/maven-project-service';
       margin-top: 0.4rem;
       font-size: 0.75rem;
       color: #6b7280;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
     }
     .hint a {
       color: #3b82f6;
@@ -63,6 +66,27 @@ import { ProjectAnalysis } from '../../../services/maven-project-service';
       from { opacity: 0; transform: translateY(-5px); }
       to { opacity: 1; transform: translateY(0); }
     }
+    .mini-spinner {
+      width: 12px;
+      height: 12px;
+      border: 2px solid #e5e7eb;
+      border-top: 2px solid #3b82f6;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .tag-name-hint {
+      font-style: italic;
+      color: #9ca3af;
+      margin-left: 0.25rem;
+      max-width: 150px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
   `]
 })
 export class UpdateModulesModalComponent implements OnInit {
@@ -70,11 +94,35 @@ export class UpdateModulesModalComponent implements OnInit {
   @Output() close = new EventEmitter<void>();
   @Output() execute = new EventEmitter<{path: string, version: string}>();
 
+  private readonly mavenProjectService = inject(MavenProjectService);
+  private readonly destroyRef = inject(DestroyRef);
+
   readonly selectedOption = signal<'current' | 'specified'>('current');
   readonly specifiedVersion = signal('');
+  readonly isLoadingTag = signal(false);
 
   ngOnInit() {
     this.specifiedVersion.set(this.project.latestTag || '');
+    this.fetchLatestTag();
+  }
+
+  private fetchLatestTag() {
+    this.isLoadingTag.set(true);
+    const subscription = this.mavenProjectService.getLatestTag(this.project.path).subscribe({
+      next: (info) => {
+        this.project.latestTagInfo = info || undefined;
+        this.project.latestTag = info?.version;
+        if (this.project.latestTag) {
+          this.specifiedVersion.set(this.project.latestTag);
+        }
+        this.isLoadingTag.set(false);
+      },
+      error: (err) => {
+        console.error('Failed to fetch latest tag', err);
+        this.isLoadingTag.set(false);
+      }
+    });
+    this.destroyRef.onDestroy(() => subscription.unsubscribe());
   }
 
   onExecute(): void {

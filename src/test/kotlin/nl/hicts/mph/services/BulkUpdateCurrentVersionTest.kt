@@ -54,7 +54,7 @@ class BulkUpdateCurrentVersionTest {
             """.trimIndent())
         }
 
-        every { gitService.getLatestTag(any()) } returns null
+        every { gitService.getLatestTagInfo(any()) } returns null
         io.mockk.justRun { gitService.clearCache() }
 
         // Execute bulk update in CURRENT mode

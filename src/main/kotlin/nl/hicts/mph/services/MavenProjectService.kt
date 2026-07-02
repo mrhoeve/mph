@@ -22,6 +22,11 @@ data class ManagedProperty(
     val comment: String? = null
 )
 
+data class TagInfo(
+    val version: String,
+    val tagName: String
+)
+
 @Service
 class MavenProjectService(
     private val mavenCommandService: MavenCommandService,
@@ -30,6 +35,10 @@ class MavenProjectService(
     private val logger = LoggerFactory.getLogger(MavenProjectService::class.java)
 
     private var modelResolver = MavenModelResolver()
+
+    fun getLatestTag(projectPath: String): TagInfo? {
+        return gitService.getLatestTagInfo(projectPath)
+    }
 
     fun scanAndAnalyze(basePath: Path, maxDepth: Int): List<ProjectAnalysis> {
         gitService.clearCache()
@@ -271,8 +280,6 @@ class MavenProjectService(
             Pair(emptyList<ManagedProperty>(), null)
         }
 
-        val latestTag = gitService.getLatestTag(project.pomLocation.absolutePath)
-
         return ProjectAnalysis(
             groupId = groupId,
             artifactId = artifactId,
@@ -283,7 +290,8 @@ class MavenProjectService(
             hasSpringBootParent = hasSpringBootParent,
             springBootVersion = springBootVersion,
             managedProperties = managedProperties,
-            latestTag = latestTag,
+            latestTag = null,
+            latestTagInfo = null,
             error = error,
             isRoot = isRoot
         )
@@ -764,7 +772,8 @@ data class ProjectAnalysis(
     val hasSpringBootParent: Boolean = false,
     val springBootVersion: String? = null,
     val managedProperties: List<ManagedProperty> = emptyList(),
-    val latestTag: String? = null,
+    var latestTag: String? = null,
+    var latestTagInfo: TagInfo? = null,
     val error: String? = null,
     val isRoot: Boolean = false
 )

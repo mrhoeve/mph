@@ -30,11 +30,19 @@
                    placeholder="e.g. 2.54"
                    class="version-input">
             
-            @if (project.latestTag) {
-              <div class="hint">
+            <div class="hint">
+              @if (isLoadingTag()) {
+                <div class="mini-spinner"></div>
+                <span>Fetching latest Git tag...</span>
+              } @else if (project.latestTag) {
                 Latest Tag found: <a href="javascript:void(0)" (click)="specifiedVersion.set(project.latestTag)">{{project.latestTag}}</a>
-              </div>
-            }
+                @if (project.latestTagInfo?.tagName; as tagName) {
+                  <span class="tag-name-hint" [title]="tagName">(from {{tagName}})</span>
+                }
+              } @else {
+                No tags found
+              }
+            </div>
           </div>
         }
       </div>

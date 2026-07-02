@@ -68,10 +68,34 @@ class GitServiceTest {
             git.add().addFilepattern("pom.xml").call()
             git.commit().setMessage("bump version").setSign(false).call()
 
-            // 4. Verify getLatestTag returns 1.2.3 (from the tag)
+            // 4. Verify getLatestTagInfo returns 1.2.3 (from the tag)
             // Note: fetch origin will fail in this local-only test, but the code handles it
-            val version = gitService.getLatestTag(pomFile.absolutePath)
-            assertEquals("1.2.3", version)
+            val info = gitService.getLatestTagInfo(pomFile.absolutePath)
+            assertEquals("1.2.3", info?.version)
+            assertEquals("v1.2.3", info?.tagName)
+        }
+    }
+
+    @Test
+    fun `should return null when no tags exist`() {
+        val repoDir = tempDir.resolve("no-tags").toFile()
+        repoDir.mkdirs()
+        Git.init().setDirectory(repoDir).call().use { git ->
+            val pomFile = File(repoDir, "pom.xml")
+            pomFile.writeText("""
+                <?xml version="1.0" encoding="UTF-8"?>
+                <project xmlns="http://maven.apache.org/POM/4.0.0">
+                    <modelVersion>4.0.0</modelVersion>
+                    <groupId>test</groupId>
+                    <artifactId>test</artifactId>
+                    <version>1.0.0</version>
+                </project>
+            """.trimIndent())
+            git.add().addFilepattern("pom.xml").call()
+            git.commit().setMessage("initial commit").setSign(false).call()
+
+            val info = gitService.getLatestTagInfo(pomFile.absolutePath)
+            assertTrue(info == null, "Expected null info when no tags exist, but got $info")
         }
     }
 }

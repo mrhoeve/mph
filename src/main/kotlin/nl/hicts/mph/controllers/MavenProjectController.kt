@@ -4,6 +4,7 @@ import nl.hicts.mph.models.Settings
 import nl.hicts.mph.services.MavenProjectService
 import nl.hicts.mph.services.ManagedProperty
 import nl.hicts.mph.services.ProjectAnalysis
+import nl.hicts.mph.services.TagInfo
 import nl.hicts.mph.services.SettingsService
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
@@ -105,6 +106,11 @@ class MavenProjectController(
         val settings = settingsService.loadSettings()
         val basePath = settings.basePath ?: throw RuntimeException("Base path not set")
         return mavenProjectService.getManagedProperties(basePath, settings.maxScanDepth, path)
+    }
+
+    @GetMapping("/api/projects/latest-tag")
+    fun getLatestTag(@RequestParam path: String): TagInfo? {
+        return mavenProjectService.getLatestTag(path)
     }
 
     @GetMapping("/api/projects/build-order")

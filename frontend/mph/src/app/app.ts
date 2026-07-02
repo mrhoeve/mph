@@ -114,6 +114,7 @@ export class App implements OnInit {
 
   protected executeBulkUpdate(data: {paths: string[], prefix: string, updateDependents: boolean, mode: string, branchName: string}): void {
     this.isBulkModalOpen.set(false);
+    this.projectState.scanningMessage.set('Bulk updating versions...');
     this.projectState.isScanning.set(true);
 
     const subscription = this.mavenProjectService.bulkUpdateVersion(data.paths, data.prefix, data.updateDependents, data.mode, data.branchName, true).subscribe({
@@ -134,6 +135,7 @@ export class App implements OnInit {
     const selectedPaths = Array.from(this.projectState.selectedRootProjects());
     if (selectedPaths.length === 0) return;
 
+    this.projectState.scanningMessage.set('Syncing develop branch...');
     this.projectState.isScanning.set(true);
     const subscription = this.mavenProjectService.syncDevelop(selectedPaths).subscribe({
       next: (response) => {
@@ -156,6 +158,7 @@ export class App implements OnInit {
     const selectedPaths = Array.from(this.projectState.selectedRootProjects());
     if (selectedPaths.length === 0) return;
 
+    this.projectState.scanningMessage.set('Updating versions...');
     this.projectState.isScanning.set(true);
     const subscription = this.mavenProjectService.bulkUpdateVersion(
       selectedPaths,
@@ -190,6 +193,7 @@ export class App implements OnInit {
 
   protected executeUpdateModulesAndUsages(data: {path: string, version: string}): void {
     this.projectState.isUpdateModulesModalOpen.set(false);
+    this.projectState.scanningMessage.set('Updating modules and usages...');
     this.projectState.isScanning.set(true);
     const subscription = this.mavenProjectService.bulkUpdateVersion([data.path], data.version, true, 'MANUAL', null, false).subscribe({
       next: (projects) => {
@@ -209,6 +213,7 @@ export class App implements OnInit {
     if (!project || !newVersion) return;
 
     this.isSpringBootModalOpen.set(false);
+    this.projectState.scanningMessage.set('Upgrading Spring Boot...');
     this.projectState.isScanning.set(true);
 
     const subscription = this.mavenProjectService.upgradeSpringBoot(project.path, newVersion).subscribe({
@@ -242,6 +247,7 @@ export class App implements OnInit {
     if (!overrideData) return;
 
     this.isOverrideModalOpen.set(false);
+    this.projectState.scanningMessage.set('Overriding property...');
     this.projectState.isScanning.set(true);
 
     const subscription = this.mavenProjectService.overrideProperty(
@@ -282,6 +288,7 @@ export class App implements OnInit {
       return;
     }
 
+    this.projectState.scanningMessage.set('Removing property override...');
     this.projectState.isScanning.set(true);
     const subscription = this.mavenProjectService.removePropertyOverride(
       project.path,

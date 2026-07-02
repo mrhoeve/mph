@@ -2,7 +2,7 @@
   @if (projectState.isScanning()) {
     <div class="loading-container">
       <div class="spinner"></div>
-      <p>Scanning and analyzing projects...</p>
+      <p>{{ projectState.scanningMessage() }}</p>
     </div>
   } @else if (projectState.selectedProject(); as project) {
     <div class="project-details">

@@ -12,6 +12,7 @@ export class ProjectStateService {
   readonly selectedProject = signal<ProjectAnalysis | null>(null);
   readonly selectedRootProjects = signal<Set<string>>(new Set());
   readonly isScanning = signal(false);
+  readonly scanningMessage = signal<string>('Scanning projects...');
   isBuildOrderModalOpen = signal(false);
   isMavenBuildModalOpen = signal(false);
   isUpdateModulesModalOpen = signal(false);
@@ -82,6 +83,7 @@ export class ProjectStateService {
   });
 
   scan(): void {
+    this.scanningMessage.set('Scanning projects...');
     this.isScanning.set(true);
     this.clearError();
     const subscription = this.mavenProjectService.analyze().subscribe({

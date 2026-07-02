@@ -14,6 +14,7 @@ export interface ProjectAnalysis {
   springBootVersion?: string;
   managedProperties: ManagedProperty[];
   latestTag?: string;
+  latestTagInfo?: TagInfo;
   error?: string;
   isRoot: boolean;
 }
@@ -40,6 +41,11 @@ export interface SyncDevelopResponse {
   messages: string[];
 }
 
+
+export interface TagInfo {
+  version: string;
+  tagName: string;
+}
 
 @Injectable({
   providedIn: 'root',
@@ -97,6 +103,12 @@ export class MavenProjectService {
 
   getManagedProperties(path: string): Observable<ManagedProperty[]> {
     return this.http.get<ManagedProperty[]>(`${this.apiBaseUrl}/api/projects/managed-properties`, {
+      params: { path }
+    });
+  }
+
+  getLatestTag(path: string): Observable<TagInfo | null> {
+    return this.http.get<TagInfo | null>(`${this.apiBaseUrl}/api/projects/latest-tag`, {
       params: { path }
     });
   }
