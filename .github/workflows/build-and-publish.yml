@@ -100,7 +100,7 @@ jobs:
           chmod +x mvnw
           ./mvnw versions:set -DnewVersion=$VERSION -DgenerateBackupPoms=false
           git add pom.xml
-          git commit -m "Release $VERSION [skip ci]"
+          git commit -m "Release $VERSION"
           git tag "$TAG_NAME"
           
           # Bump to next snapshot version
@@ -114,7 +114,7 @@ jobs:
           echo "Bumping to next version: $NEXT_VERSION"
           ./mvnw versions:set -DnewVersion=$NEXT_VERSION -DgenerateBackupPoms=false
           git add pom.xml
-          git commit -m "Prepare for next development iteration: $NEXT_VERSION [skip ci]"
+          git commit -m "Prepare for next development iteration: $NEXT_VERSION"
           
           git push origin main
           git push origin "$TAG_NAME"
