@@ -7,6 +7,11 @@ import org.eclipse.jgit.revwalk.RevCommit
 import org.eclipse.jgit.revwalk.RevTag
 import org.eclipse.jgit.revwalk.RevWalk
 import org.eclipse.jgit.transport.TagOpt
+import org.eclipse.jgit.transport.CredentialsProvider
+import org.eclipse.jgit.transport.NetRCCredentialsProvider
+import org.eclipse.jgit.transport.SshSessionFactory
+import org.eclipse.jgit.transport.sshd.SshdSessionFactory
+import org.eclipse.jgit.util.FS
 import org.eclipse.jgit.treewalk.TreeWalk
 import org.apache.maven.model.io.xpp3.MavenXpp3Reader
 import org.slf4j.LoggerFactory
@@ -18,6 +23,21 @@ import java.nio.charset.StandardCharsets
 @Service
 class GitService {
     private val logger = LoggerFactory.getLogger(GitService::class.java)
+
+    init {
+        try {
+            // Configure JGit to use modern SSH implementation and system settings
+            // SshdSessionFactory picks up settings from ~/.ssh/config and uses ssh-agent
+            val sshSessionFactory = SshdSessionFactory()
+            SshSessionFactory.setInstance(sshSessionFactory)
+
+            // Set default credentials provider to include netrc
+            CredentialsProvider.setDefault(NetRCCredentialsProvider())
+            logger.info("JGit configured with SshdSessionFactory and NetRCCredentialsProvider")
+        } catch (e: Exception) {
+            logger.error("Failed to configure JGit transport settings: ${e.message}", e)
+        }
+    }
     
     private val tagCache = mutableMapOf<String, String?>() // path -> version
     private val repoTagsCache = mutableMapOf<File, List<org.eclipse.jgit.lib.Ref>>()
@@ -45,12 +65,12 @@ class GitService {
                 try {
                     logger.info("Performing git pull origin for ${repoDir.absolutePath}")
                     // Pull requires configured upstream, or we can try to pull explicitly
-                    git.pull().setRemote("origin").call()
+                    git.pull().setRemote("origin").setCredentialsProvider(CredentialsProvider.getDefault()).call()
                 } catch (e: Exception) {
                     logger.warn("Could not perform git pull origin: ${e.message}")
                     // Fallback to just fetching if pull fails
                     try {
-                        git.fetch().setRemote("origin").call()
+                        git.fetch().setRemote("origin").setCredentialsProvider(CredentialsProvider.getDefault()).call()
                     } catch (fe: Exception) {
                         logger.warn("Could not fetch from origin: ${fe.message}")
                     }
@@ -117,7 +137,7 @@ class GitService {
                 git.checkout().setName("develop").call()
 
                 // 3. Pull origin develop
-                git.pull().setRemote("origin").setRemoteBranchName("develop").call()
+                git.pull().setRemote("origin").setRemoteBranchName("develop").setCredentialsProvider(CredentialsProvider.getDefault()).call()
 
                 // 4. Switch back to original branch
                 git.checkout().setName(currentBranch).call()
@@ -155,7 +175,7 @@ class GitService {
                 if (!fetchedRepos.contains(repoDir)) {
                     try {
                         logger.info("Fetching tags for ${repoDir.absolutePath}")
-                        git.fetch().setRemote("origin").setTagOpt(TagOpt.FETCH_TAGS).call()
+                        git.fetch().setRemote("origin").setTagOpt(TagOpt.FETCH_TAGS).setCredentialsProvider(CredentialsProvider.getDefault()).call()
                     } catch (e: Exception) {
                         logger.warn("Could not fetch tags from origin for ${repoDir.absolutePath}: ${e.message}")
                     }
