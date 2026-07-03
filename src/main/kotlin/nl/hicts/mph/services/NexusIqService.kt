@@ -17,6 +17,7 @@ class NexusIqService(
     private val logger by LoggerDelegate()
     private val webClient = WebClient.builder().build()
     private val vulnerabilityCache = ConcurrentHashMap<String, List<NexusIqPolicyViolation>>()
+    private val reportUrlCache = ConcurrentHashMap<String, String>()
 
     fun extractNexusIqAppId(projectPath: String, settings: Settings): String? {
         val file = File(projectPath)
@@ -84,21 +85,56 @@ class NexusIqService(
             args.add("-Dclm.password=$pass")
         }
 
-        val reportUrl = getReportUrl(applicationId, settings)
-
         return mavenCommandService.runMavenCommandInBackground(projectDir, args, "Nexus IQ Scan")
             .thenApply { exitCode ->
-                if (exitCode == 0) NexusIqScanResult("Scan completed successfully for $projectPath", reportUrl)
-                else NexusIqScanResult("Scan failed for $projectPath with exit code $exitCode", reportUrl)
+                val finalReportUrl = getReportUrl(applicationId, settings, forceRefresh = true)
+                if (exitCode == 0) NexusIqScanResult("Scan completed successfully for $projectPath", finalReportUrl)
+                else NexusIqScanResult("Scan failed for $projectPath with exit code $exitCode", finalReportUrl)
             }
     }
 
-    fun getReportUrl(applicationId: String?, settings: Settings): String? {
+    fun getReportUrl(applicationId: String?, settings: Settings, forceRefresh: Boolean = false): String? {
         val serverUrl = settings.nexusIqUrl ?: return null
         if (applicationId == null) return null
         
+        if (!forceRefresh && reportUrlCache.containsKey(applicationId)) {
+            return reportUrlCache[applicationId]
+        }
+
         val baseUrl = serverUrl.removeSuffix("/")
-        return "$baseUrl/ui/links/application/$applicationId/report/latest"
+        val latestFromApi = fetchLatestReportUrlFromApi(applicationId, settings)
+        
+        val url = latestFromApi ?: "$baseUrl/ui/links/application/$applicationId/report/latest"
+        reportUrlCache[applicationId] = url
+        return url
+    }
+
+    private fun fetchLatestReportUrlFromApi(applicationId: String, settings: Settings): String? {
+        val serverUrl = settings.nexusIqUrl ?: return null
+        try {
+            val response = webClient.get()
+                .uri("${serverUrl.removeSuffix("/")}/api/v2/reports/applications/$applicationId")
+                .headers { headers ->
+                    if (!settings.nexusIqUser.isNullOrBlank() && !settings.nexusIqPass.isNullOrBlank()) {
+                        headers.setBasicAuth(settings.nexusIqUser, settings.nexusIqPass)
+                    }
+                }
+                .retrieve()
+                .bodyToMono(ApplicationReportsResponse::class.java)
+                .block()
+
+            val latestReport = response?.reports?.maxByOrNull { it.evaluationDate }
+            if (latestReport != null) {
+                return if (latestReport.reportHtmlUrl.startsWith("http")) {
+                    latestReport.reportHtmlUrl
+                } else {
+                    "${serverUrl.removeSuffix("/")}/${latestReport.reportHtmlUrl}"
+                }
+            }
+        } catch (e: Exception) {
+            logger.warn("Failed to fetch latest report URL for $applicationId from API: ${e.message}")
+        }
+        return null
     }
 
     fun getVulnerabilities(groupId: String, artifactId: String, version: String): List<NexusIqPolicyViolation> {
@@ -203,6 +239,16 @@ data class NexusIqPolicyViolation(
     val policyName: String,
     val constraintViolations: List<String>,
     val remediationVersion: String?
+)
+
+data class ApplicationReportsResponse(
+    val reports: List<ApplicationReport> = emptyList()
+)
+
+data class ApplicationReport(
+    val stage: String,
+    val reportHtmlUrl: String,
+    val evaluationDate: String
 )
 
 // DTOs for Nexus IQ API
