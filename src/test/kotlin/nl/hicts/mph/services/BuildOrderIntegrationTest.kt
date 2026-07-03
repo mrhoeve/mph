@@ -22,6 +22,7 @@ class BuildOrderIntegrationTest {
             maxScanDepth = 3
         )
         every { gitService.getLatestTagInfo(any()) } returns null
+        every { nexusIqService.extractNexusIqAppId(any(), any()) } returns null
         io.mockk.justRun { gitService.clearCache() }
         val testDataPath = Paths.get("src/test/resources/test-data")
         val buildOrder = service.getBuildOrder(testDataPath, 3)

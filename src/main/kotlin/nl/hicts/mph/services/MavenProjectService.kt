@@ -282,17 +282,15 @@ class MavenProjectService(
         var nexusIqResult: NexusIqResult? = null
         var effectiveModel: Model? = null
 
-        var canScanNexusIq = false
+        val settings = settingsService.loadSettings()
+        val applicationId = nexusIqService.extractNexusIqAppId(project.pomLocation.parent, settings)
+        val canScanNexusIq = applicationId != null
 
         if (resolveProps) {
             try {
                 val result = modelResolver.resolveModelResult(project.pomLocation)
                 effectiveModel = result.effectiveModel
                 managedProperties = resolveManagedPropertiesFromResult(project, result)
-                
-                val settings = settingsService.loadSettings()
-                val applicationId = nexusIqService.extractNexusIqAppId(project.pomLocation.parent, settings)
-                canScanNexusIq = applicationId != null
                 
                 if (settings.nexusIqUrl.isNullOrBlank()) {
                     nexusIqResult = NexusIqResult(

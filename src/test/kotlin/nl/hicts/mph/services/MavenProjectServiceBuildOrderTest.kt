@@ -27,6 +27,7 @@ class MavenProjectServiceBuildOrderTest {
             maxScanDepth = 3
         )
         every { gitService.getLatestTagInfo(any()) } returns null
+        every { nexusIqService.extractNexusIqAppId(any(), any()) } returns null
         // Project A (no dependencies)
         val modelA = Model().apply {
             groupId = "com.example"
