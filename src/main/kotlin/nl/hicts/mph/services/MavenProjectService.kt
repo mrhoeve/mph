@@ -722,10 +722,26 @@ class MavenProjectService(
         }
 
         val rootPaths = rootProjects.map { it.path }.toSet()
-        val sortedRootPaths = topologicalSort(rootPaths, dependencies)
+        val sortedStages = topologicalSortIntoStages(rootPaths, dependencies)
 
         val rootByPath = rootProjects.associateBy { it.path }
-        return sortedRootPaths.mapNotNull { rootByPath[it] }
+        val result = mutableListOf<ProjectAnalysis>()
+        
+        sortedStages.forEachIndexed { stageIndex, stagePaths ->
+            stagePaths.sorted().forEach { path ->
+                rootByPath[path]?.let { root ->
+                    val deps = dependencies[path] ?: emptySet()
+                    val dependsOnArtifactIds = deps.mapNotNull { rootByPath[it]?.artifactId }.sorted()
+                    
+                    result.add(root.copy(
+                        buildStep = stageIndex + 1,
+                        dependsOn = dependsOnArtifactIds
+                    ))
+                }
+            }
+        }
+        
+        return result
     }
 
     fun exportToExcel(projects: List<ProjectAnalysis>): ByteArray {
@@ -733,23 +749,21 @@ class MavenProjectService(
         val sheet = workbook.createSheet("Build Order")
 
         val header = sheet.createRow(0)
-        header.createCell(0).setCellValue("Build Order")
+        header.createCell(0).setCellValue("Build Step")
         header.createCell(1).setCellValue("Project Name")
-        header.createCell(2).setCellValue("Group ID")
-        header.createCell(3).setCellValue("Artifact ID")
-        header.createCell(4).setCellValue("Current Version")
+        header.createCell(2).setCellValue("Current Version")
+        header.createCell(3).setCellValue("Depends On")
 
         projects.filter { it.isRoot }.forEachIndexed { index, project ->
             val row = sheet.createRow(index + 1)
-            row.createCell(0).setCellValue((index + 1).toDouble())
+            row.createCell(0).setCellValue(project.buildStep.toDouble())
             row.createCell(1).setCellValue(project.artifactId)
-            row.createCell(2).setCellValue(project.groupId)
-            row.createCell(3).setCellValue(project.artifactId)
-            row.createCell(4).setCellValue(project.version)
+            row.createCell(2).setCellValue(project.version)
+            row.createCell(3).setCellValue(project.dependsOn.joinToString(", "))
         }
 
         // Auto size columns
-        for (i in 0..4) {
+        for (i in 0..3) {
             sheet.autoSizeColumn(i)
         }
 
@@ -772,7 +786,7 @@ class MavenProjectService(
         }
     }
 
-    private fun topologicalSort(nodes: Set<String>, dependencies: Map<String, Set<String>>): List<String> {
+    private fun topologicalSortIntoStages(nodes: Set<String>, dependencies: Map<String, Set<String>>): List<List<String>> {
         val inDegree = mutableMapOf<String, Int>()
         val adj = mutableMapOf<String, MutableSet<String>>() // node -> things that depend on it
 
@@ -788,33 +802,30 @@ class MavenProjectService(
             }
         }
 
-        val outDegree = nodes.associateWith { adj[it]?.size ?: 0 }
+        val result = mutableListOf<List<String>>()
+        var currentStage = nodes.filter { (inDegree[it] ?: 0) == 0 }
 
-        // PriorityQueue to favor nodes that unblock others (higher out-degree) and then alphabetical
-        val queue = PriorityQueue<String> { a, b ->
-            val outA = outDegree[a] ?: 0
-            val outB = outDegree[b] ?: 0
-            if (outA != outB) outB.compareTo(outA)
-            else a.compareTo(b)
-        }
-        
-        nodes.forEach { if ((inDegree[it] ?: 0) == 0) queue.add(it) }
-
-        val result = mutableListOf<String>()
-        while (queue.isNotEmpty()) {
-            val u = queue.poll()
-            result.add(u)
-
-            adj[u]?.forEach { v ->
-                inDegree[v] = inDegree[v]!! - 1
-                if (inDegree[v] == 0) queue.add(v)
+        while (currentStage.isNotEmpty()) {
+            result.add(currentStage)
+            val nextStage = mutableListOf<String>()
+            currentStage.forEach { u ->
+                adj[u]?.forEach { v ->
+                    inDegree[v] = inDegree[v]!! - 1
+                    if (inDegree[v] == 0) {
+                        nextStage.add(v)
+                    }
+                }
             }
+            currentStage = nextStage
         }
 
-        // Handle cycles or disconnected nodes
-        if (result.size < nodes.size) {
-            val remaining = nodes - result.toSet()
-            result.addAll(remaining.sorted())
+        // Handle cycles
+        val processedNodes = result.flatten().toSet()
+        if (processedNodes.size < nodes.size) {
+            val remaining = (nodes - processedNodes).sorted()
+            if (remaining.isNotEmpty()) {
+                result.add(remaining)
+            }
         }
 
         return result
@@ -869,7 +880,9 @@ data class ProjectAnalysis(
     val error: String? = null,
     val isRoot: Boolean = false,
     val nexusIqResult: NexusIqResult? = null,
-    val canScanNexusIq: Boolean = false
+    val canScanNexusIq: Boolean = false,
+    val buildStep: Int = 0,
+    val dependsOn: List<String> = emptyList()
 )
 
 data class ProjectUsage(
