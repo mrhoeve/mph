@@ -314,8 +314,8 @@ export class App implements OnInit {
     this.projectState.isScanning.set(true);
     this.projectState.scanningMessage.set(`Triggering Nexus IQ scan for ${project.artifactId}...`);
     const subscription = this.mavenProjectService.scanNexusIq(project.path).subscribe({
-      next: (msg) => {
-        console.log(msg);
+      next: (response) => {
+        console.log(response.message);
         this.projectState.scan(); // Refresh projects to get potential new results
       },
       error: (err) => {

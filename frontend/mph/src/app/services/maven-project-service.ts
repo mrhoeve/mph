@@ -65,6 +65,10 @@ export interface TagInfo {
   tagName: string;
 }
 
+export interface NexusIqScanResponse {
+  message: string;
+}
+
 @Injectable({
   providedIn: 'root',
 })
@@ -145,7 +149,7 @@ export class MavenProjectService {
     return `${this.apiBaseUrl}/api/projects/export-excel`;
   }
 
-  scanNexusIq(path: string): Observable<string> {
-    return this.http.post<string>(`${this.apiBaseUrl}/api/nexus-iq/scan`, { path });
+  scanNexusIq(path: string): Observable<NexusIqScanResponse> {
+    return this.http.post<NexusIqScanResponse>(`${this.apiBaseUrl}/api/nexus-iq/scan`, { path });
   }
 }
