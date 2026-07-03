@@ -7,7 +7,8 @@
 Managing dozens of microservices and shared libraries can be a daunting task. MPH lightens this burden by providing a centralized dashboard to:
 
 - **Analyze Dependencies**: Visualize the relationships between your projects and modules with interactive dependency graphs (powered by Mermaid).
-- **Determine Build Order**: Automatically calculate the correct topological build order for your projects, ensuring that base dependencies are built before the projects that rely on them.
+- **Security Scanning**: Scan your projects for vulnerabilities using Nexus IQ integration, with direct links to full security reports.
+- **Determine Build Order**: Automatically calculate the correct topological build order for your projects, identifying which can be built concurrently.
 - **Bulk Version Updates**: Effortlessly update version properties across multiple projects and their dependent usages. Support for manual version selection and automatic discovery of the latest Git tags ensures your ecosystem stays synchronized.
 - **Maven Build Execution**: Run Maven builds directly from the app with support for parallel execution, real-time log streaming, and status tracking.
 - **Git Integration**: Automatically handle branch creation and management during bulk updates, and keep your local branches in sync with `develop`.
@@ -15,6 +16,10 @@ Managing dozens of microservices and shared libraries can be a daunting task. MP
 
 ## Key Features
 
+- **Nexus IQ Security Analysis**: Integrated vulnerability scanning with Nexus IQ. Identify security risks in your dependencies and receive specific remediation versions.
+- **Smart Remediation**: Proactively warns about vulnerable versions when performing property overrides and suggests safe upgrade paths.
+- **Excel Export with Concurrency**: Export your build order to Excel, complete with concurrent build steps and dependency mapping to optimize your CI/CD pipelines.
+- **Jenkinsfile-Driven Scanning**: Nexus IQ scans are intelligently targeted at projects containing valid `Jenkinsfile` pipeline definitions.
 - **Local-Only Tool**: Runs entirely on your machine, leveraging your existing Java/Kotlin development environment.
 - **Fresh Scans**: Always performs a fresh scan of your project directories to ensure you're working with the most up-to-date information.
 - **Expandable Project Tree**: A compact, hierarchical view of your project roots and modules for easy navigation.
