@@ -316,6 +316,13 @@ export class App implements OnInit {
     const subscription = this.mavenProjectService.scanNexusIq(project.path).subscribe({
       next: (response) => {
         console.log(response.message);
+        if (response.reportUrl) {
+          if (confirm(`${response.message}\n\nDo you want to open the report in Nexus IQ?`)) {
+            window.open(response.reportUrl, '_blank');
+          }
+        } else {
+          this.projectState.setInfo(response.message);
+        }
         this.projectState.scan(); // Refresh projects to get potential new results
       },
       error: (err) => {

@@ -48,7 +48,9 @@ class NexusIqServiceTest {
             mavenCommandService.runMavenCommandInBackground(any(), capture(argsSlot), any()) 
         } returns CompletableFuture.completedFuture(0)
 
-        service.scan(projectDir.toString()).get()
+        val result = service.scan(projectDir.toString()).get()
+        assertEquals("Scan completed successfully for $projectDir", result.message)
+        assertEquals("https://iq.example.com/ui/links/application/test-prefix:a-project-svc-test/report/latest", result.reportUrl)
 
         val args = argsSlot.captured
         assertTrue(args.contains("com.sonatype.clm:clm-maven-plugin:evaluate"), "Should use clm-maven-plugin")
@@ -79,7 +81,8 @@ class NexusIqServiceTest {
         } returns CompletableFuture.completedFuture(0)
 
         val result = service.scan(pomFile.toString()).get()
-        assertEquals("Scan completed successfully for ${pomFile.toString()}", result)
+        assertEquals("Scan completed successfully for ${pomFile.toString()}", result.message)
+        assertEquals("https://iq.example.com/ui/links/application/b-project-svc/report/latest", result.reportUrl)
         
         // Verify that the command was run in projectDir, not in pomFile path
         verify { 
@@ -157,5 +160,20 @@ class NexusIqServiceTest {
         val violations = service.getVulnerabilities("org.apache.logging.log4j", "log4j-core", "2.14.1")
         
         assertTrue(violations.isEmpty(), "Should return empty violations when no server is configured")
+    }
+
+    @Test
+    fun `should construct correct report URL`() {
+        val settings = Settings(
+            basePath = tempDir,
+            maxScanDepth = 3,
+            nexusIqUrl = "https://iq.example.com/"
+        )
+        
+        val url = service.getReportUrl("my-app", settings)
+        assertEquals("https://iq.example.com/ui/links/application/my-app/report/latest", url)
+        
+        val urlNoSlash = service.getReportUrl("my-app", settings.copy(nexusIqUrl = "https://iq.example.com"))
+        assertEquals("https://iq.example.com/ui/links/application/my-app/report/latest", urlNoSlash)
     }
 }

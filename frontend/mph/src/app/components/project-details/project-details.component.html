@@ -51,7 +51,14 @@
 
       @if (project.nexusIqResult) {
         <div class="details-section nexus-iq-section">
-          <h3>Nexus IQ Security Analysis</h3>
+          <div class="section-header">
+            <h3>Nexus IQ Security Analysis</h3>
+            @if (project.nexusIqResult.reportHtmlUrl) {
+              <a [href]="project.nexusIqResult.reportHtmlUrl" target="_blank" class="report-link">
+                View full report in Nexus IQ ↗
+              </a>
+            }
+          </div>
           @if (project.nexusIqResult.message) {
             <p class="nexus-message">{{ project.nexusIqResult.message }}</p>
           } @else if (project.nexusIqResult.policyViolations.length > 0) {

@@ -13,7 +13,7 @@ class NexusIqController(
 
     @PostMapping("/api/nexus-iq/scan")
     fun scan(@RequestBody request: NexusIqScanRequest): CompletableFuture<NexusIqScanResponse> {
-        return nexusIqService.scan(request.path).thenApply { NexusIqScanResponse(it) }
+        return nexusIqService.scan(request.path).thenApply { NexusIqScanResponse(it.message, it.reportUrl) }
     }
 }
 
@@ -22,5 +22,6 @@ data class NexusIqScanRequest(
 )
 
 data class NexusIqScanResponse(
-    val message: String
+    val message: String,
+    val reportUrl: String? = null
 )

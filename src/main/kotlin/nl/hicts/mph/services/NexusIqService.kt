@@ -44,14 +44,14 @@ class NexusIqService(
         }
     }
 
-    fun scan(projectPath: String): CompletableFuture<String> {
+    fun scan(projectPath: String): CompletableFuture<NexusIqScanResult> {
         val settings = settingsService.loadSettings()
         val file = File(projectPath)
         val projectDir = if (file.isFile) file.parentFile else file
         val pomFile = File(projectDir, "pom.xml")
         
         if (!pomFile.exists()) {
-            return CompletableFuture.completedFuture("Error: pom.xml not found at ${projectDir.absolutePath}")
+            return CompletableFuture.completedFuture(NexusIqScanResult("Error: pom.xml not found at ${projectDir.absolutePath}"))
         }
 
         val serverUrl = settings.nexusIqUrl
@@ -61,11 +61,11 @@ class NexusIqService(
         val applicationId = extractNexusIqAppId(projectDir.absolutePath, settings)
 
         if (serverUrl.isNullOrBlank()) {
-            return CompletableFuture.completedFuture("Error: Nexus IQ Server URL not configured")
+            return CompletableFuture.completedFuture(NexusIqScanResult("Error: Nexus IQ Server URL not configured"))
         }
         
         if (applicationId == null) {
-            return CompletableFuture.completedFuture("Nexus IQ scan skipped: No Jenkinsfile with servicePipeline or libraryPipeline found")
+            return CompletableFuture.completedFuture(NexusIqScanResult("Nexus IQ scan skipped: No Jenkinsfile with servicePipeline or libraryPipeline found"))
         }
         
         logger.info("Triggering Nexus IQ scan for $projectPath with App ID: $applicationId")
@@ -84,11 +84,21 @@ class NexusIqService(
             args.add("-Dclm.password=$pass")
         }
 
+        val reportUrl = getReportUrl(applicationId, settings)
+
         return mavenCommandService.runMavenCommandInBackground(projectDir, args, "Nexus IQ Scan")
             .thenApply { exitCode ->
-                if (exitCode == 0) "Scan completed successfully for $projectPath"
-                else "Scan failed for $projectPath with exit code $exitCode"
+                if (exitCode == 0) NexusIqScanResult("Scan completed successfully for $projectPath", reportUrl)
+                else NexusIqScanResult("Scan failed for $projectPath with exit code $exitCode", reportUrl)
             }
+    }
+
+    fun getReportUrl(applicationId: String?, settings: Settings): String? {
+        val serverUrl = settings.nexusIqUrl ?: return null
+        if (applicationId == null) return null
+        
+        val baseUrl = serverUrl.removeSuffix("/")
+        return "$baseUrl/ui/links/application/$applicationId/report/latest"
     }
 
     fun getVulnerabilities(groupId: String, artifactId: String, version: String): List<NexusIqPolicyViolation> {
@@ -174,6 +184,11 @@ class NexusIqService(
     }
 
 }
+
+data class NexusIqScanResult(
+    val message: String,
+    val reportUrl: String? = null
+)
 
 data class NexusIqResult(
     val applicationPublicId: String,

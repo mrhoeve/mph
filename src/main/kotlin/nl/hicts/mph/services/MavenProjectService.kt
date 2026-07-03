@@ -306,7 +306,8 @@ class MavenProjectService(
                     val violations = getProjectVulnerabilitiesFromModel(effectiveModel)
                     nexusIqResult = NexusIqResult(
                         applicationPublicId = applicationId,
-                        policyViolations = violations
+                        policyViolations = violations,
+                        reportHtmlUrl = nexusIqService.getReportUrl(applicationId, settings)
                     )
                 }
             } catch (e: Exception) {

@@ -103,6 +103,28 @@
   align-items: center;
 }
 
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.section-header h3 {
+  margin-bottom: 0;
+}
+
+.report-link {
+  font-size: 0.875rem;
+  color: #2563eb;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.report-link:hover {
+  text-decoration: underline;
+}
+
 .spring-button, .spring-manage-button {
   background: white;
   color: #166534;

@@ -67,6 +67,7 @@ export interface TagInfo {
 
 export interface NexusIqScanResponse {
   message: string;
+  reportUrl?: string;
 }
 
 @Injectable({
