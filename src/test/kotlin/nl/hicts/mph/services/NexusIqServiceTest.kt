@@ -59,6 +59,52 @@ class NexusIqServiceTest {
     }
 
     @Test
+    fun `should handle scan when path points to pom_xml file`() {
+        val projectDir = tempDir.resolve("b-project")
+        Files.createDirectories(projectDir)
+        val pomFile = projectDir.resolve("pom.xml")
+        Files.writeString(pomFile, "<project><artifactId>b-project</artifactId></project>")
+        Files.writeString(projectDir.resolve("Jenkinsfile"), "servicePipeline('b-project-svc')")
+        
+        val settings = Settings(
+            basePath = tempDir,
+            maxScanDepth = 3,
+            nexusIqUrl = "https://iq.example.com"
+        )
+        
+        every { settingsService.loadSettings() } returns settings
+        
+        every { 
+            mavenCommandService.runMavenCommandInBackground(any(), any(), any()) 
+        } returns CompletableFuture.completedFuture(0)
+
+        val result = service.scan(pomFile.toString()).get()
+        assertEquals("Scan completed successfully for ${pomFile.toString()}", result)
+        
+        // Verify that the command was run in projectDir, not in pomFile path
+        verify { 
+            mavenCommandService.runMavenCommandInBackground(projectDir.toFile(), any(), any()) 
+        }
+    }
+
+    @Test
+    fun `should extract App ID even if path points to pom_xml`() {
+        val projectDir = tempDir.resolve("c-project")
+        Files.createDirectories(projectDir)
+        val pomFile = projectDir.resolve("pom.xml")
+        Files.writeString(pomFile, "<project/>")
+        Files.writeString(projectDir.resolve("Jenkinsfile"), "servicePipeline('c-service')")
+        
+        val settings = Settings(
+            basePath = tempDir,
+            maxScanDepth = 3
+        )
+        
+        val appId = service.extractNexusIqAppId(pomFile.toString(), settings)
+        assertEquals("c-service", appId)
+    }
+
+    @Test
     fun `should extract App ID from Jenkinsfile`() {
         val projectDir = tempDir.resolve("j-project")
         Files.createDirectories(projectDir)

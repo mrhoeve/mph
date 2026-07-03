@@ -19,7 +19,8 @@ class NexusIqService(
     private val vulnerabilityCache = ConcurrentHashMap<String, List<NexusIqPolicyViolation>>()
 
     fun extractNexusIqAppId(projectPath: String, settings: Settings): String? {
-        val projectDir = File(projectPath)
+        val file = File(projectPath)
+        val projectDir = if (file.isFile) file.parentFile else file
         val jenkinsfile = File(projectDir, "Jenkinsfile")
         
         if (!jenkinsfile.exists()) return null
@@ -45,18 +46,19 @@ class NexusIqService(
 
     fun scan(projectPath: String): CompletableFuture<String> {
         val settings = settingsService.loadSettings()
-        val projectDir = File(projectPath)
+        val file = File(projectPath)
+        val projectDir = if (file.isFile) file.parentFile else file
         val pomFile = File(projectDir, "pom.xml")
         
         if (!pomFile.exists()) {
-            return CompletableFuture.completedFuture("Error: pom.xml not found at $projectPath")
+            return CompletableFuture.completedFuture("Error: pom.xml not found at ${projectDir.absolutePath}")
         }
 
         val serverUrl = settings.nexusIqUrl
         val user = settings.nexusIqUser
         val pass = settings.nexusIqPass
         
-        val applicationId = extractNexusIqAppId(projectPath, settings)
+        val applicationId = extractNexusIqAppId(projectDir.absolutePath, settings)
 
         if (serverUrl.isNullOrBlank()) {
             return CompletableFuture.completedFuture("Error: Nexus IQ Server URL not configured")
