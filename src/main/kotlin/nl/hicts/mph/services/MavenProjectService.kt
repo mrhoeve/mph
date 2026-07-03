@@ -282,6 +282,8 @@ class MavenProjectService(
         var nexusIqResult: NexusIqResult? = null
         var effectiveModel: Model? = null
 
+        var canScanNexusIq = false
+
         if (resolveProps) {
             try {
                 val result = modelResolver.resolveModelResult(project.pomLocation)
@@ -289,15 +291,23 @@ class MavenProjectService(
                 managedProperties = resolveManagedPropertiesFromResult(project, result)
                 
                 val settings = settingsService.loadSettings()
+                val applicationId = nexusIqService.extractNexusIqAppId(project.pomLocation.parent, settings)
+                canScanNexusIq = applicationId != null
+                
                 if (settings.nexusIqUrl.isNullOrBlank()) {
                     nexusIqResult = NexusIqResult(
-                        applicationPublicId = artifactId,
+                        applicationPublicId = applicationId ?: artifactId,
                         message = "Nexus IQ not configured"
+                    )
+                } else if (applicationId == null) {
+                    nexusIqResult = NexusIqResult(
+                        applicationPublicId = artifactId,
+                        message = "Nexus IQ scan skipped: No Jenkinsfile found"
                     )
                 } else {
                     val violations = getProjectVulnerabilitiesFromModel(effectiveModel)
                     nexusIqResult = NexusIqResult(
-                        applicationPublicId = artifactId,
+                        applicationPublicId = applicationId,
                         policyViolations = violations
                     )
                 }
@@ -345,7 +355,8 @@ class MavenProjectService(
             latestTagInfo = null,
             error = error,
             isRoot = isRoot,
-            nexusIqResult = nexusIqResult
+            nexusIqResult = nexusIqResult,
+            canScanNexusIq = canScanNexusIq
         )
     }
 
@@ -657,7 +668,9 @@ class MavenProjectService(
         }
 
         val settings = settingsService.loadSettings()
-        if (settings.nexusIqUrl.isNullOrBlank()) {
+        val applicationId = nexusIqService.extractNexusIqAppId(project.pomLocation.parent, settings)
+
+        if (settings.nexusIqUrl.isNullOrBlank() || applicationId == null) {
             return managedProperties
         }
 
@@ -856,7 +869,8 @@ data class ProjectAnalysis(
     var latestTagInfo: TagInfo? = null,
     val error: String? = null,
     val isRoot: Boolean = false,
-    val nexusIqResult: NexusIqResult? = null
+    val nexusIqResult: NexusIqResult? = null,
+    val canScanNexusIq: Boolean = false
 )
 
 data class ProjectUsage(

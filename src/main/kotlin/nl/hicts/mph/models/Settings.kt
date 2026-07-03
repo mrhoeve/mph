@@ -8,5 +8,6 @@ data class Settings(
     val nexusIqUrl: String? = null,
     val nexusIqUser: String? = null,
     val nexusIqPass: String? = null,
-    val nexusIqAppIdPrefix: String? = null
+    val nexusIqAppIdPrefix: String? = null,
+    val nexusIqAppIdSuffix: String? = null
 )

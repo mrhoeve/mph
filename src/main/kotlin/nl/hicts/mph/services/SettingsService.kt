@@ -34,13 +34,14 @@ class SettingsService {
         val nexusIqUser = properties.getProperty("nexusIqUser")
         val nexusIqPass = properties.getProperty("nexusIqPass")
         val nexusIqAppIdPrefix = properties.getProperty("nexusIqAppIdPrefix")
+        val nexusIqAppIdSuffix = properties.getProperty("nexusIqAppIdSuffix")
 
         val path = basePathStr?.let { Paths.get(it) }?.takeIf { it.exists() && it.isDirectory() }
 
-        return Settings(path, maxScanDepth, nexusIqUrl, nexusIqUser, nexusIqPass, nexusIqAppIdPrefix)
+        return Settings(path, maxScanDepth, nexusIqUrl, nexusIqUser, nexusIqPass, nexusIqAppIdPrefix, nexusIqAppIdSuffix)
     }
 
-    fun saveSettings(path: Path, maxScanDepth: Int, nexusIqUrl: String? = null, nexusIqUser: String? = null, nexusIqPass: String? = null, nexusIqAppIdPrefix: String? = null) {
+    fun saveSettings(path: Path, maxScanDepth: Int, nexusIqUrl: String? = null, nexusIqUser: String? = null, nexusIqPass: String? = null, nexusIqAppIdPrefix: String? = null, nexusIqAppIdSuffix: String? = null) {
         Files.createDirectories(settingsDirectory)
 
         val properties = Properties()
@@ -50,6 +51,7 @@ class SettingsService {
         nexusIqUser?.let { properties.setProperty("nexusIqUser", it) }
         nexusIqPass?.let { properties.setProperty("nexusIqPass", it) }
         nexusIqAppIdPrefix?.let { properties.setProperty("nexusIqAppIdPrefix", it) }
+        nexusIqAppIdSuffix?.let { properties.setProperty("nexusIqAppIdSuffix", it) }
 
         Files.newOutputStream(settingsFile).use { outputStream ->
             properties.store(outputStream, "MPH settings")

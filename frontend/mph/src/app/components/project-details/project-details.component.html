@@ -27,17 +27,25 @@
       
       <p class="details-path"><code>{{ project.path }}</code></p>
 
-      @if (project.hasSpringBootParent) {
-        <div class="spring-upgrade-section">
-          <button class="spring-manage-button" (click)="manageProperties.emit(project)">
-            <span class="icon">⚙️</span> Manage spring component versions
-          </button>
-          <button class="spring-button" (click)="upgradeSpringBoot.emit(project)">
-            <span class="icon">🍃</span> Upgrade Spring Boot
-          </button>
-          <button class="nexus-button" (click)="scanNexusIq.emit(project)">
-            <span class="icon">🔍</span> Nexus IQ Scan
-          </button>
+      @if (project.hasSpringBootParent || project.canScanNexusIq) {
+        <div class="project-actions">
+          @if (project.hasSpringBootParent) {
+            <div class="spring-upgrade-section">
+              <button class="spring-manage-button" (click)="manageProperties.emit(project)">
+                <span class="icon">⚙️</span> Manage spring component versions
+              </button>
+              <button class="spring-button" (click)="upgradeSpringBoot.emit(project)">
+                <span class="icon">🍃</span> Upgrade Spring Boot
+              </button>
+            </div>
+          }
+          @if (project.canScanNexusIq) {
+            <div class="nexus-scan-section">
+              <button class="nexus-button" (click)="scanNexusIq.emit(project)">
+                <span class="icon">🔍</span> Nexus IQ Scan
+              </button>
+            </div>
+          }
         </div>
       }
 

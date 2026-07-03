@@ -49,13 +49,14 @@ class FileSystemController(
             throw InvalidFolderException("Folder does not exist or is not a directory: ${request.path}")
         }
 
-        settingsService.saveSettings(path, request.maxScanDepth, request.nexusIqUrl, request.nexusIqUser, request.nexusIqPass, request.nexusIqAppIdPrefix)
+        settingsService.saveSettings(path, request.maxScanDepth, request.nexusIqUrl, request.nexusIqUser, request.nexusIqPass, request.nexusIqAppIdPrefix, request.nexusIqAppIdSuffix)
 
         return folderResponse(path, remembered = true, maxScanDepth = request.maxScanDepth)
     }
 
     private fun folderResponse(path: Path, remembered: Boolean, maxScanDepth: Int): FolderResponse {
         val normalizedPath = path.toAbsolutePath().normalize()
+        val settings = settingsService.loadSettings()
 
         if (!normalizedPath.exists() || !normalizedPath.isDirectory()) {
             throw InvalidFolderException("Folder does not exist or is not a directory: $normalizedPath")
@@ -85,6 +86,11 @@ class FileSystemController(
             parentPath = normalizedPath.parent?.absolutePathString(),
             remembered = remembered,
             maxScanDepth = maxScanDepth,
+            nexusIqUrl = settings.nexusIqUrl,
+            nexusIqUser = settings.nexusIqUser,
+            nexusIqPass = settings.nexusIqPass,
+            nexusIqAppIdPrefix = settings.nexusIqAppIdPrefix,
+            nexusIqAppIdSuffix = settings.nexusIqAppIdSuffix,
             children = children
         )
     }
@@ -95,6 +101,11 @@ data class FolderResponse(
     val parentPath: String?,
     val remembered: Boolean,
     val maxScanDepth: Int,
+    val nexusIqUrl: String? = null,
+    val nexusIqUser: String? = null,
+    val nexusIqPass: String? = null,
+    val nexusIqAppIdPrefix: String? = null,
+    val nexusIqAppIdSuffix: String? = null,
     val children: List<FolderItem>
 )
 
@@ -109,7 +120,8 @@ data class SaveSettingsRequest(
     val nexusIqUrl: String? = null,
     val nexusIqUser: String? = null,
     val nexusIqPass: String? = null,
-    val nexusIqAppIdPrefix: String? = null
+    val nexusIqAppIdPrefix: String? = null,
+    val nexusIqAppIdSuffix: String? = null
 )
 
 @ResponseStatus(HttpStatus.BAD_REQUEST)

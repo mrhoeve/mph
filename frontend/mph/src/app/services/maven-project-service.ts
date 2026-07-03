@@ -18,6 +18,7 @@ export interface ProjectAnalysis {
   error?: string;
   isRoot: boolean;
   nexusIqResult?: NexusIqResult;
+  canScanNexusIq: boolean;
 }
 
 export interface NexusIqResult {

@@ -18,9 +18,15 @@
           <label for="nexusIqUrl">Nexus IQ URL</label>
           <input id="nexusIqUrl" type="text" [ngModel]="nexusIqUrl()" (ngModelChange)="nexusIqUrl.set($event)" placeholder="https://iq.example.com">
         </div>
+      </div>
+      <div class="config-row">
         <div class="config-field">
-          <label for="nexusIqAppIdPrefix" title="Fixed part of the Application ID. Final ID will be Prefix:artifactId">App ID Prefix</label>
-          <input id="nexusIqAppIdPrefix" type="text" [ngModel]="nexusIqAppIdPrefix()" (ngModelChange)="nexusIqAppIdPrefix.set($event)" placeholder="e.g. my-org:">
+          <label for="nexusIqAppIdPrefix" title="Prefix for the Application ID">App ID Prefix</label>
+          <input id="nexusIqAppIdPrefix" type="text" [ngModel]="nexusIqAppIdPrefix()" (ngModelChange)="nexusIqAppIdPrefix.set($event)" placeholder="e.g. prefix-">
+        </div>
+        <div class="config-field">
+          <label for="nexusIqAppIdSuffix" title="Suffix for the Application ID">App ID Suffix</label>
+          <input id="nexusIqAppIdSuffix" type="text" [ngModel]="nexusIqAppIdSuffix()" (ngModelChange)="nexusIqAppIdSuffix.set($event)" placeholder="e.g. -suffix">
         </div>
       </div>
       <div class="config-row">

@@ -18,6 +18,31 @@ class NexusIqService(
     private val webClient = WebClient.builder().build()
     private val vulnerabilityCache = ConcurrentHashMap<String, List<NexusIqPolicyViolation>>()
 
+    fun extractNexusIqAppId(projectPath: String, settings: Settings): String? {
+        val projectDir = File(projectPath)
+        val jenkinsfile = File(projectDir, "Jenkinsfile")
+        
+        if (!jenkinsfile.exists()) return null
+
+        return try {
+            val content = jenkinsfile.readText()
+            val regex = Regex("(?:servicePipeline|libraryPipeline)\\s*\\(\\s*['\"]([^'\"]+)['\"]")
+            val match = regex.find(content)
+            val baseName = match?.groupValues?.get(1)
+            
+            if (baseName != null) {
+                val prefix = settings.nexusIqAppIdPrefix ?: ""
+                val suffix = settings.nexusIqAppIdSuffix ?: ""
+                prefix + baseName + suffix
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            logger.error("Failed to parse Jenkinsfile at ${jenkinsfile.absolutePath}", e)
+            null
+        }
+    }
+
     fun scan(projectPath: String): CompletableFuture<String> {
         val settings = settingsService.loadSettings()
         val projectDir = File(projectPath)
@@ -30,22 +55,16 @@ class NexusIqService(
         val serverUrl = settings.nexusIqUrl
         val user = settings.nexusIqUser
         val pass = settings.nexusIqPass
-        val appIdPrefix = settings.nexusIqAppIdPrefix ?: ""
+        
+        val applicationId = extractNexusIqAppId(projectPath, settings)
 
         if (serverUrl.isNullOrBlank()) {
             return CompletableFuture.completedFuture("Error: Nexus IQ Server URL not configured")
         }
-
-        // Try to extract artifactId from pom.xml
-        val artifactId = try {
-            val content = pomFile.readText()
-            val match = Regex("<artifactId>(.*?)</artifactId>").find(content)
-            match?.groupValues?.get(1) ?: projectDir.name
-        } catch (e: Exception) {
-            projectDir.name
+        
+        if (applicationId == null) {
+            return CompletableFuture.completedFuture("Nexus IQ scan skipped: No Jenkinsfile with servicePipeline or libraryPipeline found")
         }
-
-        val applicationId = appIdPrefix + artifactId
         
         logger.info("Triggering Nexus IQ scan for $projectPath with App ID: $applicationId")
 

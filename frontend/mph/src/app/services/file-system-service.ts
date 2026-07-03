@@ -12,6 +12,7 @@ export interface FolderResponse {
   nexusIqUser?: string;
   nexusIqPass?: string;
   nexusIqAppIdPrefix?: string;
+  nexusIqAppIdSuffix?: string;
   children: FolderItem[];
 }
 
@@ -39,14 +40,15 @@ export class FileSystemService {
     });
   }
 
-  saveBase(path: string, maxScanDepth: number, nexusIqUrl?: string, nexusIqUser?: string, nexusIqPass?: string, nexusIqAppIdPrefix?: string): Observable<FolderResponse> {
+  saveBase(path: string, maxScanDepth: number, nexusIqUrl?: string, nexusIqUser?: string, nexusIqPass?: string, nexusIqAppIdPrefix?: string, nexusIqAppIdSuffix?: string): Observable<FolderResponse> {
     return this.http.post<FolderResponse>(`${this.apiBaseUrl}/api/filesystem/base`, {
       path,
       maxScanDepth,
       nexusIqUrl,
       nexusIqUser,
       nexusIqPass,
-      nexusIqAppIdPrefix
+      nexusIqAppIdPrefix,
+      nexusIqAppIdSuffix
     });
   }
 }

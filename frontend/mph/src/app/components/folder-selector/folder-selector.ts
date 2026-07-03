@@ -20,6 +20,7 @@ export class FolderSelector implements OnInit {
   protected readonly nexusIqUser = signal<string | undefined>(undefined);
   protected readonly nexusIqPass = signal<string | undefined>(undefined);
   protected readonly nexusIqAppIdPrefix = signal<string | undefined>(undefined);
+  protected readonly nexusIqAppIdSuffix = signal<string | undefined>(undefined);
   protected readonly folders = signal<FolderItem[]>([]);
   protected readonly isLoading = signal(false);
 
@@ -47,6 +48,7 @@ export class FolderSelector implements OnInit {
     const iqUser = this.nexusIqUser();
     const iqPass = this.nexusIqPass();
     const iqAppIdPrefix = this.nexusIqAppIdPrefix();
+    const iqAppIdSuffix = this.nexusIqAppIdSuffix();
 
     if (!path) {
       return;
@@ -55,7 +57,7 @@ export class FolderSelector implements OnInit {
     this.isLoading.set(true);
     this.projectState.clearError();
 
-    const subscription = this.fileSystemService.saveBase(path, depth, iqUrl, iqUser, iqPass, iqAppIdPrefix).subscribe({
+    const subscription = this.fileSystemService.saveBase(path, depth, iqUrl, iqUser, iqPass, iqAppIdPrefix, iqAppIdSuffix).subscribe({
       next: (folder) => {
         this.updateState(folder);
         this.folderSelected.emit(folder.path);
@@ -98,6 +100,7 @@ export class FolderSelector implements OnInit {
     this.nexusIqUser.set(folder.nexusIqUser);
     this.nexusIqPass.set(folder.nexusIqPass);
     this.nexusIqAppIdPrefix.set(folder.nexusIqAppIdPrefix);
+    this.nexusIqAppIdSuffix.set(folder.nexusIqAppIdSuffix);
     this.folders.set(folder.children);
     this.isLoading.set(false);
   }
