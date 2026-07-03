@@ -17,5 +17,6 @@ export class ProjectDetailsComponent {
   @Output() manageProperties = new EventEmitter<ProjectAnalysis>();
   @Output() upgradeSpringBoot = new EventEmitter<ProjectAnalysis>();
   @Output() updateToLatest = new EventEmitter<ProjectAnalysis>();
+  @Output() scanNexusIq = new EventEmitter<ProjectAnalysis>();
 
 }

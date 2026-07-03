@@ -1,9 +1,12 @@
 import { Component, DestroyRef, inject, OnInit, output, signal } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { FileSystemService, FolderItem } from '../../services/file-system-service';
 import { ProjectStateService } from '../../services/project-state-service';
 
 @Component({
   selector: 'app-folder-selector',
+  standalone: true,
+  imports: [FormsModule],
   templateUrl: './folder-selector.html',
   styleUrl: './folder-selector.css',
 })
@@ -13,6 +16,10 @@ export class FolderSelector implements OnInit {
   protected readonly currentPath = signal('');
   protected readonly parentPath = signal<string | null>(null);
   protected readonly maxScanDepth = signal(3);
+  protected readonly nexusIqUrl = signal<string | undefined>(undefined);
+  protected readonly nexusIqUser = signal<string | undefined>(undefined);
+  protected readonly nexusIqPass = signal<string | undefined>(undefined);
+  protected readonly nexusIqAppIdPrefix = signal<string | undefined>(undefined);
   protected readonly folders = signal<FolderItem[]>([]);
   protected readonly isLoading = signal(false);
 
@@ -36,6 +43,10 @@ export class FolderSelector implements OnInit {
   protected useCurrentFolder(): void {
     const path = this.currentPath();
     const depth = this.maxScanDepth();
+    const iqUrl = this.nexusIqUrl();
+    const iqUser = this.nexusIqUser();
+    const iqPass = this.nexusIqPass();
+    const iqAppIdPrefix = this.nexusIqAppIdPrefix();
 
     if (!path) {
       return;
@@ -44,7 +55,7 @@ export class FolderSelector implements OnInit {
     this.isLoading.set(true);
     this.projectState.clearError();
 
-    const subscription = this.fileSystemService.saveBase(path, depth).subscribe({
+    const subscription = this.fileSystemService.saveBase(path, depth, iqUrl, iqUser, iqPass, iqAppIdPrefix).subscribe({
       next: (folder) => {
         this.updateState(folder);
         this.folderSelected.emit(folder.path);
@@ -83,6 +94,10 @@ export class FolderSelector implements OnInit {
     this.currentPath.set(folder.path);
     this.parentPath.set(folder.parentPath);
     this.maxScanDepth.set(folder.maxScanDepth);
+    this.nexusIqUrl.set(folder.nexusIqUrl);
+    this.nexusIqUser.set(folder.nexusIqUser);
+    this.nexusIqPass.set(folder.nexusIqPass);
+    this.nexusIqAppIdPrefix.set(folder.nexusIqAppIdPrefix);
     this.folders.set(folder.children);
     this.isLoading.set(false);
   }

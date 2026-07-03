@@ -49,7 +49,7 @@ class FileSystemController(
             throw InvalidFolderException("Folder does not exist or is not a directory: ${request.path}")
         }
 
-        settingsService.saveSettings(path, request.maxScanDepth)
+        settingsService.saveSettings(path, request.maxScanDepth, request.nexusIqUrl, request.nexusIqUser, request.nexusIqPass, request.nexusIqAppIdPrefix)
 
         return folderResponse(path, remembered = true, maxScanDepth = request.maxScanDepth)
     }
@@ -105,7 +105,11 @@ data class FolderItem(
 
 data class SaveSettingsRequest(
     val path: String,
-    val maxScanDepth: Int
+    val maxScanDepth: Int,
+    val nexusIqUrl: String? = null,
+    val nexusIqUser: String? = null,
+    val nexusIqPass: String? = null,
+    val nexusIqAppIdPrefix: String? = null
 )
 
 @ResponseStatus(HttpStatus.BAD_REQUEST)

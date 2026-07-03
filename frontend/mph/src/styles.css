@@ -256,6 +256,39 @@ p {
   margin-top: 0.25rem;
 }
 
+.security-violation-hint {
+  font-size: 0.75rem;
+  color: #ef4444;
+  font-weight: 600;
+  margin-top: 0.2rem;
+  background: #fef2f2;
+  padding: 0.2rem 0.4rem;
+  border-radius: 0.25rem;
+  border: 1px solid #fee2e2;
+}
+
+.security-banner {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 0.75rem;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.security-banner p {
+  color: #166534;
+  margin-bottom: 0 !important;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.security-banner .icon {
+  font-size: 1.25rem;
+}
+
 .overridden {
   background: rgba(16, 185, 129, 0.03);
 }

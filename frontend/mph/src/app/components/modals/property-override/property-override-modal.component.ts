@@ -25,8 +25,9 @@ export class PropertyOverrideModalComponent {
   }
 
   ngOnInit() {
-    this.overrideNewValue.set(this.prop().value);
-    this.overrideRemark.set(this.prop().comment || '');
+    const remediation = this.prop().nexusIqViolations?.[0]?.remediationVersion;
+    this.overrideNewValue.set(remediation || this.prop().value);
+    this.overrideRemark.set(this.prop().comment || (remediation ? 'Nexus IQ Security Fix' : ''));
   }
 
   onExecute(): void {

@@ -2,6 +2,7 @@ package nl.hicts.mph.services
 
 import io.mockk.every
 import io.mockk.mockk
+import nl.hicts.mph.models.Settings
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -12,7 +13,9 @@ class BulkUpdateCurrentVersionTest {
 
     private val mavenCommandService = mockk<MavenCommandService>()
     private val gitService = mockk<GitService>()
-    private val service = MavenProjectService(mavenCommandService, gitService)
+    private val nexusIqService = mockk<NexusIqService>()
+    private val settingsService = mockk<SettingsService>()
+    private val service = MavenProjectService(mavenCommandService, gitService, nexusIqService, settingsService)
 
     @TempDir
     lateinit var tempDir: Path

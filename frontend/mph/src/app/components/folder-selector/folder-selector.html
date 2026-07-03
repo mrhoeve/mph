@@ -1,15 +1,42 @@
 <div class="folder-selector">
   <div class="folder-selector__header">
-    <div class="current-path">
-      <span>Browsing</span>
-      <strong>{{ currentPath() }}</strong>
+    <div class="header-top">
+      <div class="current-path">
+        <span>Browsing</span>
+        <strong>{{ currentPath() }}</strong>
+      </div>
+
+      <div class="scan-depth">
+        <label for="maxScanDepth">Scan depth</label>
+        <input id="maxScanDepth" type="number" min="1" max="10" [value]="maxScanDepth()" (change)="onDepthChange($event)">
+      </div>
     </div>
 
-    <div class="scan-depth">
-      <label for="maxScanDepth">Scan depth</label>
-      <input id="maxScanDepth" type="number" min="1" max="10" [value]="maxScanDepth()" (change)="onDepthChange($event)">
+    <div class="nexus-iq-config">
+      <div class="config-row">
+        <div class="config-field">
+          <label for="nexusIqUrl">Nexus IQ URL</label>
+          <input id="nexusIqUrl" type="text" [ngModel]="nexusIqUrl()" (ngModelChange)="nexusIqUrl.set($event)" placeholder="https://iq.example.com">
+        </div>
+        <div class="config-field">
+          <label for="nexusIqAppIdPrefix" title="Fixed part of the Application ID. Final ID will be Prefix:artifactId">App ID Prefix</label>
+          <input id="nexusIqAppIdPrefix" type="text" [ngModel]="nexusIqAppIdPrefix()" (ngModelChange)="nexusIqAppIdPrefix.set($event)" placeholder="e.g. my-org:">
+        </div>
+      </div>
+      <div class="config-row">
+        <div class="config-field">
+          <label for="nexusIqUser">User / Token ID</label>
+          <input id="nexusIqUser" type="text" [ngModel]="nexusIqUser()" (ngModelChange)="nexusIqUser.set($event)">
+        </div>
+        <div class="config-field">
+          <label for="nexusIqPass">Pass / Token Secret</label>
+          <input id="nexusIqPass" type="password" [ngModel]="nexusIqPass()" (ngModelChange)="nexusIqPass.set($event)">
+        </div>
+      </div>
+      <div class="config-hint">
+        💡 To use a token, enter the <strong>Token ID</strong> in the User field and the <strong>Token Secret</strong> in the Pass field.
+      </div>
     </div>
-
 
     <button
       type="button"

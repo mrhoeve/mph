@@ -2,6 +2,7 @@ package nl.hicts.mph.services
 
 import nl.hicts.mph.models.*
 import org.apache.maven.model.Model
+import org.apache.maven.model.building.ModelBuildingResult
 import org.apache.poi.xssf.usermodel.XSSFWorkbook
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
@@ -19,7 +20,8 @@ data class ManagedProperty(
     val inheritedValue: String?,
     val source: String,
     val isOverridden: Boolean,
-    val comment: String? = null
+    val comment: String? = null,
+    val nexusIqViolations: List<NexusIqPolicyViolation> = emptyList()
 )
 
 data class TagInfo(
@@ -30,7 +32,9 @@ data class TagInfo(
 @Service
 class MavenProjectService(
     private val mavenCommandService: MavenCommandService,
-    private val gitService: GitService
+    private val gitService: GitService,
+    private val nexusIqService: NexusIqService,
+    private val settingsService: SettingsService
 ) {
     private val logger = LoggerFactory.getLogger(MavenProjectService::class.java)
 
@@ -271,13 +275,60 @@ class MavenProjectService(
         val usages = usageMap[Pair(groupId, artifactId)]?.filter { it.path != project.pomLocation.absolutePath } ?: emptyList()
         
         val hasSpringBootParent = isSpringBootProject(project, allProjects, projectMap)
-        // Find Spring Boot version from the hierarchy
         val springBootVersion = findSpringBootVersion(project, allProjects, projectMap)
 
-        val (managedProperties, error) = if (hasSpringBootParent && resolveProps) {
-            resolveManagedPropertiesWithError(project, allProjects)
-        } else {
-            Pair(emptyList<ManagedProperty>(), null)
+        var managedProperties = emptyList<ManagedProperty>()
+        var error: String? = null
+        var nexusIqResult: NexusIqResult? = null
+        var effectiveModel: Model? = null
+
+        if (resolveProps) {
+            try {
+                val result = modelResolver.resolveModelResult(project.pomLocation)
+                effectiveModel = result.effectiveModel
+                managedProperties = resolveManagedPropertiesFromResult(project, result)
+                
+                val settings = settingsService.loadSettings()
+                if (settings.nexusIqUrl.isNullOrBlank()) {
+                    nexusIqResult = NexusIqResult(
+                        applicationPublicId = artifactId,
+                        message = "Nexus IQ not configured"
+                    )
+                } else {
+                    val violations = getProjectVulnerabilitiesFromModel(effectiveModel)
+                    nexusIqResult = NexusIqResult(
+                        applicationPublicId = artifactId,
+                        policyViolations = violations
+                    )
+                }
+            } catch (e: Exception) {
+                error = e.message ?: e.toString()
+                // Fallback to raw properties if effective resolution fails
+                val rawProps = project.model.properties
+                managedProperties = rawProps.stringPropertyNames()
+                    .map { name ->
+                        ManagedProperty(
+                            name = name,
+                            value = rawProps.getProperty(name) ?: "",
+                            inheritedValue = null,
+                            source = "Local POM",
+                            isOverridden = true,
+                            comment = findCommentForProperty(project.pomLocation, name)
+                        )
+                    }.sortedBy { it.name }
+            }
+        }
+
+        // Map violations back to properties
+        val propertiesWithViolations = managedProperties.map { prop ->
+            val violationsForProp = nexusIqResult?.policyViolations?.filter { violation ->
+                val parts = violation.componentIdentifier.split(":")
+                val vArtifactId = parts.getOrNull(2)
+                val vVersion = parts.getOrNull(3)
+                
+                (vVersion == prop.value) && (prop.name.contains(vArtifactId ?: "___") || (vArtifactId?.contains(prop.name.replace(".version", "")) == true))
+            } ?: emptyList()
+            if (violationsForProp.isNotEmpty()) prop.copy(nexusIqViolations = violationsForProp) else prop
         }
 
         return ProjectAnalysis(
@@ -289,12 +340,24 @@ class MavenProjectService(
             usages = usages,
             hasSpringBootParent = hasSpringBootParent,
             springBootVersion = springBootVersion,
-            managedProperties = managedProperties,
+            managedProperties = propertiesWithViolations,
             latestTag = null,
             latestTagInfo = null,
             error = error,
-            isRoot = isRoot
+            isRoot = isRoot,
+            nexusIqResult = nexusIqResult
         )
+    }
+
+    private fun getProjectVulnerabilitiesFromModel(model: Model): List<NexusIqPolicyViolation> {
+        val components = mutableListOf<Triple<String, String, String>>()
+        model.dependencies?.forEach { dep ->
+            components.add(Triple(dep.groupId, dep.artifactId, dep.version))
+        }
+        model.dependencyManagement?.dependencies?.forEach { dep ->
+            components.add(Triple(dep.groupId, dep.artifactId, dep.version))
+        }
+        return nexusIqService.getVulnerabilitiesBatch(components).distinctBy { it.componentIdentifier }
     }
 
     private fun findSpringBootVersion(project: MavenProject, allProjects: List<MavenProject>, projectMap: Map<String, MavenProject>): String? {
@@ -316,28 +379,7 @@ class MavenProjectService(
         return null
     }
 
-    private fun resolveManagedPropertiesWithError(project: MavenProject, allProjects: List<MavenProject>): Pair<List<ManagedProperty>, String?> {
-        return try {
-            Pair(resolveManagedProperties(project, allProjects), null)
-        } catch (e: Exception) {
-            val rawProps = project.model.properties
-            val managedProperties = rawProps.stringPropertyNames()
-                .map { name ->
-                    ManagedProperty(
-                        name = name,
-                        value = rawProps.getProperty(name) ?: "",
-                        inheritedValue = null,
-                        source = "Local POM",
-                        isOverridden = true,
-                        comment = findCommentForProperty(project.pomLocation, name)
-                    )
-                }.sortedBy { it.name }
-            Pair(managedProperties, e.message ?: e.toString())
-        }
-    }
-
-    private fun resolveManagedProperties(project: MavenProject, allProjects: List<MavenProject>): List<ManagedProperty> {
-        val result = modelResolver.resolveModelResult(project.pomLocation)
+    private fun resolveManagedPropertiesFromResult(project: MavenProject, result: ModelBuildingResult): List<ManagedProperty> {
         val effectiveModel = result.effectiveModel
         val rawProps = project.model.properties
         
@@ -595,8 +637,46 @@ class MavenProjectService(
         }
         modelResolver = MavenModelResolver(workspaceMap)
 
-        val (props, error) = resolveManagedPropertiesWithError(project, allProjects)
-        return props
+        var projectModelResult: ModelBuildingResult? = null
+        val managedProperties = try {
+            projectModelResult = modelResolver.resolveModelResult(project.pomLocation)
+            resolveManagedPropertiesFromResult(project, projectModelResult)
+        } catch (e: Exception) {
+            val rawProps = project.model.properties
+            rawProps.stringPropertyNames()
+                .map { name ->
+                    ManagedProperty(
+                        name = name,
+                        value = rawProps.getProperty(name) ?: "",
+                        inheritedValue = null,
+                        source = "Local POM",
+                        isOverridden = true,
+                        comment = findCommentForProperty(project.pomLocation, name)
+                    )
+                }.sortedBy { it.name }
+        }
+
+        val settings = settingsService.loadSettings()
+        if (settings.nexusIqUrl.isNullOrBlank()) {
+            return managedProperties
+        }
+
+        val violations = if (projectModelResult != null) getProjectVulnerabilitiesFromModel(projectModelResult!!.effectiveModel) else emptyList()
+
+        if (violations.isEmpty()) {
+            return managedProperties
+        }
+
+        return managedProperties.map { prop ->
+            val violationsForProp = violations.filter { violation ->
+                val parts = violation.componentIdentifier.split(":")
+                val vArtifactId = parts.getOrNull(2)
+                val vVersion = parts.getOrNull(3)
+                
+                (vVersion == prop.value) && (prop.name.contains(vArtifactId ?: "___") || (vArtifactId?.contains(prop.name.replace(".version", "")) == true))
+            }
+            if (violationsForProp.isNotEmpty()) prop.copy(nexusIqViolations = violationsForProp) else prop
+        }
     }
 
     fun getBuildOrder(basePath: Path, maxDepth: Int): List<ProjectAnalysis> {
@@ -775,7 +855,8 @@ data class ProjectAnalysis(
     var latestTag: String? = null,
     var latestTagInfo: TagInfo? = null,
     val error: String? = null,
-    val isRoot: Boolean = false
+    val isRoot: Boolean = false,
+    val nexusIqResult: NexusIqResult? = null
 )
 
 data class ProjectUsage(

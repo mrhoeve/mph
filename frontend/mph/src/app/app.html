@@ -67,7 +67,8 @@
         (updateAllModules)="updateAllModulesAndUsages($event)"
         (manageProperties)="openVersionsModal($event)"
         (upgradeSpringBoot)="isSpringBootModalOpen.set(true)"
-        (updateToLatest)="updateToLatest($event)">
+        (updateToLatest)="updateToLatest($event)"
+        (scanNexusIq)="executeNexusIqScan($event)">
       </app-project-details>
     </div>
   }

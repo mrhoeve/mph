@@ -17,6 +17,22 @@ export interface ProjectAnalysis {
   latestTagInfo?: TagInfo;
   error?: string;
   isRoot: boolean;
+  nexusIqResult?: NexusIqResult;
+}
+
+export interface NexusIqResult {
+  applicationPublicId: string;
+  reportHtmlUrl?: string;
+  policyViolations: NexusIqPolicyViolation[];
+  message?: string;
+}
+
+export interface NexusIqPolicyViolation {
+  componentIdentifier: string;
+  threatLevel: number;
+  policyName: string;
+  constraintViolations: string[];
+  remediationVersion?: string;
 }
 
 export interface ManagedProperty {
@@ -26,6 +42,7 @@ export interface ManagedProperty {
   source: string;
   isOverridden: boolean;
   comment?: string;
+  nexusIqViolations?: NexusIqPolicyViolation[];
 }
 
 export interface ProjectUsage {
@@ -125,5 +142,9 @@ export class MavenProjectService {
 
   getExcelUrl(): string {
     return `${this.apiBaseUrl}/api/projects/export-excel`;
+  }
+
+  scanNexusIq(path: string): Observable<string> {
+    return this.http.post<string>(`${this.apiBaseUrl}/api/nexus-iq/scan`, { path });
   }
 }

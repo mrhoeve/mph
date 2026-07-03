@@ -10,44 +10,51 @@ class MavenCommandService {
     private val logger by LoggerDelegate()
 
     fun runInstallInBackground(projectPom: File) {
-        val projectDir = projectPom.parentFile
+        runMavenCommandInBackground(projectPom.parentFile, listOf("install", "-DskipTests"), "install")
+    }
+
+    fun runMavenCommandInBackground(projectDir: File, args: List<String>, label: String = "command"): CompletableFuture<Int> {
         val mvnw = findMvnw(projectDir) ?: "mvn"
         
         val isWindows = System.getProperty("os.name").lowercase().contains("win")
-        val command = if (mvnw.contains("mvnw")) {
-            if (isWindows) listOf("cmd.exe", "/c", mvnw, "install", "-DskipTests")
-            else listOf(mvnw, "install", "-DskipTests")
+        val baseCommand = if (mvnw.contains("mvnw")) {
+            if (isWindows) listOf("cmd.exe", "/c", mvnw)
+            else listOf(mvnw)
         } else {
-            if (isWindows) listOf("cmd.exe", "/c", "mvn", "install", "-DskipTests")
-            else listOf("mvn", "install", "-DskipTests")
+            if (isWindows) listOf("cmd.exe", "/c", "mvn")
+            else listOf("mvn")
         }
+        
+        val command = baseCommand + args
 
+        val future = CompletableFuture<Int>()
         CompletableFuture.runAsync {
             try {
-                logger.info("Running command: ${command.joinToString(" ")} in ${projectDir.absolutePath}")
+                logger.info("Running $label: ${command.joinToString(" ")} in ${projectDir.absolutePath}")
                 val process = ProcessBuilder(command)
                     .directory(projectDir)
                     .redirectErrorStream(true)
                     .start()
                 
-                // Read output to avoid blocking
                 process.inputStream.bufferedReader().use { reader ->
                     reader.forEachLine { line ->
-                        // Only log interesting lines or log all as debug
                         if (line.contains("[ERROR]") || line.contains("BUILD SUCCESS") || line.contains("BUILD FAILURE")) {
-                            logger.info("[Maven] $line")
+                            logger.info("[Maven $label] $line")
                         } else {
-                            logger.debug("[Maven] $line")
+                            logger.debug("[Maven $label] $line")
                         }
                     }
                 }
                 
                 val exitCode = process.waitFor()
-                logger.info("Maven command finished with exit code $exitCode for ${projectPom.absolutePath}")
+                logger.info("Maven $label finished with exit code $exitCode for ${projectDir.absolutePath}")
+                future.complete(exitCode)
             } catch (e: Exception) {
-                logger.error("Failed to run Maven command for ${projectPom.absolutePath}", e)
+                logger.error("Failed to run Maven $label for ${projectDir.absolutePath}", e)
+                future.completeExceptionally(e)
             }
         }
+        return future
     }
 
     private fun findMvnw(dir: File): String? {

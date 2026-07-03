@@ -309,4 +309,21 @@ export class App implements OnInit {
     });
     this.destroyRef.onDestroy(() => subscription.unsubscribe());
   }
+
+  protected executeNexusIqScan(project: ProjectAnalysis): void {
+    this.projectState.isScanning.set(true);
+    this.projectState.scanningMessage.set(`Triggering Nexus IQ scan for ${project.artifactId}...`);
+    const subscription = this.mavenProjectService.scanNexusIq(project.path).subscribe({
+      next: (msg) => {
+        console.log(msg);
+        this.projectState.scan(); // Refresh projects to get potential new results
+      },
+      error: (err) => {
+        this.projectState.setError(`Failed to trigger Nexus IQ scan: ${err.message || err}`);
+        this.projectState.isScanning.set(false);
+      },
+      complete: () => this.projectState.isScanning.set(false)
+    });
+    this.destroyRef.onDestroy(() => subscription.unsubscribe());
+  }
 }

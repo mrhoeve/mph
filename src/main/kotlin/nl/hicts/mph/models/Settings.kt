@@ -4,5 +4,9 @@ import java.nio.file.Path
 
 data class Settings(
     val basePath: Path?,
-    val maxScanDepth: Int
+    val maxScanDepth: Int,
+    val nexusIqUrl: String? = null,
+    val nexusIqUser: String? = null,
+    val nexusIqPass: String? = null,
+    val nexusIqAppIdPrefix: String? = null
 )

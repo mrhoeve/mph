@@ -35,6 +35,40 @@
           <button class="spring-button" (click)="upgradeSpringBoot.emit(project)">
             <span class="icon">🍃</span> Upgrade Spring Boot
           </button>
+          <button class="nexus-button" (click)="scanNexusIq.emit(project)">
+            <span class="icon">🔍</span> Nexus IQ Scan
+          </button>
+        </div>
+      }
+
+      @if (project.nexusIqResult) {
+        <div class="details-section nexus-iq-section">
+          <h3>Nexus IQ Security Analysis</h3>
+          @if (project.nexusIqResult.message) {
+            <p class="nexus-message">{{ project.nexusIqResult.message }}</p>
+          } @else if (project.nexusIqResult.policyViolations.length > 0) {
+            <ul class="violation-list">
+              @for (violation of project.nexusIqResult.policyViolations; track violation.componentIdentifier) {
+                <li class="violation-item" [class.threat-high]="violation.threatLevel >= 7">
+                  <div class="violation-header">
+                    <span class="threat-badge">{{ violation.threatLevel }}</span>
+                    <strong>{{ violation.componentIdentifier }}</strong>
+                  </div>
+                  <div class="violation-details">
+                    <p>Policy: {{ violation.policyName }}</p>
+                    <p>Issues: {{ violation.constraintViolations.join(', ') }}</p>
+                    @if (violation.remediationVersion) {
+                      <p class="remediation-hint">
+                        💡 Hint: Upgrade to <strong>{{ violation.remediationVersion }}</strong>
+                      </p>
+                    }
+                  </div>
+                </li>
+              }
+            </ul>
+          } @else {
+            <p>✅ No policy violations found.</p>
+          }
         </div>
       }
 

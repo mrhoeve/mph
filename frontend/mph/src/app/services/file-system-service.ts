@@ -8,6 +8,10 @@ export interface FolderResponse {
   parentPath: string | null;
   remembered: boolean;
   maxScanDepth: number;
+  nexusIqUrl?: string;
+  nexusIqUser?: string;
+  nexusIqPass?: string;
+  nexusIqAppIdPrefix?: string;
   children: FolderItem[];
 }
 
@@ -35,10 +39,14 @@ export class FileSystemService {
     });
   }
 
-  saveBase(path: string, maxScanDepth: number): Observable<FolderResponse> {
+  saveBase(path: string, maxScanDepth: number, nexusIqUrl?: string, nexusIqUser?: string, nexusIqPass?: string, nexusIqAppIdPrefix?: string): Observable<FolderResponse> {
     return this.http.post<FolderResponse>(`${this.apiBaseUrl}/api/filesystem/base`, {
       path,
-      maxScanDepth
+      maxScanDepth,
+      nexusIqUrl,
+      nexusIqUser,
+      nexusIqPass,
+      nexusIqAppIdPrefix
     });
   }
 }

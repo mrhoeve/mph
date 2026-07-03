@@ -61,6 +61,14 @@
                   @if (prop.isOverridden && prop.inheritedValue) {
                     <div class="inherited-value" [title]="'Inherited: ' + prop.inheritedValue">Inherited: {{ prop.inheritedValue }}</div>
                   }
+                  @if (prop.nexusIqViolations && prop.nexusIqViolations.length > 0) {
+                    <div class="security-violation-hint" title="Security vulnerability found">
+                      ⚠️ Vulnerable! 
+                      @if (prop.nexusIqViolations[0].remediationVersion) {
+                        (Use {{ prop.nexusIqViolations[0].remediationVersion }})
+                      }
+                    </div>
+                  }
                 </td>
                 <td>
                   <span class="source-badge" [class.source-local]="prop.source === 'Local POM'">

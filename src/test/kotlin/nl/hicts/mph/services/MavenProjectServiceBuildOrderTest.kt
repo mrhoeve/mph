@@ -1,7 +1,9 @@
 package nl.hicts.mph.services
 
+import io.mockk.every
 import io.mockk.mockk
 import nl.hicts.mph.models.MavenProject
+import nl.hicts.mph.models.Settings
 import org.apache.maven.model.Dependency
 import org.apache.maven.model.Model
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -14,11 +16,17 @@ class MavenProjectServiceBuildOrderTest {
 
     private val mavenCommandService = mockk<MavenCommandService>()
     private val gitService = mockk<GitService>()
-    private val service = MavenProjectService(mavenCommandService, gitService)
+    private val nexusIqService = mockk<NexusIqService>()
+    private val settingsService = mockk<SettingsService>()
+    private val service = MavenProjectService(mavenCommandService, gitService, nexusIqService, settingsService)
 
     @Test
     fun `should determine correct build order`() {
-        io.mockk.every { gitService.getLatestTagInfo(any()) } returns null
+        every { settingsService.loadSettings() } returns Settings(
+            basePath = Paths.get("src/test/resources/test-data"),
+            maxScanDepth = 3
+        )
+        every { gitService.getLatestTagInfo(any()) } returns null
         // Project A (no dependencies)
         val modelA = Model().apply {
             groupId = "com.example"
