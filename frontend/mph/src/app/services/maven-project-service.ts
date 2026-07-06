@@ -82,10 +82,13 @@ export interface SbomComponent {
   type: string | null;
   description?: string;
   licenses: string[];
+  dependencies: SbomComponent[];
 }
 
 export interface SbomDetails {
   components: SbomComponent[];
+  rawXml: string;
+  rawJson: string;
 }
 
 export interface NexusIqScanResponse {

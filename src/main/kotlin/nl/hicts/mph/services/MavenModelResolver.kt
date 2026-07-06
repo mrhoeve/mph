@@ -52,6 +52,11 @@ class MavenModelResolver(private val workspaceProjects: Map<String, File> = empt
         val session = MavenRepositorySystemUtils.newSession()
         val localRepo = LocalRepository(localRepositoryPath)
         session.localRepositoryManager = system.newLocalRepositoryManager(session, localRepo)
+        
+        // Default selectors from MavenRepositorySystemUtils exclude provided and test transitive dependencies.
+        // For SBOM we want to include more, so we can customize or remove selectors.
+        // But for now, let's keep it mostly as is and see.
+        
         return session
     }
 
@@ -97,7 +102,7 @@ class MavenModelResolver(private val workspaceProjects: Map<String, File> = empt
         return modelBuildingResult.effectiveModel
     }
 
-    fun resolveDependencies(groupId: String, artifactId: String, version: String): List<Artifact> {
+    fun resolveDependencyTree(groupId: String, artifactId: String, version: String): org.eclipse.aether.graph.DependencyNode {
         val artifact = DefaultArtifact(groupId, artifactId, "", "pom", version)
         
         val descriptorRequest = ArtifactDescriptorRequest(artifact, remoteRepositories, null)
@@ -112,7 +117,40 @@ class MavenModelResolver(private val workspaceProjects: Map<String, File> = empt
         val dependencyRequest = DependencyRequest(collectRequest, null)
         val dependencyResult = repositorySystem.resolveDependencies(session, dependencyRequest)
         
-        return dependencyResult.artifactResults.map { it.artifact }
+        return dependencyResult.root
+    }
+
+    fun resolveDependencies(groupId: String, artifactId: String, version: String): List<Artifact> {
+        return resolveAllDependencies(groupId, artifactId, version).map { it.artifact }
+    }
+
+    fun resolveAllDependencies(groupId: String, artifactId: String, version: String): List<AetherDependency> {
+        val artifact = DefaultArtifact(groupId, artifactId, "", "pom", version)
+        
+        val descriptorRequest = ArtifactDescriptorRequest(artifact, remoteRepositories, null)
+        val descriptorResult = repositorySystem.readArtifactDescriptor(session, descriptorRequest)
+        
+        val collectRequest = CollectRequest()
+        collectRequest.root = AetherDependency(DefaultArtifact(groupId, artifactId, "", "jar", version), "")
+        collectRequest.dependencies = descriptorResult.dependencies
+        collectRequest.managedDependencies = descriptorResult.managedDependencies
+        collectRequest.repositories = remoteRepositories
+        
+        val dependencyRequest = DependencyRequest(collectRequest, null)
+        val dependencyResult = repositorySystem.resolveDependencies(session, dependencyRequest)
+        
+        val result = mutableListOf<AetherDependency>()
+        fun flatten(node: org.eclipse.aether.graph.DependencyNode) {
+            node.dependency?.let { result.add(it) }
+            node.children.forEach { flatten(it) }
+        }
+        flatten(dependencyResult.root)
+        
+        return result.filter { it.artifact.groupId != groupId || it.artifact.artifactId != artifactId }
+            .distinctBy { 
+                val a = it.artifact
+                "${a.groupId}:${a.artifactId}:${a.version}"
+            }
     }
 
     private class RepositoryModelResolver : ModelResolver {

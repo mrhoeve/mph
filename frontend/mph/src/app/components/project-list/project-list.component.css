@@ -102,7 +102,7 @@
 
 .project-list {
   flex: 1;
-  overflow-y: auto;
+  overflow: auto;
   padding: 0.5rem 0;
 }
 

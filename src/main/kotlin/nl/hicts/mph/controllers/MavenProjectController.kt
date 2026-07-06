@@ -16,9 +16,12 @@ import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
+import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import java.util.Properties
 import kotlin.io.path.exists
 
@@ -157,10 +160,31 @@ class MavenProjectController(
         val extension = if (format.lowercase() == "xml") "xml" else "json"
         val contentType = if (format.lowercase() == "xml") MediaType.APPLICATION_XML else MediaType.APPLICATION_JSON
 
+        val pomFile = File(path)
+        val artifactId = try {
+            val settings = settingsService.loadSettings()
+            val basePath = settings.basePath ?: throw RuntimeException("Base path not set")
+            // Try to find the project in analyzed projects
+            val projects = mavenProjectService.scanAndAnalyze(basePath, settings.maxScanDepth)
+            val project = projects.flatMap { p -> flattenAnalysis(p) }.find { 
+                Paths.get(it.path).toAbsolutePath().normalize().toString() == Paths.get(path).toAbsolutePath().normalize().toString()
+            }
+            project?.artifactId ?: pomFile.parentFile.name
+        } catch (e: Exception) {
+            pomFile.parentFile.name
+        }
+        
+        val timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyMMddHHmmss"))
+        val filename = "$artifactId-$timestamp.$extension"
+
         return ResponseEntity.ok()
-            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=bom.$extension")
+            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=$filename")
             .contentType(contentType)
             .body(sbom.toByteArray())
+    }
+
+    private fun flattenAnalysis(project: ProjectAnalysis): List<ProjectAnalysis> {
+        return listOf(project) + project.modules.flatMap { flattenAnalysis(it) }
     }
 }
 
