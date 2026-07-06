@@ -7,16 +7,18 @@
 Managing dozens of microservices and shared libraries can be a daunting task. MPH lightens this burden by providing a centralized dashboard to:
 
 - **Analyze Dependencies**: Visualize the relationships between your projects and modules with interactive dependency graphs (powered by Mermaid).
-- **Security Scanning**: Scan your projects for vulnerabilities using Nexus IQ integration, with direct links to full security reports.
+- **Security Scanning**: Scan your projects for vulnerabilities using Nexus IQ integration, with direct links to specific security reports for each scan.
+- **Software Bill of Materials (SBOM)**: Generate and view standard-compliant SBOMs (CycloneDX 1.5) for your projects. Explore all direct and transitive dependencies in an interactive, searchable view.
 - **Determine Build Order**: Automatically calculate the correct topological build order for your projects, identifying which can be built concurrently.
 - **Bulk Version Updates**: Effortlessly update version properties across multiple projects and their dependent usages. Support for manual version selection and automatic discovery of the latest Git tags ensures your ecosystem stays synchronized.
 - **Maven Build Execution**: Run Maven builds directly from the app with support for parallel execution, real-time log streaming, and status tracking.
-- **Git Integration**: Automatically handle branch creation and management during bulk updates, and keep your local branches in sync with `develop`.
+- **Git Integration**: Automatically handle branch creation and management during bulk updates. Visualize how many commits your branch is ahead or behind `develop` and easily merge `develop` into your work branch.
 - **Spring Boot Upgrades**: Discover and apply newer Spring Boot versions across your projects.
 
 ## Key Features
 
-- **Nexus IQ Security Analysis**: Integrated vulnerability scanning with Nexus IQ. Identify security risks in your dependencies and receive specific remediation versions.
+- **Nexus IQ Security Analysis**: Integrated vulnerability scanning with Nexus IQ. Identify security risks in your dependencies and receive specific remediation versions. The app automatically resolves internal IDs to link directly to the correct report.
+- **Standard-Compliant SBOMs**: Export your project's Software Bill of Materials in CycloneDX JSON or XML formats, ensuring compliance with security standards.
 - **Smart Remediation**: Proactively warns about vulnerable versions when performing property overrides and suggests safe upgrade paths.
 - **Excel Export with Concurrency**: Export your build order to Excel, complete with concurrent build steps and dependency mapping to optimize your CI/CD pipelines.
 - **Jenkinsfile-Driven Scanning**: Nexus IQ scans are intelligently targeted at projects containing valid `Jenkinsfile` pipeline definitions.
