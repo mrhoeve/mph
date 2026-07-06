@@ -33,7 +33,7 @@ class MavenModelResolver(private val workspaceProjects: Map<String, File> = empt
 
     private val modelBuilder: ModelBuilder = DefaultModelBuilderFactory().newInstance()
     private val localRepositoryPath = File(System.getProperty("user.home"), ".m2/repository")
-    
+
     private val repositorySystem: RepositorySystem = newRepositorySystem()
     private val session: RepositorySystemSession = newSession(repositorySystem)
     private val remoteRepositories = mutableListOf(
@@ -52,11 +52,42 @@ class MavenModelResolver(private val workspaceProjects: Map<String, File> = empt
         val session = MavenRepositorySystemUtils.newSession()
         val localRepo = LocalRepository(localRepositoryPath)
         session.localRepositoryManager = system.newLocalRepositoryManager(session, localRepo)
-        
-        // Default selectors from MavenRepositorySystemUtils exclude provided and test transitive dependencies.
-        // For SBOM we want to include more, so we can customize or remove selectors.
-        // But for now, let's keep it mostly as is and see.
-        
+
+        if (workspaceProjects.isNotEmpty()) {
+            session.setWorkspaceReader(object : org.eclipse.aether.repository.WorkspaceReader {
+                override fun getRepository(): org.eclipse.aether.repository.WorkspaceRepository {
+                    return org.eclipse.aether.repository.WorkspaceRepository("ide", workspaceProjects.keys)
+                }
+
+                override fun findArtifact(artifact: Artifact): File? {
+                    val key = "${artifact.groupId}:${artifact.artifactId}:${artifact.version}"
+                    val pomFile = workspaceProjects[key]
+                    if (pomFile != null) {
+                        if (artifact.extension == "pom") {
+                            return pomFile
+                        }
+                        // For the purpose of dependency resolution in this tool,
+                        // we can return the POM file even if a JAR is requested,
+                        // if the JAR doesn't exist. Aether might be happy enough
+                        // to get something that exists to satisfy the "resolved" state.
+                        // OR better, we just return the POM if it's all we have.
+                        val jarFile = File(pomFile.parentFile, "target/${artifact.artifactId}-${artifact.version}.jar")
+                        if (jarFile.exists()) {
+                            return jarFile
+                        }
+                        // Fallback to POM even for JAR requests if we are in workspace
+                        return pomFile
+                    }
+                    return null
+                }
+
+                override fun findVersions(artifact: Artifact): List<String> {
+                    val key = "${artifact.groupId}:${artifact.artifactId}:${artifact.version}"
+                    return if (workspaceProjects.containsKey(key)) listOf(artifact.version) else emptyList()
+                }
+            })
+        }
+
         return session
     }
 
@@ -106,16 +137,46 @@ class MavenModelResolver(private val workspaceProjects: Map<String, File> = empt
         val artifact = DefaultArtifact(groupId, artifactId, "", "pom", version)
         
         val descriptorRequest = ArtifactDescriptorRequest(artifact, remoteRepositories, null)
-        val descriptorResult = repositorySystem.readArtifactDescriptor(session, descriptorRequest)
+        val descriptorResult = try {
+            repositorySystem.readArtifactDescriptor(session, descriptorRequest)
+        } catch (e: Exception) {
+            throw RuntimeException("readArtifactDescriptor failed for $groupId:$artifactId:$version: ${e.message}", e)
+        }
         
+        val aetherDependencies = descriptorResult.dependencies.toMutableList()
+        val managedDependencies = descriptorResult.managedDependencies.toMutableList()
+        
+        if (aetherDependencies.isEmpty()) {
+            val model = try { resolveModel(groupId, artifactId, version) } catch (e: Exception) { null }
+            if (model != null && model.dependencies.isNotEmpty()) {
+                model.dependencies.forEach { dep ->
+                    val aetherDep = AetherDependency(
+                        DefaultArtifact(
+                            dep.groupId, 
+                            dep.artifactId, 
+                            dep.classifier ?: "", 
+                            dep.type ?: "jar", 
+                            dep.version ?: ""
+                        ),
+                        dep.scope ?: "compile"
+                    )
+                    aetherDependencies.add(aetherDep)
+                }
+            }
+        }
+
         val collectRequest = CollectRequest()
         collectRequest.root = AetherDependency(DefaultArtifact(groupId, artifactId, "", "jar", version), "compile")
-        collectRequest.dependencies = descriptorResult.dependencies
-        collectRequest.managedDependencies = descriptorResult.managedDependencies
+        collectRequest.dependencies = aetherDependencies
+        collectRequest.managedDependencies = managedDependencies
         collectRequest.repositories = remoteRepositories
         
         val dependencyRequest = DependencyRequest(collectRequest, null)
-        val dependencyResult = repositorySystem.resolveDependencies(session, dependencyRequest)
+        val dependencyResult = try {
+            repositorySystem.resolveDependencies(session, dependencyRequest)
+        } catch (e: Exception) {
+            throw RuntimeException("resolveDependencies failed for $groupId:$artifactId:$version: ${e.message}", e)
+        }
         
         return dependencyResult.root
     }
@@ -126,28 +187,28 @@ class MavenModelResolver(private val workspaceProjects: Map<String, File> = empt
 
     fun resolveAllDependencies(groupId: String, artifactId: String, version: String): List<AetherDependency> {
         val artifact = DefaultArtifact(groupId, artifactId, "", "pom", version)
-        
+
         val descriptorRequest = ArtifactDescriptorRequest(artifact, remoteRepositories, null)
         val descriptorResult = repositorySystem.readArtifactDescriptor(session, descriptorRequest)
-        
+
         val collectRequest = CollectRequest()
         collectRequest.root = AetherDependency(DefaultArtifact(groupId, artifactId, "", "jar", version), "")
         collectRequest.dependencies = descriptorResult.dependencies
         collectRequest.managedDependencies = descriptorResult.managedDependencies
         collectRequest.repositories = remoteRepositories
-        
+
         val dependencyRequest = DependencyRequest(collectRequest, null)
         val dependencyResult = repositorySystem.resolveDependencies(session, dependencyRequest)
-        
+
         val result = mutableListOf<AetherDependency>()
         fun flatten(node: org.eclipse.aether.graph.DependencyNode) {
             node.dependency?.let { result.add(it) }
             node.children.forEach { flatten(it) }
         }
         flatten(dependencyResult.root)
-        
+
         return result.filter { it.artifact.groupId != groupId || it.artifact.artifactId != artifactId }
-            .distinctBy { 
+            .distinctBy {
                 val a = it.artifact
                 "${a.groupId}:${a.artifactId}:${a.version}"
             }
@@ -187,7 +248,7 @@ class MavenModelResolver(private val workspaceProjects: Map<String, File> = empt
 
             val artifact = DefaultArtifact(groupId, artifactId, "", "pom", version)
             val request = ArtifactRequest(artifact, repositories, null)
-            
+
             return try {
                 val result = system.resolveArtifact(session, request)
                 FileModelSource(result.artifact.file)
