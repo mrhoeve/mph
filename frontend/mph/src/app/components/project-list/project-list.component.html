@@ -63,6 +63,16 @@
             @if (item.hasSpringBootParent) {
               <span class="spring-boot-icon" title="Spring Boot Project">🍃</span>
             }
+            @if (item.gitStatus) {
+              <span class="git-info" [title]="'Branch: ' + item.gitStatus.branchName">
+                @if (item.gitStatus.behindCount > 0) {
+                  <span class="git-status-icon behind" [title]="item.gitStatus.behindCount + ' commits behind develop'">⬇️{{item.gitStatus.behindCount}}</span>
+                }
+                @if (item.gitStatus.aheadCount > 0) {
+                  <span class="git-status-icon ahead" [title]="item.gitStatus.aheadCount + ' commits ahead of develop'">⬆️{{item.gitStatus.aheadCount}}</span>
+                }
+              </span>
+            }
           </span>
         </div>
         @if (item.modules.length > 0 && isExpanded(item)) {

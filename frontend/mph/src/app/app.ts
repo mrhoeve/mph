@@ -135,9 +135,11 @@ export class App implements OnInit {
     const selectedPaths = Array.from(this.projectState.selectedRootProjects());
     if (selectedPaths.length === 0) return;
 
+    const mergeDevelop = window.confirm('Do you also want to merge develop into the current branch?');
+
     this.projectState.scanningMessage.set('Syncing develop branch...');
     this.projectState.isScanning.set(true);
-    const subscription = this.mavenProjectService.syncDevelop(selectedPaths).subscribe({
+    const subscription = this.mavenProjectService.syncDevelop(selectedPaths, mergeDevelop).subscribe({
       next: (response) => {
         this.projectState.updateProjectsData(response.projects);
         this.projectState.isScanning.set(false);

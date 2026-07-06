@@ -98,4 +98,39 @@ class GitServiceTest {
             assertTrue(info == null, "Expected null info when no tags exist, but got $info")
         }
     }
+
+    @Test
+    fun `should get git status correctly`() {
+        val repoDir = tempDir.resolve("status-repo").toFile()
+        repoDir.mkdirs()
+        Git.init().setDirectory(repoDir).call().use { git ->
+            File(repoDir, "base.txt").writeText("base")
+            git.add().addFilepattern("base.txt").call()
+            val baseCommit = git.commit().setMessage("initial").setSign(false).call()
+
+            // Create develop branch
+            git.branchCreate().setName("develop").setStartPoint(baseCommit).call()
+
+            // Add a commit to develop
+            git.checkout().setName("develop").call()
+            File(repoDir, "dev.txt").writeText("dev")
+            git.add().addFilepattern("dev.txt").call()
+            git.commit().setMessage("dev commit 1").setSign(false).call()
+            File(repoDir, "dev2.txt").writeText("dev2")
+            git.add().addFilepattern("dev2.txt").call()
+            git.commit().setMessage("dev commit 2").setSign(false).call()
+
+            // Go back to master (default branch)
+            git.checkout().setName("master").call()
+            File(repoDir, "master.txt").writeText("master")
+            git.add().addFilepattern("master.txt").call()
+            git.commit().setMessage("master commit 1").setSign(false).call()
+
+            // Status: master is 1 ahead, 2 behind develop
+            val status = gitService.getGitStatus(repoDir.absolutePath)
+            assertEquals("master", status?.branchName)
+            assertEquals(1, status?.aheadCount)
+            assertEquals(2, status?.behindCount)
+        }
+    }
 }

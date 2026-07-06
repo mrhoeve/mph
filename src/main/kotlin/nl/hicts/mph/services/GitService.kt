@@ -112,7 +112,7 @@ class GitService {
         }
     }
 
-    fun syncDevelop(projectPath: String): String? {
+    fun syncDevelop(projectPath: String, mergeIntoCurrent: Boolean = false): String? {
         val repoDir = findGitRoot(File(projectPath)) ?: run {
             logger.warn("No Git repository found for path: $projectPath")
             return null
@@ -121,6 +121,8 @@ class GitService {
         Git.open(repoDir).use { git ->
             val repository = git.repository
             val currentBranch = repository.branch
+            if (currentBranch == null) return "Could not determine current branch for ${repoDir.name}"
+
             logger.info("Syncing develop for ${repoDir.absolutePath}. Current branch: $currentBranch")
 
             try {
@@ -141,6 +143,18 @@ class GitService {
 
                 // 4. Switch back to original branch
                 git.checkout().setName(currentBranch).call()
+
+                // 5. Optionally merge develop into current branch
+                if (mergeIntoCurrent && currentBranch != "develop") {
+                    logger.info("Merging develop into $currentBranch for ${repoDir.absolutePath}")
+                    val developRef = repository.findRef("develop")
+                    val result = git.merge().include(developRef).call()
+                    if (!result.mergeStatus.isSuccessful) {
+                        logger.warn("Merge develop into $currentBranch failed for ${repoDir.absolutePath}: ${result.mergeStatus}")
+                        return "Sync completed, but merge into $currentBranch failed with status: ${result.mergeStatus}. You may have conflicts."
+                    }
+                }
+
                 return null
             } catch (e: Exception) {
                 logger.error("Sync develop failed for ${repoDir.absolutePath}: ${e.message}", e)
@@ -152,8 +166,51 @@ class GitService {
                 } catch (ce: Exception) {
                     logger.error("Failed to switch back to original branch $currentBranch: ${ce.message}")
                 }
-                throw RuntimeException("Sync develop failed: ${e.message}")
+                throw RuntimeException("Sync develop failed for ${repoDir.name}: ${e.message}")
             }
+        }
+    }
+
+    fun getGitStatus(projectPath: String): GitStatus? {
+        val repoDir = findGitRoot(File(projectPath)) ?: return null
+        return try {
+            Git.open(repoDir).use { git ->
+                val repository = git.repository
+                val currentBranch = repository.branch ?: return null
+                val develop = repository.resolve("develop") ?: return GitStatus(currentBranch, 0, 0)
+                val head = repository.resolve("HEAD") ?: return GitStatus(currentBranch, 0, 0)
+
+                val walk = RevWalk(repository)
+                try {
+                    val headCommit = walk.parseCommit(head)
+                    val developCommit = walk.parseCommit(develop)
+
+                    // Behind: in develop but not in head
+                    walk.reset()
+                    walk.markStart(developCommit)
+                    walk.markUninteresting(headCommit)
+                    var behind = 0
+                    for (commit in walk) {
+                        behind++
+                    }
+
+                    // Ahead: in head but not in develop
+                    walk.reset()
+                    walk.markStart(headCommit)
+                    walk.markUninteresting(developCommit)
+                    var ahead = 0
+                    for (commit in walk) {
+                        ahead++
+                    }
+
+                    GitStatus(currentBranch, ahead, behind)
+                } finally {
+                    walk.dispose()
+                }
+            }
+        } catch (e: Exception) {
+            logger.warn("Failed to get git status for $projectPath: ${e.message}")
+            null
         }
     }
 

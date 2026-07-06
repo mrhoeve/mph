@@ -15,6 +15,7 @@ export interface ProjectAnalysis {
   managedProperties: ManagedProperty[];
   latestTag?: string;
   latestTagInfo?: TagInfo;
+  gitStatus?: GitStatus;
   error?: string;
   isRoot: boolean;
   nexusIqResult?: NexusIqResult;
@@ -65,6 +66,12 @@ export interface SyncDevelopResponse {
 export interface TagInfo {
   version: string;
   tagName: string;
+}
+
+export interface GitStatus {
+  branchName: string;
+  aheadCount: number;
+  behindCount: number;
 }
 
 export interface NexusIqScanResponse {
@@ -142,9 +149,10 @@ export class MavenProjectService {
     return this.http.get<ProjectAnalysis[]>(`${this.apiBaseUrl}/api/projects/build-order`);
   }
 
-  syncDevelop(rootProjectPaths: string[]): Observable<SyncDevelopResponse> {
+  syncDevelop(rootProjectPaths: string[], mergeDevelop: boolean = false): Observable<SyncDevelopResponse> {
     return this.http.post<SyncDevelopResponse>(`${this.apiBaseUrl}/api/projects/sync-develop`, {
-      rootProjectPaths
+      rootProjectPaths,
+      mergeDevelop
     });
   }
 

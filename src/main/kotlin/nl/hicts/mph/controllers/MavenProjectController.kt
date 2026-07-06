@@ -125,7 +125,7 @@ class MavenProjectController(
     fun syncDevelop(@RequestBody request: SyncDevelopRequest): SyncDevelopResponse {
         val settings = settingsService.loadSettings()
         val basePath = settings.basePath ?: throw RuntimeException("Base path not set")
-        val messages = mavenProjectService.syncDevelop(request.rootProjectPaths)
+        val messages = mavenProjectService.syncDevelop(request.rootProjectPaths, request.mergeDevelop ?: false)
         val projects = mavenProjectService.scanAndAnalyze(basePath, settings.maxScanDepth)
         return SyncDevelopResponse(projects, messages)
     }
@@ -177,7 +177,8 @@ data class RemovePropertyOverrideRequest(
 )
 
 data class SyncDevelopRequest(
-    val rootProjectPaths: List<String>
+    val rootProjectPaths: List<String>,
+    val mergeDevelop: Boolean? = false
 )
 
 data class SyncDevelopResponse(

@@ -197,6 +197,32 @@
   font-size: 0.9rem;
 }
 
+.git-info {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+}
+
+.git-status-icon {
+  font-size: 0.75rem;
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+}
+
+.git-status-icon.behind {
+  background-color: #fee2e2;
+  color: #dc2626;
+}
+
+.git-status-icon.ahead {
+  background-color: #dcfce7;
+  color: #16a34a;
+}
+
 .project-modules {
   padding-left: 1.2rem;
   border-left: 1px dashed #e2e8f0;

@@ -29,6 +29,12 @@ data class TagInfo(
     val tagName: String
 )
 
+data class GitStatus(
+    val branchName: String,
+    val aheadCount: Int,
+    val behindCount: Int
+)
+
 @Service
 class MavenProjectService(
     private val mavenCommandService: MavenCommandService,
@@ -211,11 +217,11 @@ class MavenProjectService(
         }
     }
 
-    fun syncDevelop(rootProjectPaths: List<String>): List<String> {
+    fun syncDevelop(rootProjectPaths: List<String>, mergeDevelop: Boolean = false): List<String> {
         val messages = mutableListOf<String>()
         for (rootPath in rootProjectPaths) {
             try {
-                gitService.syncDevelop(rootPath)?.let {
+                gitService.syncDevelop(rootPath, mergeDevelop)?.let {
                     messages.add(it)
                 }
             } catch (e: Exception) {
@@ -340,6 +346,8 @@ class MavenProjectService(
             if (violationsForProp.isNotEmpty()) prop.copy(nexusIqViolations = violationsForProp) else prop
         }
 
+        val gitStatus = if (isRoot) gitService.getGitStatus(project.pomLocation.absolutePath) else null
+
         return ProjectAnalysis(
             groupId = groupId,
             artifactId = artifactId,
@@ -352,6 +360,7 @@ class MavenProjectService(
             managedProperties = propertiesWithViolations,
             latestTag = null,
             latestTagInfo = null,
+            gitStatus = gitStatus,
             error = error,
             isRoot = isRoot,
             nexusIqResult = nexusIqResult,
@@ -877,6 +886,7 @@ data class ProjectAnalysis(
     val managedProperties: List<ManagedProperty> = emptyList(),
     var latestTag: String? = null,
     var latestTagInfo: TagInfo? = null,
+    var gitStatus: GitStatus? = null,
     val error: String? = null,
     val isRoot: Boolean = false,
     val nexusIqResult: NexusIqResult? = null,
