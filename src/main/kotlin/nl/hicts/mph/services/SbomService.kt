@@ -170,7 +170,9 @@ class SbomService {
                             comp.type = Component.Type.LIBRARY
                             comp.bomRef = "pkg:maven/${art.groupId}/${art.artifactId}@${art.version}?type=${art.extension ?: "jar"}"
                             comp.purl = comp.bomRef
-                            comp.hashes = getHashes(art.file)
+                            if (workspaceProjects.containsKey("${art.groupId}:${art.artifactId}:${art.version}")) {
+                                comp.hashes = getHashes(art.file)
+                            }
 
                             // Try to get more metadata if it's a local project or we can resolve its model
                             try {

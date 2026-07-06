@@ -50,6 +50,7 @@ class MavenModelResolver(private val workspaceProjects: Map<String, File> = empt
 
     private fun newSession(system: RepositorySystem): RepositorySystemSession {
         val session = MavenRepositorySystemUtils.newSession()
+        session.isOffline = true
         val localRepo = LocalRepository(localRepositoryPath)
         session.localRepositoryManager = system.newLocalRepositoryManager(session, localRepo)
 
@@ -135,27 +136,27 @@ class MavenModelResolver(private val workspaceProjects: Map<String, File> = empt
 
     fun resolveDependencyTree(groupId: String, artifactId: String, version: String): org.eclipse.aether.graph.DependencyNode {
         val artifact = DefaultArtifact(groupId, artifactId, "", "pom", version)
-        
+
         val descriptorRequest = ArtifactDescriptorRequest(artifact, remoteRepositories, null)
         val descriptorResult = try {
             repositorySystem.readArtifactDescriptor(session, descriptorRequest)
         } catch (e: Exception) {
             throw RuntimeException("readArtifactDescriptor failed for $groupId:$artifactId:$version: ${e.message}", e)
         }
-        
+
         val aetherDependencies = descriptorResult.dependencies.toMutableList()
         val managedDependencies = descriptorResult.managedDependencies.toMutableList()
-        
+
         if (aetherDependencies.isEmpty()) {
             val model = try { resolveModel(groupId, artifactId, version) } catch (e: Exception) { null }
             if (model != null && model.dependencies.isNotEmpty()) {
                 model.dependencies.forEach { dep ->
                     val aetherDep = AetherDependency(
                         DefaultArtifact(
-                            dep.groupId, 
-                            dep.artifactId, 
-                            dep.classifier ?: "", 
-                            dep.type ?: "jar", 
+                            dep.groupId,
+                            dep.artifactId,
+                            dep.classifier ?: "",
+                            dep.type ?: "jar",
                             dep.version ?: ""
                         ),
                         dep.scope ?: "compile"
@@ -170,14 +171,14 @@ class MavenModelResolver(private val workspaceProjects: Map<String, File> = empt
         collectRequest.dependencies = aetherDependencies
         collectRequest.managedDependencies = managedDependencies
         collectRequest.repositories = remoteRepositories
-        
+
         val dependencyRequest = DependencyRequest(collectRequest, null)
         val dependencyResult = try {
             repositorySystem.resolveDependencies(session, dependencyRequest)
         } catch (e: Exception) {
             throw RuntimeException("resolveDependencies failed for $groupId:$artifactId:$version: ${e.message}", e)
         }
-        
+
         return dependencyResult.root
     }
 
