@@ -18,6 +18,7 @@ class NexusIqService(
     private val webClient = WebClient.builder().build()
     private val vulnerabilityCache = ConcurrentHashMap<String, List<NexusIqPolicyViolation>>()
     private val reportUrlCache = ConcurrentHashMap<String, String>()
+    private val internalIdCache = ConcurrentHashMap<String, String>()
 
     fun extractNexusIqAppId(projectPath: String, settings: Settings): String? {
         val file = File(projectPath)
@@ -111,9 +112,10 @@ class NexusIqService(
 
     private fun fetchLatestReportUrlFromApi(applicationId: String, settings: Settings): String? {
         val serverUrl = settings.nexusIqUrl ?: return null
+        val internalId = getInternalApplicationId(applicationId, settings) ?: return null
         try {
             val response = webClient.get()
-                .uri("${serverUrl.removeSuffix("/")}/api/v2/reports/applications/$applicationId")
+                .uri("${serverUrl.removeSuffix("/")}/api/v2/reports/applications/$internalId")
                 .headers { headers ->
                     if (!settings.nexusIqUser.isNullOrBlank() && !settings.nexusIqPass.isNullOrBlank()) {
                         headers.setBasicAuth(settings.nexusIqUser, settings.nexusIqPass)
@@ -133,6 +135,34 @@ class NexusIqService(
             }
         } catch (e: Exception) {
             logger.warn("Failed to fetch latest report URL for $applicationId from API: ${e.message}")
+        }
+        return null
+    }
+
+    private fun getInternalApplicationId(publicId: String, settings: Settings): String? {
+        val cached = internalIdCache[publicId]
+        if (cached != null) return cached
+
+        val serverUrl = settings.nexusIqUrl ?: return null
+        try {
+            val response = webClient.get()
+                .uri("${serverUrl.removeSuffix("/")}/api/v2/applications?publicId=$publicId")
+                .headers { headers ->
+                    if (!settings.nexusIqUser.isNullOrBlank() && !settings.nexusIqPass.isNullOrBlank()) {
+                        headers.setBasicAuth(settings.nexusIqUser, settings.nexusIqPass)
+                    }
+                }
+                .retrieve()
+                .bodyToMono(ApplicationsResponse::class.java)
+                .block()
+
+            val internalId = response?.applications?.firstOrNull { it.publicId == publicId }?.id
+            if (internalId != null) {
+                internalIdCache[publicId] = internalId
+            }
+            return internalId
+        } catch (e: Exception) {
+            logger.warn("Failed to fetch internal ID for $publicId: ${e.message}")
         }
         return null
     }
@@ -249,6 +279,15 @@ data class ApplicationReport(
     val stage: String,
     val reportHtmlUrl: String,
     val evaluationDate: String
+)
+
+data class ApplicationsResponse(
+    val applications: List<Application> = emptyList()
+)
+
+data class Application(
+    val id: String,
+    val publicId: String
 )
 
 // DTOs for Nexus IQ API
