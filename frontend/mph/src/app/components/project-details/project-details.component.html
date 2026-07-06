@@ -26,8 +26,14 @@
       </header>
       
       <p class="details-path"><code>{{ project.path }}</code></p>
+      
+      <div class="tabs">
+        <button class="tab-button" [class.active]="activeTab() === 'analysis'" (click)="activeTab.set('analysis')">Analysis</button>
+        <button class="tab-button" [class.active]="activeTab() === 'sbom'" (click)="activeTab.set('sbom')">SBOM</button>
+      </div>
 
-      @if (project.hasSpringBootParent || project.canScanNexusIq) {
+      @if (activeTab() === 'analysis') {
+        @if (project.hasSpringBootParent || project.canScanNexusIq) {
         <div class="project-actions">
           @if (project.hasSpringBootParent) {
             <div class="spring-upgrade-section">
@@ -156,6 +162,9 @@
           <p>No usages found in scanned projects.</p>
         }
       </div>
+    } @else {
+      <app-sbom-view [projectPath]="project.path"></app-sbom-view>
+    }
     </div>
   } @else {
     <div class="empty-state">

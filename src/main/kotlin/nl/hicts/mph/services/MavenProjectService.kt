@@ -40,7 +40,8 @@ class MavenProjectService(
     private val mavenCommandService: MavenCommandService,
     private val gitService: GitService,
     private val nexusIqService: NexusIqService,
-    private val settingsService: SettingsService
+    private val settingsService: SettingsService,
+    private val sbomService: SbomService
 ) {
     private val logger = LoggerFactory.getLogger(MavenProjectService::class.java)
 
@@ -68,6 +69,7 @@ class MavenProjectService(
             key to project.pomLocation
         }
         modelResolver = MavenModelResolver(workspaceMap)
+        sbomService.setWorkspace(workspaceMap)
 
         return rootProjects.map { analyzeProject(it, allProjects, projectMap, false, true, usageMap) }.sortedBy { it.artifactId }
     }
@@ -655,6 +657,7 @@ class MavenProjectService(
             key to p.pomLocation
         }
         modelResolver = MavenModelResolver(workspaceMap)
+        sbomService.setWorkspace(workspaceMap)
 
         var projectModelResult: ModelBuildingResult? = null
         val managedProperties = try {

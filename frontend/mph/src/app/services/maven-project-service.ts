@@ -74,6 +74,20 @@ export interface GitStatus {
   behindCount: number;
 }
 
+export interface SbomComponent {
+  groupId: string;
+  artifactId: string;
+  version: string;
+  scope: string | null;
+  type: string | null;
+  description?: string;
+  licenses: string[];
+}
+
+export interface SbomDetails {
+  components: SbomComponent[];
+}
+
 export interface NexusIqScanResponse {
   message: string;
   reportUrl?: string;
@@ -158,6 +172,16 @@ export class MavenProjectService {
 
   getExcelUrl(): string {
     return `${this.apiBaseUrl}/api/projects/export-excel`;
+  }
+
+  getSbomDetails(path: string): Observable<SbomDetails> {
+    return this.http.get<SbomDetails>(`${this.apiBaseUrl}/api/projects/sbom/details`, {
+      params: { path }
+    });
+  }
+
+  getSbomExportUrl(path: string, format: string): string {
+    return `${this.apiBaseUrl}/api/projects/sbom/export?path=${encodeURIComponent(path)}&format=${format}`;
   }
 
   scanNexusIq(path: string): Observable<NexusIqScanResponse> {

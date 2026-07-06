@@ -6,6 +6,8 @@ import nl.hicts.mph.services.ManagedProperty
 import nl.hicts.mph.services.ProjectAnalysis
 import nl.hicts.mph.services.TagInfo
 import nl.hicts.mph.services.SettingsService
+import nl.hicts.mph.services.SbomService
+import nl.hicts.mph.services.SbomDetails
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
@@ -23,7 +25,8 @@ import kotlin.io.path.exists
 @RestController
 class MavenProjectController(
     private val mavenProjectService: MavenProjectService,
-    private val settingsService: SettingsService
+    private val settingsService: SettingsService,
+    private val sbomService: SbomService
 ) {
 
     @GetMapping("/api/projects/analyze")
@@ -141,6 +144,23 @@ class MavenProjectController(
             .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=build-order.xlsx")
             .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
             .body(excelBytes)
+    }
+
+    @GetMapping("/api/projects/sbom/details")
+    fun getSbomDetails(@RequestParam path: String): SbomDetails {
+        return sbomService.getSbomDetails(path)
+    }
+
+    @GetMapping("/api/projects/sbom/export")
+    fun exportSbom(@RequestParam path: String, @RequestParam format: String): ResponseEntity<ByteArray> {
+        val sbom = sbomService.generateSbom(path, format)
+        val extension = if (format.lowercase() == "xml") "xml" else "json"
+        val contentType = if (format.lowercase() == "xml") MediaType.APPLICATION_XML else MediaType.APPLICATION_JSON
+
+        return ResponseEntity.ok()
+            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=bom.$extension")
+            .contentType(contentType)
+            .body(sbom.toByteArray())
     }
 }
 

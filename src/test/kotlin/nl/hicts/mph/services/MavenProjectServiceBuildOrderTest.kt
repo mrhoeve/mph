@@ -18,7 +18,8 @@ class MavenProjectServiceBuildOrderTest {
     private val gitService = mockk<GitService>()
     private val nexusIqService = mockk<NexusIqService>()
     private val settingsService = mockk<SettingsService>()
-    private val service = MavenProjectService(mavenCommandService, gitService, nexusIqService, settingsService)
+    private val sbomService = mockk<SbomService>()
+    private val service = MavenProjectService(mavenCommandService, gitService, nexusIqService, settingsService, sbomService)
 
     @Test
     fun `should determine correct build order`() {
@@ -27,6 +28,7 @@ class MavenProjectServiceBuildOrderTest {
             maxScanDepth = 3
         )
         every { gitService.getLatestTagInfo(any()) } returns null
+        every { gitService.getGitStatus(any()) } returns GitStatus("main", 0, 0)
         every { nexusIqService.extractNexusIqAppId(any(), any()) } returns null
         // Project A (no dependencies)
         val modelA = Model().apply {

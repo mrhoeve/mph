@@ -13,7 +13,8 @@ class BuildOrderIntegrationTest {
     private val gitService = mockk<GitService>()
     private val nexusIqService = mockk<NexusIqService>()
     private val settingsService = mockk<SettingsService>()
-    private val service = MavenProjectService(mavenCommandService, gitService, nexusIqService, settingsService)
+    private val sbomService = mockk<SbomService>()
+    private val service = MavenProjectService(mavenCommandService, gitService, nexusIqService, settingsService, sbomService)
 
     @Test
     fun `should only contain root projects and have correct order`() {
@@ -22,8 +23,10 @@ class BuildOrderIntegrationTest {
             maxScanDepth = 3
         )
         every { gitService.getLatestTagInfo(any()) } returns null
+        every { gitService.getGitStatus(any()) } returns GitStatus("main", 0, 0)
         every { nexusIqService.extractNexusIqAppId(any(), any()) } returns null
         io.mockk.justRun { gitService.clearCache() }
+        io.mockk.justRun { sbomService.setWorkspace(any()) }
         val testDataPath = Paths.get("src/test/resources/test-data")
         val buildOrder = service.getBuildOrder(testDataPath, 3)
 

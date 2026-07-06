@@ -15,7 +15,8 @@ class BulkUpdateCurrentVersionTest {
     private val gitService = mockk<GitService>()
     private val nexusIqService = mockk<NexusIqService>()
     private val settingsService = mockk<SettingsService>()
-    private val service = MavenProjectService(mavenCommandService, gitService, nexusIqService, settingsService)
+    private val sbomService = mockk<SbomService>()
+    private val service = MavenProjectService(mavenCommandService, gitService, nexusIqService, settingsService, sbomService)
 
     @TempDir
     lateinit var tempDir: Path
@@ -58,7 +59,9 @@ class BulkUpdateCurrentVersionTest {
         }
 
         every { gitService.getLatestTagInfo(any()) } returns null
+        every { gitService.getGitStatus(any()) } returns GitStatus("main", 0, 0)
         io.mockk.justRun { gitService.clearCache() }
+        io.mockk.justRun { sbomService.setWorkspace(any()) }
 
         // Execute bulk update in CURRENT mode
         service.bulkUpdateVersions(

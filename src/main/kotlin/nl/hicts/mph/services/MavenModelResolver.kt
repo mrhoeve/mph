@@ -1,6 +1,5 @@
 package nl.hicts.mph.services
 
-import org.apache.maven.model.Dependency
 import org.apache.maven.model.Model
 import org.apache.maven.model.Parent
 import org.apache.maven.model.Repository
@@ -10,18 +9,25 @@ import org.apache.maven.model.resolution.UnresolvableModelException
 import org.apache.maven.repository.internal.MavenRepositorySystemUtils
 import org.eclipse.aether.RepositorySystem
 import org.eclipse.aether.RepositorySystemSession
+import org.eclipse.aether.artifact.Artifact
 import org.eclipse.aether.artifact.DefaultArtifact
+import org.eclipse.aether.collection.CollectRequest
 import org.eclipse.aether.connector.basic.BasicRepositoryConnectorFactory
 import org.eclipse.aether.impl.DefaultServiceLocator
 import org.eclipse.aether.repository.LocalRepository
 import org.eclipse.aether.repository.RemoteRepository
+import org.eclipse.aether.resolution.ArtifactDescriptorRequest
 import org.eclipse.aether.resolution.ArtifactRequest
 import org.eclipse.aether.resolution.ArtifactResolutionException
+import org.eclipse.aether.resolution.DependencyRequest
 import org.eclipse.aether.spi.connector.RepositoryConnectorFactory
 import org.eclipse.aether.spi.connector.transport.TransporterFactory
 import org.eclipse.aether.transport.file.FileTransporterFactory
 import org.eclipse.aether.transport.http.HttpTransporterFactory
 import java.io.File
+
+typealias MavenDependency = org.apache.maven.model.Dependency
+typealias AetherDependency = org.eclipse.aether.graph.Dependency
 
 class MavenModelResolver(private val workspaceProjects: Map<String, File> = emptyMap()) {
 
@@ -91,6 +97,24 @@ class MavenModelResolver(private val workspaceProjects: Map<String, File> = empt
         return modelBuildingResult.effectiveModel
     }
 
+    fun resolveDependencies(groupId: String, artifactId: String, version: String): List<Artifact> {
+        val artifact = DefaultArtifact(groupId, artifactId, "", "pom", version)
+        
+        val descriptorRequest = ArtifactDescriptorRequest(artifact, remoteRepositories, null)
+        val descriptorResult = repositorySystem.readArtifactDescriptor(session, descriptorRequest)
+        
+        val collectRequest = CollectRequest()
+        collectRequest.root = AetherDependency(DefaultArtifact(groupId, artifactId, "", "jar", version), "compile")
+        collectRequest.dependencies = descriptorResult.dependencies
+        collectRequest.managedDependencies = descriptorResult.managedDependencies
+        collectRequest.repositories = remoteRepositories
+        
+        val dependencyRequest = DependencyRequest(collectRequest, null)
+        val dependencyResult = repositorySystem.resolveDependencies(session, dependencyRequest)
+        
+        return dependencyResult.artifactResults.map { it.artifact }
+    }
+
     private class RepositoryModelResolver : ModelResolver {
         private val system: RepositorySystem
         private val session: RepositorySystemSession
@@ -138,7 +162,7 @@ class MavenModelResolver(private val workspaceProjects: Map<String, File> = empt
             return resolveModel(parent.groupId, parent.artifactId, parent.version)
         }
 
-        override fun resolveModel(dependency: Dependency): ModelSource {
+        override fun resolveModel(dependency: MavenDependency): ModelSource {
             return resolveModel(dependency.groupId, dependency.artifactId, dependency.version)
         }
 
