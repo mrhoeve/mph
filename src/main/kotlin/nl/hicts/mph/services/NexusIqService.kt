@@ -89,7 +89,12 @@ class NexusIqService(
             args.add("-Dclm.password=$pass")
         }
 
-        return mavenCommandService.runMavenCommandInBackground(projectDir, args, "Nexus IQ Scan")
+        return mavenCommandService.runMavenCommandInBackground(
+            projectDir,
+            args,
+            "Nexus IQ Scan",
+            listOf("clm.username", "clm.password")
+        )
             .thenApply { exitCode ->
                 val finalReportUrl = getReportUrl(applicationId, settings, forceRefresh = true)
                 val report = finalReportUrl?.let { fetchReportDetails(applicationId, it, settings) }

@@ -35,7 +35,7 @@ class NexusIqServiceTest {
         Files.createDirectories(projectDir)
         Files.writeString(projectDir.resolve("pom.xml"), "<project><artifactId>a-project</artifactId></project>")
         Files.writeString(projectDir.resolve("Jenkinsfile"), "servicePipeline('a-project-svc', false, '21')")
-        
+
         val settings = Settings(
             basePath = tempDir,
             maxScanDepth = 3,
@@ -45,12 +45,12 @@ class NexusIqServiceTest {
             nexusIqAppIdPrefix = "test-prefix:",
             nexusIqAppIdSuffix = "-test"
         )
-        
+
         every { settingsService.loadSettings() } returns settings
-        
+
         val argsSlot = slot<List<String>>()
-        every { 
-            mavenCommandService.runMavenCommandInBackground(any(), capture(argsSlot), any()) 
+        every {
+            mavenCommandService.runMavenCommandInBackground(any(), capture(argsSlot), any(), any())
         } returns CompletableFuture.completedFuture(0)
 
         val webClientBuilder = WebClient.builder().exchangeFunction { request ->
@@ -123,26 +123,26 @@ class NexusIqServiceTest {
         val pomFile = projectDir.resolve("pom.xml")
         Files.writeString(pomFile, "<project><artifactId>b-project</artifactId></project>")
         Files.writeString(projectDir.resolve("Jenkinsfile"), "servicePipeline('b-project-svc')")
-        
+
         val settings = Settings(
             basePath = tempDir,
             maxScanDepth = 3,
             nexusIqUrl = "https://iq.example.com"
         )
-        
+
         every { settingsService.loadSettings() } returns settings
-        
-        every { 
-            mavenCommandService.runMavenCommandInBackground(any(), any(), any()) 
+
+        every {
+            mavenCommandService.runMavenCommandInBackground(any(), any(), any(), any())
         } returns CompletableFuture.completedFuture(0)
 
         val result = service.scan(pomFile.toString()).get()
         assertEquals("Scan completed successfully for ${pomFile.toString()}", result.message)
         assertEquals(null, result.reportUrl)
-        
+
         // Verify that the command was run in projectDir, not in pomFile path
         verify { 
-            mavenCommandService.runMavenCommandInBackground(projectDir.toFile(), any(), any()) 
+            mavenCommandService.runMavenCommandInBackground(projectDir.toFile(), any(), any(), any()) 
         }
     }
 
@@ -153,12 +153,12 @@ class NexusIqServiceTest {
         val pomFile = projectDir.resolve("pom.xml")
         Files.writeString(pomFile, "<project/>")
         Files.writeString(projectDir.resolve("Jenkinsfile"), "servicePipeline('c-service')")
-        
+
         val settings = Settings(
             basePath = tempDir,
             maxScanDepth = 3
         )
-        
+
         val appId = service.extractNexusIqAppId(pomFile.toString(), settings)
         assertEquals("c-service", appId)
     }
@@ -169,17 +169,17 @@ class NexusIqServiceTest {
         Files.createDirectories(projectDir)
         val jenkinsfile = projectDir.resolve("Jenkinsfile")
         Files.writeString(jenkinsfile, "servicePipeline('my-service', false, '21')")
-        
+
         val settings = Settings(
             basePath = tempDir,
             maxScanDepth = 3,
             nexusIqAppIdPrefix = "pre-",
             nexusIqAppIdSuffix = "-suf"
         )
-        
+
         val appId = service.extractNexusIqAppId(projectDir.toString(), settings)
         assertEquals("pre-my-service-suf", appId)
-        
+
         // Test libraryPipeline
         Files.writeString(jenkinsfile, "libraryPipeline('my-lib', true)")
         val appIdLib = service.extractNexusIqAppId(projectDir.toString(), settings)
@@ -190,15 +190,15 @@ class NexusIqServiceTest {
     fun `should return null if no Jenkinsfile or no pipeline call`() {
         val projectDir = tempDir.resolve("no-j-project")
         Files.createDirectories(projectDir)
-        
+
         val settings = Settings(
             basePath = tempDir,
             maxScanDepth = 3
         )
-        
+
         val appId = service.extractNexusIqAppId(projectDir.toString(), settings)
         assertEquals(null, appId)
-        
+
         Files.writeString(projectDir.resolve("Jenkinsfile"), "some other content")
         val appIdEmpty = service.extractNexusIqAppId(projectDir.toString(), settings)
         assertEquals(null, appIdEmpty)
@@ -212,9 +212,9 @@ class NexusIqServiceTest {
             nexusIqUrl = null
         )
         every { settingsService.loadSettings() } returns settings
-        
+
         val violations = service.getVulnerabilities("org.apache.logging.log4j", "log4j-core", "2.14.1")
-        
+
         assertTrue(violations.isEmpty(), "Should return empty violations when no server is configured")
     }
 

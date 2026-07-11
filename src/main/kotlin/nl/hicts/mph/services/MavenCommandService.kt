@@ -13,29 +13,46 @@ class MavenCommandService {
         runMavenCommandInBackground(projectPom.parentFile, listOf("install", "-DskipTests"), "install")
     }
 
-    fun runMavenCommandInBackground(projectDir: File, args: List<String>, label: String = "command"): CompletableFuture<Int> {
+    fun runMavenCommandInBackground(
+        projectDir: File,
+        args: List<String>,
+        label: String = "command",
+        maskArguments: List<String> = emptyList()
+    ): CompletableFuture<Int> {
         val mvnw = findMvnw(projectDir) ?: "mvn"
-        
+
         val isWindows = System.getProperty("os.name").lowercase().contains("win")
         val baseCommand = if (mvnw.contains("mvnw")) {
             if (isWindows) listOf("cmd.exe", "/c", mvnw)
             else listOf(mvnw)
         } else {
             if (isWindows) listOf("cmd.exe", "/c", "mvn")
-            else listOf("mvn")
+            else listOf(mvnw)
         }
-        
+
         val command = baseCommand + args
 
         val future = CompletableFuture<Int>()
         CompletableFuture.runAsync {
             try {
-                logger.info("Running $label: ${command.joinToString(" ")} in ${projectDir.absolutePath}")
+                val maskedCommand = command.map { arg ->
+                    var maskedArg = arg
+                    maskArguments.forEach { mask ->
+                        if (arg.startsWith("-D$mask=") || arg.startsWith("$mask=")) {
+                            val parts = arg.split("=", limit = 2)
+                            if (parts.size == 2) {
+                                maskedArg = "${parts[0]}=***"
+                            }
+                        }
+                    }
+                    maskedArg
+                }
+                logger.info("Running $label: ${maskedCommand.joinToString(" ")} in ${projectDir.absolutePath}")
                 val process = ProcessBuilder(command)
                     .directory(projectDir)
                     .redirectErrorStream(true)
                     .start()
-                
+
                 process.inputStream.bufferedReader().use { reader ->
                     reader.forEachLine { line ->
                         if (line.contains("[ERROR]") || line.contains("BUILD SUCCESS") || line.contains("BUILD FAILURE")) {
@@ -45,7 +62,7 @@ class MavenCommandService {
                         }
                     }
                 }
-                
+
                 val exitCode = process.waitFor()
                 logger.info("Maven $label finished with exit code $exitCode for ${projectDir.absolutePath}")
                 future.complete(exitCode)
