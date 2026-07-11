@@ -94,6 +94,27 @@ export interface SbomDetails {
 export interface NexusIqScanResponse {
   message: string;
   reportUrl?: string;
+  summary?: NexusIqScanSummary;
+  violations: NexusIqReportViolation[];
+}
+
+export interface NexusIqScanSummary {
+  critical: number;
+  severe: number;
+  moderate: number;
+  low: number;
+  total: number;
+  affectedComponents: number;
+}
+
+export interface NexusIqReportViolation {
+  componentIdentifier: string;
+  packageUrl?: string;
+  policyName: string;
+  threatLevel: number;
+  reasons: string[];
+  directDependency: boolean;
+  waived: boolean;
 }
 
 @Injectable({

@@ -1,0 +1,71 @@
+<div class="modal-overlay" (click)="close.emit()">
+  <div class="modal-content wide nexus-report-modal" (click)="$event.stopPropagation()">
+    <div class="modal-header">
+      <div>
+        <h2>Nexus IQ scan report</h2>
+        <p class="report-subtitle">{{ projectName }}</p>
+      </div>
+      <button class="close-button" (click)="close.emit()">&times;</button>
+    </div>
+
+    <div class="modal-body">
+      <div class="report-intro">
+        <p>{{ result.message }}</p>
+        @if (result.reportUrl) {
+          <a class="nexus-report-link" [href]="result.reportUrl" target="_blank" rel="noopener noreferrer">
+            Open full report in Nexus IQ &nearr;
+          </a>
+        }
+      </div>
+
+      @if (result.summary; as summary) {
+        <div class="summary-grid" aria-label="Security finding summary">
+          <div class="summary-card critical"><strong>{{ summary.critical }}</strong><span>Critical</span></div>
+          <div class="summary-card severe"><strong>{{ summary.severe }}</strong><span>Severe</span></div>
+          <div class="summary-card moderate"><strong>{{ summary.moderate }}</strong><span>Moderate</span></div>
+          <div class="summary-card low"><strong>{{ summary.low }}</strong><span>Low</span></div>
+          <div class="summary-card total"><strong>{{ summary.total }}</strong><span>Total findings</span></div>
+          <div class="summary-card components"><strong>{{ summary.affectedComponents }}</strong><span>Components</span></div>
+        </div>
+
+        <div class="findings-header">
+          <h3>Security findings</h3>
+          <span>{{ summary.total }} policy {{ summary.total === 1 ? 'violation' : 'violations' }}</span>
+        </div>
+
+        @if (result.violations.length > 0) {
+          <div class="findings-list">
+            @for (violation of result.violations; track $index) {
+              <article class="finding" [class]="'finding ' + severity(violation)">
+                <div class="finding-heading">
+                  <span class="threat-level">{{ violation.threatLevel }}</span>
+                  <div>
+                    <h4>{{ violation.componentIdentifier }}</h4>
+                    <p>{{ violation.policyName }}</p>
+                  </div>
+                  <div class="finding-badges">
+                    <span>{{ violation.directDependency ? 'Direct' : 'Transitive' }}</span>
+                    @if (violation.waived) { <span class="waived">Waived</span> }
+                  </div>
+                </div>
+                @if (violation.reasons.length > 0) {
+                  <ul>
+                    @for (reason of violation.reasons; track reason) {
+                      <li>{{ reason }}</li>
+                    }
+                  </ul>
+                }
+              </article>
+            }
+          </div>
+        } @else {
+          <div class="clean-result">No security policy violations were found in this report.</div>
+        }
+      } @else {
+        <div class="details-unavailable">
+          The scan finished, but Nexus IQ did not return report details. Use the report link to view the result.
+        </div>
+      }
+    </div>
+  </div>
+</div>

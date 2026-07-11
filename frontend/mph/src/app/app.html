@@ -133,4 +133,12 @@
   </app-update-modules-modal>
 }
 
+@if (nexusIqReport(); as report) {
+  <app-nexus-iq-report-modal
+    [result]="report.result"
+    [projectName]="report.projectName"
+    (close)="nexusIqReport.set(null)">
+  </app-nexus-iq-report-modal>
+}
+
 <router-outlet />

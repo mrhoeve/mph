@@ -5,6 +5,7 @@ import nl.hicts.mph.models.Settings
 import org.springframework.core.ParameterizedTypeReference
 import org.springframework.stereotype.Service
 import org.springframework.web.reactive.function.client.WebClient
+import org.springframework.web.util.UriComponentsBuilder
 import java.io.File
 import java.util.*
 import java.util.concurrent.CompletableFuture
@@ -91,8 +92,22 @@ class NexusIqService(
         return mavenCommandService.runMavenCommandInBackground(projectDir, args, "Nexus IQ Scan")
             .thenApply { exitCode ->
                 val finalReportUrl = getReportUrl(applicationId, settings, forceRefresh = true)
-                if (exitCode == 0) NexusIqScanResult("Scan completed successfully for $projectPath", finalReportUrl)
-                else NexusIqScanResult("Scan failed for $projectPath with exit code $exitCode", finalReportUrl)
+                val report = finalReportUrl?.let { fetchReportDetails(applicationId, it, settings) }
+                if (exitCode == 0) {
+                    NexusIqScanResult(
+                        message = "Scan completed successfully for $projectPath",
+                        reportUrl = finalReportUrl,
+                        summary = report?.summary,
+                        violations = report?.violations ?: emptyList()
+                    )
+                } else {
+                    NexusIqScanResult(
+                        message = "Scan failed for $projectPath with exit code $exitCode",
+                        reportUrl = finalReportUrl,
+                        summary = report?.summary,
+                        violations = report?.violations ?: emptyList()
+                    )
+                }
             }
     }
 
@@ -143,6 +158,74 @@ class NexusIqService(
         } else {
             "${serverUrl.trimEnd('/')}/${reportHtmlUrl.trimStart('/')}"
         }
+
+    private fun fetchReportDetails(applicationId: String, reportUrl: String, settings: Settings): NexusIqReportDetails? {
+        val serverUrl = settings.nexusIqUrl ?: return null
+        val reportId = Regex("/report/([^/?#]+)").find(reportUrl)?.groupValues?.get(1) ?: return null
+        val policyUri = UriComponentsBuilder.fromUriString(serverUrl.trimEnd('/'))
+            .pathSegment("api", "v2", "applications", applicationId, "reports", reportId, "policy")
+            .build()
+            .encode()
+            .toUri()
+
+        return try {
+            val response = webClient.get()
+                .uri(policyUri)
+                .headers { headers ->
+                    if (!settings.nexusIqUser.isNullOrBlank() && !settings.nexusIqPass.isNullOrBlank()) {
+                        headers.setBasicAuth(settings.nexusIqUser, settings.nexusIqPass)
+                    }
+                }
+                .retrieve()
+                .bodyToMono(NexusIqPolicyReportResponse::class.java)
+                .block()
+                ?: return null
+
+            val violations = response.components.flatMap { component ->
+                component.violations
+                    .filter { it.policyThreatCategory == null || it.policyThreatCategory.equals("SECURITY", ignoreCase = true) }
+                    .map { violation ->
+                        NexusIqReportViolation(
+                            componentIdentifier = component.displayName
+                                ?: formatComponentIdentifier(component.componentIdentifier),
+                            packageUrl = component.packageUrl,
+                            policyName = violation.policyName,
+                            threatLevel = violation.policyThreatLevel,
+                            reasons = violation.constraints
+                                .flatMap { constraint -> constraint.conditions.mapNotNull { it.conditionReason } }
+                                .distinct(),
+                            directDependency = component.dependencyData?.directDependency == true,
+                            waived = violation.waived
+                        )
+                    }
+            }.sortedWith(compareByDescending<NexusIqReportViolation> { it.threatLevel }.thenBy { it.componentIdentifier })
+
+            NexusIqReportDetails(
+                summary = NexusIqScanSummary(
+                    critical = violations.count { it.threatLevel >= 8 },
+                    severe = violations.count { it.threatLevel in 4..7 },
+                    moderate = violations.count { it.threatLevel in 2..3 },
+                    low = violations.count { it.threatLevel < 2 },
+                    total = violations.size,
+                    affectedComponents = violations.map { it.componentIdentifier }.distinct().size
+                ),
+                violations = violations
+            )
+        } catch (e: Exception) {
+            logger.warn("Failed to fetch Nexus IQ policy details for report $reportId: ${e.message}")
+            null
+        }
+    }
+
+    private fun formatComponentIdentifier(identifier: ComponentIdentifier): String {
+        val coordinates = identifier.coordinates
+        return listOfNotNull(
+            identifier.format,
+            coordinates["groupId"] ?: coordinates["namespace"],
+            coordinates["artifactId"] ?: coordinates["name"] ?: coordinates["packageId"],
+            coordinates["version"]
+        ).joinToString(":")
+    }
 
     private fun getInternalApplicationId(publicId: String, settings: Settings): String? {
         val cached = internalIdCache[publicId]
@@ -258,7 +341,65 @@ class NexusIqService(
 
 data class NexusIqScanResult(
     val message: String,
-    val reportUrl: String? = null
+    val reportUrl: String? = null,
+    val summary: NexusIqScanSummary? = null,
+    val violations: List<NexusIqReportViolation> = emptyList()
+)
+
+data class NexusIqScanSummary(
+    val critical: Int,
+    val severe: Int,
+    val moderate: Int,
+    val low: Int,
+    val total: Int,
+    val affectedComponents: Int
+)
+
+data class NexusIqReportViolation(
+    val componentIdentifier: String,
+    val packageUrl: String? = null,
+    val policyName: String,
+    val threatLevel: Int,
+    val reasons: List<String> = emptyList(),
+    val directDependency: Boolean,
+    val waived: Boolean
+)
+
+private data class NexusIqReportDetails(
+    val summary: NexusIqScanSummary,
+    val violations: List<NexusIqReportViolation>
+)
+
+data class NexusIqPolicyReportResponse(
+    val components: List<NexusIqReportComponent> = emptyList()
+)
+
+data class NexusIqReportComponent(
+    val componentIdentifier: ComponentIdentifier,
+    val displayName: String? = null,
+    val packageUrl: String? = null,
+    val dependencyData: NexusIqDependencyData? = null,
+    val violations: List<NexusIqReportPolicyViolation> = emptyList()
+)
+
+data class NexusIqDependencyData(
+    val directDependency: Boolean = false
+)
+
+data class NexusIqReportPolicyViolation(
+    val policyName: String,
+    val policyThreatCategory: String? = null,
+    val policyThreatLevel: Int,
+    val waived: Boolean = false,
+    val constraints: List<NexusIqReportConstraint> = emptyList()
+)
+
+data class NexusIqReportConstraint(
+    val conditions: List<NexusIqReportCondition> = emptyList()
+)
+
+data class NexusIqReportCondition(
+    val conditionReason: String? = null
 )
 
 data class NexusIqResult(

@@ -53,9 +53,60 @@ class NexusIqServiceTest {
             mavenCommandService.runMavenCommandInBackground(any(), capture(argsSlot), any()) 
         } returns CompletableFuture.completedFuture(0)
 
-        val result = service.scan(projectDir.toString()).get()
+        val webClientBuilder = WebClient.builder().exchangeFunction { request ->
+            val body = when {
+                request.url().path.endsWith("/api/v2/applications") ->
+                    """{"applications":[{"id":"internal-app-id","publicId":"test-prefix:a-project-svc-test"}]}"""
+                request.url().path.contains("/api/v2/reports/applications/") ->
+                    """[{"stage":"build","reportHtmlUrl":"ui/links/application/test-prefix:a-project-svc-test/report/report-id-123","evaluationDate":"2026-07-11T10:15:30Z"}]"""
+                else ->
+                    """{
+                        "components":[
+                            {
+                                "componentIdentifier":{"format":"maven","coordinates":{"groupId":"org.example","artifactId":"critical-lib","version":"1.0"}},
+                                "displayName":"org.example : critical-lib : 1.0",
+                                "dependencyData":{"directDependency":true},
+                                "violations":[{
+                                    "policyName":"Security-Critical",
+                                    "policyThreatCategory":"SECURITY",
+                                    "policyThreatLevel":9,
+                                    "waived":false,
+                                    "constraints":[{"conditions":[{"conditionReason":"Found test vulnerability with severity 9.8."}]}]
+                                }]
+                            },
+                            {
+                                "componentIdentifier":{"format":"maven","coordinates":{"groupId":"org.example","artifactId":"severe-lib","version":"2.0"}},
+                                "violations":[{
+                                    "policyName":"Security-Severe",
+                                    "policyThreatCategory":"SECURITY",
+                                    "policyThreatLevel":6,
+                                    "constraints":[]
+                                }]
+                            }
+                        ]
+                    }"""
+            }
+            Mono.just(
+                ClientResponse.create(HttpStatus.OK)
+                    .header("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                    .body(body)
+                    .build()
+            )
+        }
+        val serviceWithApi = NexusIqService(settingsService, mavenCommandService, webClientBuilder)
+
+        val result = serviceWithApi.scan(projectDir.toString()).get()
         assertEquals("Scan completed successfully for $projectDir", result.message)
-        assertEquals(null, result.reportUrl)
+        assertEquals(
+            "https://iq.example.com/ui/links/application/test-prefix:a-project-svc-test/report/report-id-123",
+            result.reportUrl
+        )
+        assertEquals(2, result.summary?.total)
+        assertEquals(1, result.summary?.critical)
+        assertEquals(1, result.summary?.severe)
+        assertEquals(2, result.summary?.affectedComponents)
+        assertEquals("org.example : critical-lib : 1.0", result.violations.first().componentIdentifier)
+        assertEquals(listOf("Found test vulnerability with severity 9.8."), result.violations.first().reasons)
 
         val args = argsSlot.captured
         assertTrue(args.contains("com.sonatype.clm:clm-maven-plugin:evaluate"), "Should use clm-maven-plugin")

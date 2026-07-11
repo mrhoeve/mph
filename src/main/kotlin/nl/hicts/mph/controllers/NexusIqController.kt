@@ -1,6 +1,8 @@
 package nl.hicts.mph.controllers
 
 import nl.hicts.mph.services.NexusIqService
+import nl.hicts.mph.services.NexusIqReportViolation
+import nl.hicts.mph.services.NexusIqScanSummary
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RestController
@@ -13,7 +15,9 @@ class NexusIqController(
 
     @PostMapping("/api/nexus-iq/scan")
     fun scan(@RequestBody request: NexusIqScanRequest): CompletableFuture<NexusIqScanResponse> {
-        return nexusIqService.scan(request.path).thenApply { NexusIqScanResponse(it.message, it.reportUrl) }
+        return nexusIqService.scan(request.path).thenApply {
+            NexusIqScanResponse(it.message, it.reportUrl, it.summary, it.violations)
+        }
     }
 }
 
@@ -23,5 +27,7 @@ data class NexusIqScanRequest(
 
 data class NexusIqScanResponse(
     val message: String,
-    val reportUrl: String? = null
+    val reportUrl: String? = null,
+    val summary: NexusIqScanSummary? = null,
+    val violations: List<NexusIqReportViolation> = emptyList()
 )

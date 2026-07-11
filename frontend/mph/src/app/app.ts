@@ -2,7 +2,7 @@ import { Component, DestroyRef, inject, OnInit, signal } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { FolderSelector } from './components/folder-selector/folder-selector';
 import { FileSystemService } from './services/file-system-service';
-import { MavenProjectService, ProjectAnalysis, ManagedProperty } from './services/maven-project-service';
+import { MavenProjectService, ProjectAnalysis, ManagedProperty, NexusIqScanResponse } from './services/maven-project-service';
 import { SystemService, SystemInfo } from './services/system-service';
 import { ProjectStateService } from './services/project-state-service';
 import { CommonModule } from '@angular/common';
@@ -18,6 +18,7 @@ import { BuildOrderModalComponent } from './components/modals/build-order/build-
 import { PropertyOverrideModalComponent } from './components/modals/property-override/property-override-modal.component';
 import { MavenBuildModalComponent } from './components/modals/maven-build/maven-build-modal.component';
 import { UpdateModulesModalComponent } from './components/modals/update-modules/update-modules-modal.component';
+import { NexusIqReportModalComponent } from './components/modals/nexus-iq-report/nexus-iq-report-modal.component';
 
 @Component({
   selector: 'app-root',
@@ -35,7 +36,8 @@ import { UpdateModulesModalComponent } from './components/modals/update-modules/
     BuildOrderModalComponent,
     PropertyOverrideModalComponent,
     MavenBuildModalComponent,
-    UpdateModulesModalComponent
+    UpdateModulesModalComponent,
+    NexusIqReportModalComponent
   ],
   templateUrl: './app.html',
   styleUrl: './app.css',
@@ -51,6 +53,7 @@ export class App implements OnInit {
   protected readonly isVersionsModalOpen = signal(false);
   protected readonly isOverrideModalOpen = signal(false);
   protected readonly systemInfo = signal<SystemInfo | null>(null);
+  protected readonly nexusIqReport = signal<{ result: NexusIqScanResponse, projectName: string } | null>(null);
 
   protected readonly versionsModalProject = signal<ProjectAnalysis | null>(null);
   protected readonly overridePropertyData = signal<{project: ProjectAnalysis, prop: ManagedProperty} | null>(null);
@@ -317,14 +320,7 @@ export class App implements OnInit {
     this.projectState.scanningMessage.set(`Triggering Nexus IQ scan for ${project.artifactId}...`);
     const subscription = this.mavenProjectService.scanNexusIq(project.path).subscribe({
       next: (response) => {
-        console.log(response.message);
-        if (response.reportUrl) {
-          if (confirm(`${response.message}\n\nDo you want to open the report in Nexus IQ?`)) {
-            window.open(response.reportUrl, '_blank');
-          }
-        } else {
-          this.projectState.setInfo(response.message);
-        }
+        this.nexusIqReport.set({ result: response, projectName: project.artifactId });
         this.projectState.scan(); // Refresh projects to get potential new results
       },
       error: (err) => {
