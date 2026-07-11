@@ -29,15 +29,23 @@
         </div>
 
         <div class="findings-header">
-          <h3>Security findings</h3>
-          <span>{{ summary.total }} policy {{ summary.total === 1 ? 'violation' : 'violations' }}</span>
+          <div class="header-left">
+            <h3>Security findings</h3>
+            <span>{{ summary.total }} policy {{ summary.total === 1 ? 'violation' : 'violations' }}</span>
+          </div>
+          @if (result.violations.length > 0) {
+            <button class="text-button" (click)="toggleAll()">
+              {{ allExpanded ? 'Collapse All' : 'Expand All' }}
+            </button>
+          }
         </div>
 
         @if (result.violations.length > 0) {
           <div class="findings-list">
             @for (violation of result.violations; track $index) {
-              <article class="finding" [class]="'finding ' + severity(violation)">
-                <div class="finding-heading">
+              <article class="finding" [class]="'finding ' + severity(violation)" [class.expanded]="isExpanded($index)">
+                <div class="finding-heading" (click)="toggleExpand($index)" role="button" [attr.aria-expanded]="isExpanded($index)">
+                  <span class="expand-icon">{{ isExpanded($index) ? '▼' : '▶' }}</span>
                   <span class="threat-level">{{ violation.threatLevel }}</span>
                   <div>
                     <h4>{{ violation.componentIdentifier || 'Unknown Component' }}</h4>
@@ -48,8 +56,9 @@
                   </div>
                 </div>
 
-                <div class="violation-details">
-                  @for (detail of violation.details; track $index) {
+                @if (isExpanded($index)) {
+                  <div class="violation-details">
+                    @for (detail of violation.details; track $index) {
                     <div class="detail-item" [class]="detail.waived ? 'waived' : ''">
                       <div class="detail-header">
                         <span class="detail-threat">{{ detail.threatLevel }}</span>
@@ -66,7 +75,8 @@
                     </div>
                   }
                 </div>
-              </article>
+              }
+            </article>
             }
           </div>
         } @else {

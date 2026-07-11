@@ -24,6 +24,32 @@ describe('NexusIqReportModalComponent', () => {
     expect(component.severity(finding(1))).toBe('low');
   });
 
+  it('toggles expansion state', () => {
+    const component = fixture.componentInstance;
+    component.result = {
+      message: 'test',
+      violations: [
+        { componentIdentifier: 'a', policyName: 'p', threatLevel: 5, reasons: [], directDependency: true, waived: false, details: [] },
+        { componentIdentifier: 'b', policyName: 'p', threatLevel: 5, reasons: [], directDependency: true, waived: false, details: [] }
+      ]
+    } as any;
+
+    expect(component.isExpanded(0)).toBeFalsy();
+    component.toggleExpand(0);
+    expect(component.isExpanded(0)).toBeTruthy();
+    component.toggleExpand(0);
+    expect(component.isExpanded(0)).toBeFalsy();
+
+    component.toggleAll();
+    expect(component.allExpanded).toBeTruthy();
+    expect(component.isExpanded(0)).toBeTruthy();
+    expect(component.isExpanded(1)).toBeTruthy();
+
+    component.toggleAll();
+    expect(component.allExpanded).toBeFalsy();
+    expect(component.isExpanded(0)).toBeFalsy();
+  });
+
   it('renders summary exact report link and detailed findings', () => {
     const result: NexusIqScanResponse = {
       message: 'Scan completed',
@@ -46,6 +72,14 @@ describe('NexusIqReportModalComponent', () => {
     expect([...element.querySelectorAll('.summary-card strong')].map(node => node.textContent?.trim())).toEqual(['1', '2', '3', '4', '10', '5']);
     expect(element.querySelector('.nexus-report-link')?.getAttribute('href')).toBe(result.reportUrl);
     expect(element.querySelector('.finding h4')?.textContent?.trim()).toBe('org.example : sample : 1.0');
+
+    // Details should be hidden by default
+    expect(element.querySelector('.violation-details')).toBeNull();
+
+    // Expand and check details
+    fixture.componentInstance.toggleExpand(0);
+    fixture.detectChanges();
+
     expect(element.querySelector('.detail-policy')?.textContent?.trim()).toBe('Security-Critical');
     expect(element.querySelector('.detail-reasons li')?.textContent?.trim()).toBe('Found test vulnerability.');
     expect([...element.querySelectorAll('.finding-badges span')].map(node => node.textContent?.trim())).toEqual(['Transitive', 'Waived']);

@@ -77,10 +77,32 @@
 .findings-header {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  align-items: center;
   border-bottom: 1px solid #e2e8f0;
   padding-bottom: 0.75rem;
   margin-bottom: 1rem;
+}
+
+.header-left {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+}
+
+.text-button {
+  background: none;
+  border: none;
+  color: #2563eb;
+  font-weight: 600;
+  font-size: 0.85rem;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+}
+
+.text-button:hover {
+  background: #f1f5f9;
+  text-decoration: underline;
 }
 
 .findings-header h3 {
@@ -117,8 +139,21 @@
 
 .finding-heading {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 0.8rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.expand-icon {
+  font-size: 0.7rem;
+  color: #64748b;
+  width: 1rem;
+  transition: transform 0.2s;
+}
+
+.finding.expanded {
+  background: #fdfdfd;
 }
 
 .finding-heading > div:nth-child(2) {
