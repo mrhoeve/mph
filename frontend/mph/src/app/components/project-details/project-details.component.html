@@ -33,16 +33,19 @@
       </div>
 
       @if (activeTab() === 'analysis') {
-        @if (project.hasSpringBootParent || project.canScanNexusIq) {
+        @if (project.canManageComponentVersions || project.canScanNexusIq) {
         <div class="project-actions">
-          @if (project.hasSpringBootParent) {
+          @if (project.canManageComponentVersions) {
             <div class="spring-upgrade-section">
               <button class="spring-manage-button" (click)="manageProperties.emit(project)">
-                <span class="icon">⚙️</span> Manage spring component versions
+                <span class="icon">⚙️</span>
+                {{ project.hasSpringBootParent ? 'Manage spring component versions' : 'Manage component versions' }}
               </button>
+              @if (project.hasSpringBootParent) {
               <button class="spring-button" (click)="upgradeSpringBoot.emit(project)">
                 <span class="icon">🍃</span> Upgrade Spring Boot
               </button>
+              }
             </div>
           }
           @if (project.canScanNexusIq) {

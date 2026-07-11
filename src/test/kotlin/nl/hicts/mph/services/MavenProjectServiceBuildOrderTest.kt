@@ -7,6 +7,8 @@ import nl.hicts.mph.models.Settings
 import org.apache.maven.model.Dependency
 import org.apache.maven.model.Model
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.io.File
 import java.nio.file.Path
@@ -75,5 +77,10 @@ class MavenProjectServiceBuildOrderTest {
         assertEquals(1, analysisA.usages.size)
         assertEquals("project-b", analysisA.usages[0].usedInArtifactId)
         assertEquals(0, analysisB.usages.size)
+        assertTrue(analysisA.canManageComponentVersions, "Modules should expose component version management")
+        assertTrue(analysisB.canManageComponentVersions, "Modules should expose component version management")
+
+        val rootAnalysis = service.analyzeProject(projectA, allProjects, projectMap, false, true, usageMap)
+        assertFalse(rootAnalysis.canManageComponentVersions, "Non-Spring root projects should not show the module action")
     }
 }

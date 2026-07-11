@@ -358,6 +358,7 @@ class MavenProjectService(
             modules = project.modules.map { analyzeProject(it, allProjects, projectMap, resolveProps, false, usageMap) }.sortedBy { it.artifactId },
             usages = usages,
             hasSpringBootParent = hasSpringBootParent,
+            canManageComponentVersions = hasSpringBootParent || !isRoot,
             springBootVersion = springBootVersion,
             managedProperties = propertiesWithViolations,
             latestTag = null,
@@ -410,19 +411,38 @@ class MavenProjectService(
         }.filter { it.scope == "import" && it.type == "pom" }
          .distinctBy { "${it.groupId}:${it.artifactId}:${it.version}" }
 
-        for (imp in allImports) {
-            val groupId = interpolate(imp.groupId, effectiveModel.properties)
-            val artifactId = interpolate(imp.artifactId, effectiveModel.properties)
-            val version = interpolate(imp.version, effectiveModel.properties)
-            
+        fun collectBom(groupId: String, artifactId: String, version: String) {
             val key = "$groupId:$artifactId:$version"
-            if (bomModels.containsKey(key)) continue
+            if (bomModels.containsKey(key)) return
             
             try {
-                bomModels[key] = modelResolver.resolveModel(groupId, artifactId, version)
+                val bomResult = modelResolver.resolveModelResult(groupId, artifactId, version)
+                val bomModel = bomResult.effectiveModel
+                bomModels[key] = bomModel
+
+                bomResult.modelIds
+                    .flatMap { modelId ->
+                        bomResult.getRawModel(modelId).dependencyManagement?.dependencies ?: emptyList()
+                    }
+                    .filter { it.scope == "import" && it.type == "pom" }
+                    .forEach { nestedImport ->
+                        collectBom(
+                            interpolate(nestedImport.groupId, bomModel.properties),
+                            interpolate(nestedImport.artifactId, bomModel.properties),
+                            interpolate(nestedImport.version, bomModel.properties)
+                        )
+                    }
             } catch (e: Exception) {
                 // Skip BOMs that cannot be resolved
             }
+        }
+
+        for (imp in allImports) {
+            collectBom(
+                interpolate(imp.groupId, effectiveModel.properties),
+                interpolate(imp.artifactId, effectiveModel.properties),
+                interpolate(imp.version, effectiveModel.properties)
+            )
         }
 
         val allPropsMap = mutableMapOf<String, ManagedProperty>()
@@ -463,11 +483,6 @@ class MavenProjectService(
                             break
                         }
                     }
-                }
-
-                // If it's a Spring Boot project and source is still "Inherited", it might be from the starter parent itself
-                if (source == "Inherited" && !isInRaw) {
-                    source = "Spring Boot"
                 }
 
                 allPropsMap[name] = ManagedProperty(
@@ -885,6 +900,7 @@ data class ProjectAnalysis(
     val modules: List<ProjectAnalysis>,
     val usages: List<ProjectUsage>,
     val hasSpringBootParent: Boolean = false,
+    val canManageComponentVersions: Boolean = false,
     val springBootVersion: String? = null,
     val managedProperties: List<ManagedProperty> = emptyList(),
     var latestTag: String? = null,

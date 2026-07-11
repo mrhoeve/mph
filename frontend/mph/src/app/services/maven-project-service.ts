@@ -11,6 +11,7 @@ export interface ProjectAnalysis {
   modules: ProjectAnalysis[];
   usages: ProjectUsage[];
   hasSpringBootParent: boolean;
+  canManageComponentVersions: boolean;
   springBootVersion?: string;
   managedProperties: ManagedProperty[];
   latestTag?: string;

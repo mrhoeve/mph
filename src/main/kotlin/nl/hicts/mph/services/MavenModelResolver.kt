@@ -114,6 +114,10 @@ class MavenModelResolver(private val workspaceProjects: Map<String, File> = empt
     }
 
     fun resolveModel(groupId: String, artifactId: String, version: String): Model {
+        return resolveModelResult(groupId, artifactId, version).effectiveModel
+    }
+
+    fun resolveModelResult(groupId: String, artifactId: String, version: String): ModelBuildingResult {
         val resolver = RepositoryModelResolver(
             repositorySystem,
             session,
@@ -130,8 +134,7 @@ class MavenModelResolver(private val workspaceProjects: Map<String, File> = empt
         modelBuildingRequest.systemProperties = System.getProperties()
         modelBuildingRequest.modelResolver = resolver
 
-        val modelBuildingResult = modelBuilder.build(modelBuildingRequest)
-        return modelBuildingResult.effectiveModel
+        return modelBuilder.build(modelBuildingRequest)
     }
 
     fun resolveDependencyTree(groupId: String, artifactId: String, version: String): org.eclipse.aether.graph.DependencyNode {
