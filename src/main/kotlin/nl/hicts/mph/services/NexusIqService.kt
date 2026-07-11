@@ -27,7 +27,7 @@ class NexusIqService(
         val file = File(projectPath)
         val projectDir = if (file.isFile) file.parentFile else file
         val jenkinsfile = File(projectDir, "Jenkinsfile")
-        
+
         if (!jenkinsfile.exists()) return null
 
         return try {
@@ -35,7 +35,7 @@ class NexusIqService(
             val regex = Regex("(?:servicePipeline|libraryPipeline)\\s*\\(\\s*['\"]([^'\"]+)['\"]")
             val match = regex.find(content)
             val baseName = match?.groupValues?.get(1)
-            
+
             if (baseName != null) {
                 val prefix = settings.nexusIqAppIdPrefix ?: ""
                 val suffix = settings.nexusIqAppIdSuffix ?: ""
@@ -54,7 +54,7 @@ class NexusIqService(
         val file = File(projectPath)
         val projectDir = if (file.isFile) file.parentFile else file
         val pomFile = File(projectDir, "pom.xml")
-        
+
         if (!pomFile.exists()) {
             return CompletableFuture.completedFuture(NexusIqScanResult("Error: pom.xml not found at ${projectDir.absolutePath}"))
         }
@@ -62,17 +62,17 @@ class NexusIqService(
         val serverUrl = settings.nexusIqUrl
         val user = settings.nexusIqUser
         val pass = settings.nexusIqPass
-        
+
         val applicationId = extractNexusIqAppId(projectDir.absolutePath, settings)
 
         if (serverUrl.isNullOrBlank()) {
             return CompletableFuture.completedFuture(NexusIqScanResult("Error: Nexus IQ Server URL not configured"))
         }
-        
+
         if (applicationId == null) {
             return CompletableFuture.completedFuture(NexusIqScanResult("Nexus IQ scan skipped: No Jenkinsfile with servicePipeline or libraryPipeline found"))
         }
-        
+
         logger.info("Triggering Nexus IQ scan for $projectPath with App ID: $applicationId")
 
         val args = mutableListOf(
@@ -114,13 +114,13 @@ class NexusIqService(
     fun getReportUrl(applicationId: String?, settings: Settings, forceRefresh: Boolean = false): String? {
         val serverUrl = settings.nexusIqUrl ?: return null
         if (applicationId == null) return null
-        
+
         if (!forceRefresh && reportUrlCache.containsKey(applicationId)) {
             return reportUrlCache[applicationId]
         }
 
         val latestFromApi = fetchLatestReportUrlFromApi(applicationId, settings)
-        
+
         if (latestFromApi != null) {
             reportUrlCache[applicationId] = latestFromApi
         }
@@ -217,7 +217,8 @@ class NexusIqService(
         }
     }
 
-    private fun formatComponentIdentifier(identifier: ComponentIdentifier): String {
+    private fun formatComponentIdentifier(identifier: ComponentIdentifier?): String {
+        if (identifier == null) return "Unknown"
         val coordinates = identifier.coordinates
         return listOfNotNull(
             identifier.format,
@@ -261,7 +262,7 @@ class NexusIqService(
 
     fun getVulnerabilitiesBatch(components: List<Triple<String, String, String>>): List<NexusIqPolicyViolation> {
         val settings = settingsService.loadSettings()
-        
+
         val results = mutableListOf<NexusIqPolicyViolation>()
         val toFetch = mutableListOf<Triple<String, String, String>>()
 
@@ -316,7 +317,7 @@ class NexusIqService(
                 val v = detail.componentIdentifier.coordinates["version"] ?: ""
                 val key = "$g:$a:$v"
                 val remediationVersion = detail.remediation?.version
-                
+
                 val violations = detail.policyData?.policyViolations?.map { violation ->
                     NexusIqPolicyViolation(
                         componentIdentifier = "maven:$g:$a:$v",
@@ -326,7 +327,7 @@ class NexusIqService(
                         remediationVersion = remediationVersion
                     )
                 } ?: emptyList()
-                
+
                 vulnerabilityCache[key] = violations
                 results.addAll(violations)
             }
@@ -356,13 +357,13 @@ data class NexusIqScanSummary(
 )
 
 data class NexusIqReportViolation(
-    val componentIdentifier: String,
+    val componentIdentifier: String? = null,
     val packageUrl: String? = null,
     val policyName: String,
     val threatLevel: Int,
     val reasons: List<String> = emptyList(),
-    val directDependency: Boolean,
-    val waived: Boolean
+    val directDependency: Boolean = false,
+    val waived: Boolean = false
 )
 
 private data class NexusIqReportDetails(
@@ -375,7 +376,7 @@ data class NexusIqPolicyReportResponse(
 )
 
 data class NexusIqReportComponent(
-    val componentIdentifier: ComponentIdentifier,
+    val componentIdentifier: ComponentIdentifier? = null,
     val displayName: String? = null,
     val packageUrl: String? = null,
     val dependencyData: NexusIqDependencyData? = null,
