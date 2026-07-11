@@ -2,7 +2,6 @@ package nl.hicts.mph.services
 
 import org.eclipse.jgit.api.Git
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -163,11 +162,12 @@ class GitServiceTest {
             git.commit().setMessage("feature change").setSign(false).call()
 
             val result = gitService.mergeIntoCurrent(git, git.repository.findRef("develop"), "master")
-            val mergeCommit = git.log().setMaxCount(1).call().firstOrNull()
+            val mergeCommits = git.log().setMaxCount(1).call().toList()
 
             assertTrue(result.mergeStatus.isSuccessful)
-            assertNotNull(mergeCommit)
-            assertEquals(2, mergeCommit!!.parentCount)
+            assertEquals(1, mergeCommits.size)
+            val mergeCommit = mergeCommits.single()
+            assertEquals(2, mergeCommit.parentCount)
             assertEquals("Test User", mergeCommit.authorIdent.name)
             assertEquals("Test.User@example.org", mergeCommit.authorIdent.emailAddress)
             assertEquals("Test User", mergeCommit.committerIdent.name)
