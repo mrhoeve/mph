@@ -85,5 +85,12 @@ class NexusIqGroupingTest {
         assertEquals("Critical-Policy", violation.details[0].policyName)
         assertEquals("Severe-Policy", violation.details[1].policyName)
         assertEquals(listOf("Reason 1", "Reason 2"), violation.reasons.sorted())
+
+        // Verify summary totals reflect individual violations, not grouped ones
+        val summary = result.summary!!
+        assertEquals(1, summary.critical) // Critical-Policy (9)
+        assertEquals(1, summary.severe)   // Severe-Policy (6)
+        assertEquals(2, summary.total)    // 1 critical + 1 severe
+        assertEquals(1, summary.affectedComponents)
     }
 }

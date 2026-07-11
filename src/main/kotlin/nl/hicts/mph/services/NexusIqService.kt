@@ -230,12 +230,12 @@ class NexusIqService(
 
             NexusIqReportDetails(
                 summary = NexusIqScanSummary(
-                    critical = violations.count { it.threatLevel >= 8 },
-                    severe = violations.count { it.threatLevel in 4..7 },
-                    moderate = violations.count { it.threatLevel in 2..3 },
-                    low = violations.count { it.threatLevel < 2 },
-                    total = violations.size,
-                    affectedComponents = violations.map { it.componentIdentifier }.distinct().size
+                    critical = ungroupedViolations.count { it.threatLevel >= 8 },
+                    severe = ungroupedViolations.count { it.threatLevel in 4..7 },
+                    moderate = ungroupedViolations.count { it.threatLevel in 2..3 },
+                    low = ungroupedViolations.count { it.threatLevel < 2 },
+                    total = ungroupedViolations.size,
+                    affectedComponents = violations.size
                 ),
                 violations = violations
             )
