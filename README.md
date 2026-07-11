@@ -36,6 +36,12 @@ This application was developed with the invaluable assistance of **Junie**, the 
 
 We love JetBrains tools, and Junie has been instrumental in bringing MPH to life!
 
+## Developed with OpenAI Codex
+
+This project is also developed and maintained with the assistance of **OpenAI Codex**, an AI coding agent used to explore the codebase, implement changes, and verify their correctness.
+
+[<img src="https://images.ctfassets.net/kftzwdyauwt9/77tJ5U1tgxHMZflZ5m4Z24/ace4d8b6ad200d87ebcb69c466344343/Blossom_4k_Icon_1.png?fm=webp&q=90&w=256" width="100" alt="OpenAI Logo">](https://openai.com/codex/)
+
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
@@ -46,4 +52,4 @@ Found a bug or have a feature request? Please report them to our [Issue Tracker]
 
 ---
 
-*Built for developers, by a developer (and Junie).*
+*Built for developers, by a developer (and Junie and OpenAI Codex).*
