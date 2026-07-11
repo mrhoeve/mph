@@ -181,7 +181,7 @@ class NexusIqService(
                 .block()
                 ?: return null
 
-            val violations = response.components.flatMap { component ->
+            val ungroupedViolations = response.components.flatMap { component ->
                 component.violations
                     .filter { it.policyThreatCategory == null || it.policyThreatCategory.equals("SECURITY", ignoreCase = true) }
                     .map { violation ->
@@ -198,7 +198,30 @@ class NexusIqService(
                             waived = violation.waived
                         )
                     }
-            }.sortedWith(compareByDescending<NexusIqReportViolation> { it.threatLevel }.thenBy { it.componentIdentifier })
+            }
+
+            val violations = ungroupedViolations.groupBy { it.componentIdentifier }
+                .map { (id, componentViolations) ->
+                    val maxViolation = componentViolations.maxByOrNull { it.threatLevel }!!
+                    NexusIqReportViolation(
+                        componentIdentifier = id,
+                        packageUrl = maxViolation.packageUrl,
+                        policyName = maxViolation.policyName,
+                        threatLevel = maxViolation.threatLevel,
+                        reasons = componentViolations.flatMap { it.reasons }.distinct(),
+                        directDependency = maxViolation.directDependency,
+                        waived = componentViolations.any { it.waived },
+                        details = componentViolations.map {
+                            NexusIqReportViolationDetail(
+                                policyName = it.policyName,
+                                threatLevel = it.threatLevel,
+                                reasons = it.reasons,
+                                waived = it.waived
+                            )
+                        }.sortedByDescending { it.threatLevel }
+                    )
+                }
+                .sortedWith(compareByDescending<NexusIqReportViolation> { it.threatLevel }.thenBy { it.componentIdentifier })
 
             NexusIqReportDetails(
                 summary = NexusIqScanSummary(
@@ -363,7 +386,15 @@ data class NexusIqReportViolation(
     val threatLevel: Int,
     val reasons: List<String> = emptyList(),
     val directDependency: Boolean = false,
-    val waived: Boolean = false
+    val waived: Boolean = false,
+    val details: List<NexusIqReportViolationDetail> = emptyList()
+)
+
+data class NexusIqReportViolationDetail(
+    val policyName: String,
+    val threatLevel: Int,
+    val reasons: List<String>,
+    val waived: Boolean
 )
 
 private data class NexusIqReportDetails(

@@ -109,12 +109,20 @@ export interface NexusIqScanSummary {
 }
 
 export interface NexusIqReportViolation {
-  componentIdentifier: string;
+  componentIdentifier?: string;
   packageUrl?: string;
   policyName: string;
   threatLevel: number;
   reasons: string[];
   directDependency: boolean;
+  waived: boolean;
+  details: NexusIqReportViolationDetail[];
+}
+
+export interface NexusIqReportViolationDetail {
+  policyName: string;
+  threatLevel: number;
+  reasons: string[];
   waived: boolean;
 }
 

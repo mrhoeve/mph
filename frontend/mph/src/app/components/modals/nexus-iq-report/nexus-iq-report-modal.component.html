@@ -40,21 +40,32 @@
                 <div class="finding-heading">
                   <span class="threat-level">{{ violation.threatLevel }}</span>
                   <div>
-                    <h4>{{ violation.componentIdentifier }}</h4>
-                    <p>{{ violation.policyName }}</p>
+                    <h4>{{ violation.componentIdentifier || 'Unknown Component' }}</h4>
                   </div>
                   <div class="finding-badges">
                     <span>{{ violation.directDependency ? 'Direct' : 'Transitive' }}</span>
                     @if (violation.waived) { <span class="waived">Waived</span> }
                   </div>
                 </div>
-                @if (violation.reasons.length > 0) {
-                  <ul>
-                    @for (reason of violation.reasons; track reason) {
-                      <li>{{ reason }}</li>
-                    }
-                  </ul>
-                }
+
+                <div class="violation-details">
+                  @for (detail of violation.details; track $index) {
+                    <div class="detail-item" [class]="detail.waived ? 'waived' : ''">
+                      <div class="detail-header">
+                        <span class="detail-threat">{{ detail.threatLevel }}</span>
+                        <span class="detail-policy">{{ detail.policyName }}</span>
+                        @if (detail.waived) { <span class="badge waived">Waived</span> }
+                      </div>
+                      @if (detail.reasons.length > 0) {
+                        <ul class="detail-reasons">
+                          @for (reason of detail.reasons; track reason) {
+                            <li>{{ reason }}</li>
+                          }
+                        </ul>
+                      }
+                    </div>
+                  }
+                </div>
               </article>
             }
           </div>

@@ -13,7 +13,7 @@ describe('NexusIqReportModalComponent', () => {
   it('classifies every threat-level boundary', () => {
     const component = fixture.componentInstance;
     const finding = (threatLevel: number) => ({
-      componentIdentifier: 'sample', policyName: 'policy', threatLevel, reasons: [], directDependency: true, waived: false
+      componentIdentifier: 'sample', policyName: 'policy', threatLevel, reasons: [], directDependency: true, waived: false, details: []
     });
 
     expect(component.severity(finding(8))).toBe('critical');
@@ -32,7 +32,10 @@ describe('NexusIqReportModalComponent', () => {
       violations: [{
         componentIdentifier: 'org.example : sample : 1.0', packageUrl: 'pkg:maven/org.example/sample@1.0',
         policyName: 'Security-Critical', threatLevel: 9, reasons: ['Found test vulnerability.'],
-        directDependency: false, waived: true
+        directDependency: false, waived: true,
+        details: [{
+          policyName: 'Security-Critical', threatLevel: 9, reasons: ['Found test vulnerability.'], waived: true
+        }]
       }]
     };
     fixture.componentRef.setInput('result', result);
@@ -43,8 +46,8 @@ describe('NexusIqReportModalComponent', () => {
     expect([...element.querySelectorAll('.summary-card strong')].map(node => node.textContent?.trim())).toEqual(['1', '2', '3', '4', '10', '5']);
     expect(element.querySelector('.nexus-report-link')?.getAttribute('href')).toBe(result.reportUrl);
     expect(element.querySelector('.finding h4')?.textContent?.trim()).toBe('org.example : sample : 1.0');
-    expect(element.querySelector('.finding p')?.textContent?.trim()).toBe('Security-Critical');
-    expect(element.querySelector('.finding li')?.textContent?.trim()).toBe('Found test vulnerability.');
+    expect(element.querySelector('.detail-policy')?.textContent?.trim()).toBe('Security-Critical');
+    expect(element.querySelector('.detail-reasons li')?.textContent?.trim()).toBe('Found test vulnerability.');
     expect([...element.querySelectorAll('.finding-badges span')].map(node => node.textContent?.trim())).toEqual(['Transitive', 'Waived']);
   });
 
