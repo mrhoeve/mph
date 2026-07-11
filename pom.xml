@@ -165,6 +165,18 @@
 			<artifactId>org.eclipse.jgit.http.apache</artifactId>
 			<version>${jgit.version}</version>
 		</dependency>
+		<dependency>
+			<groupId>io.netty</groupId>
+			<artifactId>netty-resolver-dns-native-macos</artifactId>
+			<classifier>osx-x86_64</classifier>
+			<scope>runtime</scope>
+		</dependency>
+		<dependency>
+			<groupId>io.netty</groupId>
+			<artifactId>netty-resolver-dns-native-macos</artifactId>
+			<classifier>osx-aarch_64</classifier>
+			<scope>runtime</scope>
+		</dependency>
 	</dependencies>
 
 	<build>
