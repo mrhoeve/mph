@@ -2,6 +2,7 @@ package nl.hicts.mph.services
 
 import org.eclipse.jgit.api.Git
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -131,6 +132,66 @@ class GitServiceTest {
             assertEquals("master", status?.branchName)
             assertEquals(1, status?.aheadCount)
             assertEquals(2, status?.behindCount)
+        }
+    }
+
+    @Test
+    fun `should preserve configured identity exactly in merge commit`() {
+        val repoDir = tempDir.resolve("merge-identity").toFile()
+        repoDir.mkdirs()
+
+        Git.init().setDirectory(repoDir).call().use { git ->
+            git.repository.config.apply {
+                setString("user", null, "name", "Test User")
+                setString("user", null, "email", "Test.User@example.org")
+                save()
+            }
+
+            File(repoDir, "base.txt").writeText("base")
+            git.add().addFilepattern("base.txt").call()
+            val baseCommit = git.commit().setMessage("initial").setSign(false).call()
+
+            git.branchCreate().setName("develop").setStartPoint(baseCommit).call()
+            git.checkout().setName("develop").call()
+            File(repoDir, "develop.txt").writeText("develop")
+            git.add().addFilepattern("develop.txt").call()
+            git.commit().setMessage("develop change").setSign(false).call()
+
+            git.checkout().setName("master").call()
+            File(repoDir, "feature.txt").writeText("feature")
+            git.add().addFilepattern("feature.txt").call()
+            git.commit().setMessage("feature change").setSign(false).call()
+
+            val result = gitService.mergeIntoCurrent(git, git.repository.findRef("develop"), "master")
+            val mergeCommit = git.log().setMaxCount(1).call().firstOrNull()
+
+            assertTrue(result.mergeStatus.isSuccessful)
+            assertNotNull(mergeCommit)
+            assertEquals(2, mergeCommit!!.parentCount)
+            assertEquals("Test User", mergeCommit.authorIdent.name)
+            assertEquals("Test.User@example.org", mergeCommit.authorIdent.emailAddress)
+            assertEquals("Test User", mergeCommit.committerIdent.name)
+            assertEquals("Test.User@example.org", mergeCommit.committerIdent.emailAddress)
+        }
+    }
+
+    @Test
+    fun `should use git defaults for missing identity values`() {
+        val repoDir = tempDir.resolve("partial-identity").toFile()
+        repoDir.mkdirs()
+
+        Git.init().setDirectory(repoDir).call().use { git ->
+            val defaultIdentity = org.eclipse.jgit.lib.PersonIdent(git.repository)
+            git.repository.config.apply {
+                setString("user", null, "name", "Exact Name")
+                unset("user", null, "email")
+                save()
+            }
+
+            val identity = gitService.resolveCommitIdentity(git.repository)
+
+            assertEquals("Exact Name", identity.name)
+            assertEquals(defaultIdentity.emailAddress, identity.emailAddress)
         }
     }
 }

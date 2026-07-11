@@ -2,6 +2,9 @@ package nl.hicts.mph.services
 
 import org.eclipse.jgit.api.Git
 import org.eclipse.jgit.api.ListBranchCommand
+import org.eclipse.jgit.api.MergeResult
+import org.eclipse.jgit.lib.PersonIdent
+import org.eclipse.jgit.lib.Ref
 import org.eclipse.jgit.lib.Repository
 import org.eclipse.jgit.revwalk.RevCommit
 import org.eclipse.jgit.revwalk.RevTag
@@ -148,7 +151,7 @@ class GitService {
                 if (mergeIntoCurrent && currentBranch != "develop") {
                     logger.info("Merging develop into $currentBranch for ${repoDir.absolutePath}")
                     val developRef = repository.findRef("develop")
-                    val result = git.merge().include(developRef).call()
+                    val result = mergeIntoCurrent(git, developRef, currentBranch)
                     if (!result.mergeStatus.isSuccessful) {
                         logger.warn("Merge develop into $currentBranch failed for ${repoDir.absolutePath}: ${result.mergeStatus}")
                         return "Sync completed, but merge into $currentBranch failed with status: ${result.mergeStatus}. You may have conflicts."
@@ -168,6 +171,45 @@ class GitService {
                 }
                 throw RuntimeException("Sync develop failed for ${repoDir.name}: ${e.message}")
             }
+        }
+    }
+
+    internal fun mergeIntoCurrent(git: Git, sourceRef: Ref, currentBranch: String): MergeResult {
+        val result = git.merge()
+            .include(sourceRef)
+            .setCommit(false)
+            .call()
+
+        if (result.mergeStatus == MergeResult.MergeStatus.MERGED_NOT_COMMITTED) {
+            val repository = git.repository
+            val identity = resolveCommitIdentity(repository)
+            val sourceBranch = sourceRef.name.substringAfterLast('/')
+            val message = repository.readMergeCommitMsg()?.takeIf { it.isNotBlank() }
+                ?: "Merge branch '$sourceBranch' into $currentBranch"
+
+            git.commit()
+                .setMessage(message)
+                .setAuthor(identity)
+                .setCommitter(identity)
+                .setSign(false)
+                .call()
+        }
+
+        return result
+    }
+
+    internal fun resolveCommitIdentity(repository: Repository): PersonIdent {
+        val defaultIdentity = PersonIdent(repository)
+        val configuredName = repository.config.getString("user", null, "name")?.takeIf { it.isNotBlank() }
+        val configuredEmail = repository.config.getString("user", null, "email")?.takeIf { it.isNotBlank() }
+
+        return if (configuredName == null && configuredEmail == null) {
+            defaultIdentity
+        } else {
+            PersonIdent(
+                configuredName ?: defaultIdentity.name,
+                configuredEmail ?: defaultIdentity.emailAddress
+            )
         }
     }
 
