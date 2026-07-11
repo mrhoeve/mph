@@ -2,6 +2,7 @@ package nl.hicts.mph.services
 
 import nl.hicts.mph.logging.LoggerDelegate
 import nl.hicts.mph.models.Settings
+import org.springframework.core.ParameterizedTypeReference
 import org.springframework.stereotype.Service
 import org.springframework.web.reactive.function.client.WebClient
 import java.io.File
@@ -12,10 +13,11 @@ import java.util.concurrent.ConcurrentHashMap
 @Service
 class NexusIqService(
     private val settingsService: SettingsService,
-    private val mavenCommandService: MavenCommandService
+    private val mavenCommandService: MavenCommandService,
+    webClientBuilder: WebClient.Builder = WebClient.builder()
 ) {
     private val logger by LoggerDelegate()
-    private val webClient = WebClient.builder().build()
+    private val webClient = webClientBuilder.build()
     private val vulnerabilityCache = ConcurrentHashMap<String, List<NexusIqPolicyViolation>>()
     private val reportUrlCache = ConcurrentHashMap<String, String>()
     private val internalIdCache = ConcurrentHashMap<String, String>()
@@ -102,19 +104,19 @@ class NexusIqService(
             return reportUrlCache[applicationId]
         }
 
-        val baseUrl = serverUrl.removeSuffix("/")
         val latestFromApi = fetchLatestReportUrlFromApi(applicationId, settings)
         
-        val url = latestFromApi ?: "$baseUrl/ui/links/application/$applicationId/report/latest"
-        reportUrlCache[applicationId] = url
-        return url
+        if (latestFromApi != null) {
+            reportUrlCache[applicationId] = latestFromApi
+        }
+        return latestFromApi
     }
 
     private fun fetchLatestReportUrlFromApi(applicationId: String, settings: Settings): String? {
         val serverUrl = settings.nexusIqUrl ?: return null
         val internalId = getInternalApplicationId(applicationId, settings) ?: return null
         try {
-            val response = webClient.get()
+            val reports = webClient.get()
                 .uri("${serverUrl.removeSuffix("/")}/api/v2/reports/applications/$internalId")
                 .headers { headers ->
                     if (!settings.nexusIqUser.isNullOrBlank() && !settings.nexusIqPass.isNullOrBlank()) {
@@ -122,22 +124,25 @@ class NexusIqService(
                     }
                 }
                 .retrieve()
-                .bodyToMono(ApplicationReportsResponse::class.java)
+                .bodyToMono(object : ParameterizedTypeReference<List<ApplicationReport>>() {})
                 .block()
 
-            val latestReport = response?.reports?.maxByOrNull { it.evaluationDate }
+            val latestReport = reports?.maxByOrNull { it.evaluationDate }
             if (latestReport != null) {
-                return if (latestReport.reportHtmlUrl.startsWith("http")) {
-                    latestReport.reportHtmlUrl
-                } else {
-                    "${serverUrl.removeSuffix("/")}/${latestReport.reportHtmlUrl}"
-                }
+                return resolveReportUrl(serverUrl, latestReport.reportHtmlUrl)
             }
         } catch (e: Exception) {
             logger.warn("Failed to fetch latest report URL for $applicationId from API: ${e.message}")
         }
         return null
     }
+
+    internal fun resolveReportUrl(serverUrl: String, reportHtmlUrl: String): String =
+        if (reportHtmlUrl.startsWith("http://") || reportHtmlUrl.startsWith("https://")) {
+            reportHtmlUrl
+        } else {
+            "${serverUrl.trimEnd('/')}/${reportHtmlUrl.trimStart('/')}"
+        }
 
     private fun getInternalApplicationId(publicId: String, settings: Settings): String? {
         val cached = internalIdCache[publicId]
@@ -269,10 +274,6 @@ data class NexusIqPolicyViolation(
     val policyName: String,
     val constraintViolations: List<String>,
     val remediationVersion: String?
-)
-
-data class ApplicationReportsResponse(
-    val reports: List<ApplicationReport> = emptyList()
 )
 
 data class ApplicationReport(

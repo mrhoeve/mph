@@ -9,6 +9,11 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
+import org.springframework.http.HttpStatus
+import org.springframework.http.MediaType
+import org.springframework.web.reactive.function.client.ClientResponse
+import org.springframework.web.reactive.function.client.WebClient
+import reactor.core.publisher.Mono
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
@@ -50,7 +55,7 @@ class NexusIqServiceTest {
 
         val result = service.scan(projectDir.toString()).get()
         assertEquals("Scan completed successfully for $projectDir", result.message)
-        assertEquals("https://iq.example.com/ui/links/application/test-prefix:a-project-svc-test/report/latest", result.reportUrl)
+        assertEquals(null, result.reportUrl)
 
         val args = argsSlot.captured
         assertTrue(args.contains("com.sonatype.clm:clm-maven-plugin:evaluate"), "Should use clm-maven-plugin")
@@ -82,7 +87,7 @@ class NexusIqServiceTest {
 
         val result = service.scan(pomFile.toString()).get()
         assertEquals("Scan completed successfully for ${pomFile.toString()}", result.message)
-        assertEquals("https://iq.example.com/ui/links/application/b-project-svc/report/latest", result.reportUrl)
+        assertEquals(null, result.reportUrl)
         
         // Verify that the command was run in projectDir, not in pomFile path
         verify { 
@@ -163,17 +168,41 @@ class NexusIqServiceTest {
     }
 
     @Test
-    fun `should construct correct report URL`() {
+    fun `should return exact report URL from Nexus IQ reports API`() {
         val settings = Settings(
             basePath = tempDir,
             maxScanDepth = 3,
             nexusIqUrl = "https://iq.example.com/"
         )
-        
-        val url = service.getReportUrl("my-app", settings)
-        assertEquals("https://iq.example.com/ui/links/application/my-app/report/latest", url)
-        
-        val urlNoSlash = service.getReportUrl("my-app", settings.copy(nexusIqUrl = "https://iq.example.com"))
-        assertEquals("https://iq.example.com/ui/links/application/my-app/report/latest", urlNoSlash)
+
+        val webClientBuilder = WebClient.builder().exchangeFunction { request ->
+            val body = if (request.url().path.endsWith("/api/v2/applications")) {
+                """{"applications":[{"id":"internal-app-id","publicId":"my-app"}]}"""
+            } else {
+                """[{"stage":"build","reportHtmlUrl":"ui/links/application/my-app/report/report-id-123","evaluationDate":"2026-07-11T10:15:30Z"}]"""
+            }
+            Mono.just(
+                ClientResponse.create(HttpStatus.OK)
+                    .header("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                    .body(body)
+                    .build()
+            )
+        }
+        val serviceWithApi = NexusIqService(settingsService, mavenCommandService, webClientBuilder)
+
+        val url = serviceWithApi.getReportUrl("my-app", settings)
+
+        assertEquals("https://iq.example.com/ui/links/application/my-app/report/report-id-123", url)
+    }
+
+    @Test
+    fun `should preserve absolute report URL returned by Nexus IQ`() {
+        assertEquals(
+            "https://reports.example.com/ui/links/application/my-app/report/report-id-123",
+            service.resolveReportUrl(
+                "https://iq.example.com",
+                "https://reports.example.com/ui/links/application/my-app/report/report-id-123"
+            )
+        )
     }
 }
