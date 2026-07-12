@@ -27,7 +27,7 @@ class GitServiceTest {
             git.commit().setMessage("initial commit").setSign(false).call()
 
             // Prepare a new branch
-            gitService.prepareBranch(repoDir.absolutePath, "feature-test")
+            gitService.prepareBranch(repoDir, "feature-test")
 
             val branches = git.branchList().call()
             assertTrue(branches.any { it.name == "refs/heads/feature-test" })
@@ -72,7 +72,7 @@ class GitServiceTest {
 
             // 4. Verify getLatestTagInfo returns 1.2.3 (from the tag)
             // Note: fetch origin will fail in this local-only test, but the code handles it
-            val info = gitService.getLatestTagInfo(pomFile.absolutePath)
+            val info = gitService.getLatestTagInfo(pomFile)
             assertEquals("1.2.3", info?.version)
             assertEquals("v1.2.3", info?.tagName)
         }
@@ -96,7 +96,7 @@ class GitServiceTest {
             git.add().addFilepattern("pom.xml").call()
             git.commit().setMessage("initial commit").setSign(false).call()
 
-            val info = gitService.getLatestTagInfo(pomFile.absolutePath)
+            val info = gitService.getLatestTagInfo(pomFile)
             assertTrue(info == null, "Expected null info when no tags exist, but got $info")
         }
     }
@@ -129,7 +129,7 @@ class GitServiceTest {
             git.commit().setMessage("master commit 1").setSign(false).call()
 
             // Status: master is 1 ahead, 2 behind develop
-            val status = gitService.getGitStatus(repoDir.absolutePath)
+            val status = gitService.getGitStatus(repoDir)
             assertEquals("master", status?.branchName)
             assertEquals(1, status?.aheadCount)
             assertEquals(2, status?.behindCount)
@@ -219,7 +219,7 @@ class GitServiceTest {
                 val tasks = (1..30).map { index ->
                     Callable {
                         if (index % 3 == 0) gitService.clearCache()
-                        gitService.getLatestTagInfo(pomFile.absolutePath)?.version
+                        gitService.getLatestTagInfo(pomFile)?.version
                     }
                 }
 

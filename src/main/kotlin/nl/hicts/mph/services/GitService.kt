@@ -54,10 +54,10 @@ class GitService {
         fetchedRepos.clear()
     }
 
-    fun prepareBranch(projectPath: String, branchName: String) {
+    fun prepareBranch(projectPath: File, branchName: String) {
         if (branchName.isBlank()) return
 
-        val repoDir = findGitRoot(File(projectPath)) ?: run {
+        val repoDir = findGitRoot(projectPath) ?: run {
             logger.warn("No Git repository found for path: $projectPath")
             return
         }
@@ -117,8 +117,8 @@ class GitService {
         }
     }
 
-    fun syncDevelop(projectPath: String, mergeIntoCurrent: Boolean = false): String? {
-        val repoDir = findGitRoot(File(projectPath)) ?: run {
+    fun syncDevelop(projectPath: File, mergeIntoCurrent: Boolean = false): String? {
+        val repoDir = findGitRoot(projectPath) ?: run {
             logger.warn("No Git repository found for path: $projectPath")
             return null
         }
@@ -215,8 +215,8 @@ class GitService {
         }
     }
 
-    fun getGitStatus(projectPath: String): GitStatus? {
-        val repoDir = findGitRoot(File(projectPath)) ?: return null
+    fun getGitStatus(projectPath: File): GitStatus? {
+        val repoDir = findGitRoot(projectPath) ?: return null
         return try {
             Git.open(repoDir).use { git ->
                 val repository = git.repository
@@ -258,16 +258,16 @@ class GitService {
         }
     }
 
-    fun getLatestTagInfo(projectPath: String): TagInfo? {
-        val repoDir = findGitRoot(File(projectPath)) ?: return null
-        val normalizedProjectPath = File(projectPath).toPath().toAbsolutePath().normalize().toString()
+    fun getLatestTagInfo(projectPath: File): TagInfo? {
+        val repoDir = findGitRoot(projectPath) ?: return null
+        val normalizedProjectPath = projectPath.toPath().toAbsolutePath().normalize().toString()
         
         if (tagCache.containsKey(normalizedProjectPath)) {
             return tagCache[normalizedProjectPath].let { if (it === noTag) null else it as TagInfo }
         }
 
         val gitRootPath = repoDir.toPath().toAbsolutePath().normalize()
-        val pomPath = File(projectPath).toPath().toAbsolutePath().normalize()
+        val pomPath = projectPath.toPath().toAbsolutePath().normalize()
         val relativePomPath = gitRootPath.relativize(pomPath).toString().replace(File.separator, "/")
 
         return try {

@@ -32,4 +32,19 @@ class FileSystemControllerIntegrationTest {
             .jsonPath("$.nexusIqUser").isEqualTo("test-user")
             .jsonPath("$.nexusIqPass").doesNotExist()
     }
+
+    @Test
+    fun `folders endpoint rejects paths not previously exposed by the server`() {
+        val settingsService = mockk<SettingsService>()
+        every { settingsService.loadSettings() } returns Settings(tempDir, 3)
+        val client = WebTestClient.bindToController(FileSystemController(settingsService)).build()
+
+        client.get().uri { builder ->
+            builder.path("/api/filesystem/folders")
+                .queryParam("path", tempDir.resolve("not-exposed").toString())
+                .build()
+        }
+            .exchange()
+            .expectStatus().isBadRequest
+    }
 }

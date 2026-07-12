@@ -48,6 +48,7 @@ class FileSystemControllerTest {
     @Test
     fun `folders should browse requested path without marking it remembered`() {
         every { settingsService.loadSettings() } returns configuredSettings(tempDir)
+        controller.current()
 
         val response = controller.folders(tempDir.toString())
 
@@ -60,6 +61,7 @@ class FileSystemControllerTest {
     fun `saveBase should persist every setting and return selected folder`() {
         every { settingsService.loadSettings() } returns configuredSettings(tempDir)
         every { settingsService.saveSettings(any(), any(), any(), any(), any(), any(), any()) } returns Unit
+        controller.current()
         val request = SaveSettingsRequest(
             path = tempDir.toString(),
             maxScanDepth = 8,
@@ -96,7 +98,7 @@ class FileSystemControllerTest {
             controller.saveBase(SaveSettingsRequest(missing.toString(), 3))
         }
 
-        assertEquals("Folder does not exist or is not a directory: $missing", exception.message)
+        assertEquals("Folder was not provided by the server: $missing", exception.message)
         verify(exactly = 0) { settingsService.saveSettings(any(), any(), any(), any(), any(), any(), any()) }
     }
 
@@ -105,15 +107,30 @@ class FileSystemControllerTest {
         val file = tempDir.resolve("pom.xml")
         Files.writeString(file, "<project/>")
         every { settingsService.loadSettings() } returns configuredSettings(tempDir)
+        controller.current()
 
         val exception = assertThrows(InvalidFolderException::class.java) {
             controller.folders(file.toString())
         }
 
         assertEquals(
-            "Folder does not exist or is not a directory: ${file.toAbsolutePath().normalize()}",
+            "Folder was not provided by the server: $file",
             exception.message
         )
+    }
+
+    @Test
+    fun `folders should reject an existing directory that was not exposed`() {
+        val exposed = Files.createDirectories(tempDir.resolve("exposed"))
+        val unexposed = Files.createDirectories(tempDir.resolve("unexposed").resolve("nested"))
+        every { settingsService.loadSettings() } returns configuredSettings(exposed)
+        controller.current()
+
+        val exception = assertThrows(InvalidFolderException::class.java) {
+            controller.folders(unexposed.toString())
+        }
+
+        assertEquals("Folder was not provided by the server: $unexposed", exception.message)
     }
 
     private fun configuredSettings(path: Path) = Settings(

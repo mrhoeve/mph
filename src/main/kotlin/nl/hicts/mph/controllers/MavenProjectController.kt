@@ -116,7 +116,9 @@ class MavenProjectController(
 
     @GetMapping("/api/projects/latest-tag")
     fun getLatestTag(@RequestParam path: String): TagInfo? {
-        return mavenProjectService.getLatestTag(path)
+        val settings = settingsService.loadSettings()
+        val basePath = settings.basePath ?: throw RuntimeException("Base path not set")
+        return mavenProjectService.getLatestTag(basePath, settings.maxScanDepth, path)
     }
 
     @GetMapping("/api/projects/build-order")
@@ -131,7 +133,7 @@ class MavenProjectController(
     fun syncDevelop(@RequestBody request: SyncDevelopRequest): SyncDevelopResponse {
         val settings = settingsService.loadSettings()
         val basePath = settings.basePath ?: throw RuntimeException("Base path not set")
-        val messages = mavenProjectService.syncDevelop(request.rootProjectPaths, request.mergeDevelop ?: false)
+        val messages = mavenProjectService.syncDevelop(basePath, settings.maxScanDepth, request.rootProjectPaths, request.mergeDevelop ?: false)
         val projects = mavenProjectService.scanAndAnalyze(basePath, settings.maxScanDepth)
         return SyncDevelopResponse(projects, messages)
     }

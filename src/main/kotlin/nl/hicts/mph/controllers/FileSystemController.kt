@@ -14,7 +14,7 @@ import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
-import java.util.Properties
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.io.path.absolutePathString
 import kotlin.io.path.exists
 import kotlin.io.path.isDirectory
@@ -23,6 +23,7 @@ import kotlin.io.path.isDirectory
 class FileSystemController(
     private val settingsService: SettingsService
 ) {
+    private val exposedFolders = ConcurrentHashMap<String, Path>()
 
     @GetMapping("/api/filesystem/current")
     fun current(): FolderResponse {
@@ -39,16 +40,12 @@ class FileSystemController(
     @GetMapping("/api/filesystem/folders")
     fun folders(@RequestParam path: String): FolderResponse {
         val settings = settingsService.loadSettings()
-        return folderResponse(Paths.get(path), remembered = false, maxScanDepth = settings.maxScanDepth)
+        return folderResponse(resolveExposedFolder(path), remembered = false, maxScanDepth = settings.maxScanDepth)
     }
 
     @PostMapping("/api/filesystem/base")
     fun saveBase(@RequestBody request: SaveSettingsRequest): FolderResponse {
-        val path = Paths.get(request.path)
-
-        if (!path.exists() || !path.isDirectory()) {
-            throw InvalidFolderException("Folder does not exist or is not a directory: ${request.path}")
-        }
+        val path = resolveExposedFolder(request.path)
 
         settingsService.saveSettings(path, request.maxScanDepth, request.nexusIqUrl, request.nexusIqUser, request.nexusIqPass, request.nexusIqAppIdPrefix, request.nexusIqAppIdSuffix)
 
@@ -63,15 +60,20 @@ class FileSystemController(
             throw InvalidFolderException("Folder does not exist or is not a directory: $normalizedPath")
         }
 
+        expose(normalizedPath)
+        normalizedPath.parent?.let(::expose)
+
         val children = try {
             Files.list(normalizedPath).use { stream ->
                 stream
                     .filter { Files.isDirectory(it) }
                     .sorted(Comparator.comparing<Path, String> { it.fileName.toString().lowercase() })
                     .map {
+                        val child = it.toAbsolutePath().normalize()
+                        expose(child)
                         FolderItem(
                             name = it.fileName.toString(),
-                            path = it.toAbsolutePath().normalize().absolutePathString()
+                            path = child.absolutePathString()
                         )
                     }
                     .toList()
@@ -95,6 +97,13 @@ class FileSystemController(
             children = children
         )
     }
+
+    private fun expose(path: Path) {
+        exposedFolders[path.absolutePathString()] = path
+    }
+
+    private fun resolveExposedFolder(path: String): Path = exposedFolders[path]
+        ?: throw InvalidFolderException("Folder was not provided by the server: $path")
 }
 
 data class FolderResponse(

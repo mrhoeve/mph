@@ -47,8 +47,9 @@ class MavenProjectService(
 
     private var modelResolver = MavenModelResolver()
 
-    fun getLatestTag(projectPath: String): TagInfo? {
-        return gitService.getLatestTagInfo(projectPath)
+    fun getLatestTag(basePath: Path, maxDepth: Int, projectPath: String): TagInfo? {
+        val project = findExposedProject(basePath, maxDepth, projectPath)
+        return gitService.getLatestTagInfo(project.pomLocation)
     }
 
     fun scanAndAnalyze(basePath: Path, maxDepth: Int): List<ProjectAnalysis> {
@@ -100,7 +101,9 @@ class MavenProjectService(
         if (!branchName.isNullOrBlank()) {
             for (rootPath in rootProjectPaths) {
                 try {
-                    gitService.prepareBranch(rootPath, branchName)
+                    val project = allProjects.find { it.pomLocation.absolutePath == rootPath }
+                        ?: throw IllegalArgumentException("Project was not found in the configured workspace: $rootPath")
+                    gitService.prepareBranch(project.pomLocation, branchName)
                 } catch (e: Exception) {
                     throw RuntimeException("Failed to prepare Git branch for $rootPath: ${e.message}")
                 }
@@ -219,11 +222,15 @@ class MavenProjectService(
         }
     }
 
-    fun syncDevelop(rootProjectPaths: List<String>, mergeDevelop: Boolean = false): List<String> {
+    fun syncDevelop(basePath: Path, maxDepth: Int, rootProjectPaths: List<String>, mergeDevelop: Boolean = false): List<String> {
+        val projectsByPath = flattenProjects(ScanProjectUtil.searchAllMavenProjects(basePath.toFile(), maxDepth))
+            .associateBy { it.pomLocation.absolutePath }
         val messages = mutableListOf<String>()
         for (rootPath in rootProjectPaths) {
             try {
-                gitService.syncDevelop(rootPath, mergeDevelop)?.let {
+                val project = projectsByPath[rootPath]
+                    ?: throw IllegalArgumentException("Project was not found in the configured workspace: $rootPath")
+                gitService.syncDevelop(project.pomLocation, mergeDevelop)?.let {
                     messages.add(it)
                 }
             } catch (e: Exception) {
@@ -254,6 +261,12 @@ class MavenProjectService(
             result.addAll(flattenProjects(project.modules))
         }
         return result
+    }
+
+    private fun findExposedProject(basePath: Path, maxDepth: Int, projectPath: String): MavenProject {
+        return flattenProjects(ScanProjectUtil.searchAllMavenProjects(basePath.toFile(), maxDepth))
+            .find { it.pomLocation.absolutePath == projectPath }
+            ?: throw IllegalArgumentException("Project was not found in the configured workspace: $projectPath")
     }
 
     private fun isSpringBootProject(project: MavenProject, allProjects: List<MavenProject>, projectMap: Map<String, MavenProject>): Boolean {
@@ -348,7 +361,7 @@ class MavenProjectService(
             if (violationsForProp.isNotEmpty()) prop.copy(nexusIqViolations = violationsForProp) else prop
         }
 
-        val gitStatus = if (isRoot) gitService.getGitStatus(project.pomLocation.absolutePath) else null
+        val gitStatus = if (isRoot) gitService.getGitStatus(project.pomLocation) else null
 
         return ProjectAnalysis(
             groupId = groupId,

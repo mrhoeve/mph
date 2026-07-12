@@ -100,7 +100,7 @@ class MavenProjectControllerTest {
         val properties = listOf(ManagedProperty("library.version", "1.0", null, "Local POM", true))
         val tag = TagInfo("1.2.3", "v1.2.3")
         every { projectService.getManagedProperties(tempDir, 5, "/sample/pom.xml") } returns properties
-        every { projectService.getLatestTag("/sample/pom.xml") } returns tag
+        every { projectService.getLatestTag(tempDir, 5, "/sample/pom.xml") } returns tag
         every { projectService.getBuildOrder(tempDir, 5) } returns analyzedProjects
 
         assertEquals(properties, controller.getManagedProperties("/sample/pom.xml"))
@@ -110,13 +110,13 @@ class MavenProjectControllerTest {
 
     @Test
     fun `sync should return messages and refreshed projects`() {
-        every { projectService.syncDevelop(listOf("/sample/pom.xml"), true) } returns listOf("merged")
+        every { projectService.syncDevelop(tempDir, 5, listOf("/sample/pom.xml"), true) } returns listOf("merged")
 
         val response = controller.syncDevelop(SyncDevelopRequest(listOf("/sample/pom.xml"), true))
 
         assertEquals(analyzedProjects, response.projects)
         assertEquals(listOf("merged"), response.messages)
-        verify { projectService.syncDevelop(listOf("/sample/pom.xml"), true) }
+        verify { projectService.syncDevelop(tempDir, 5, listOf("/sample/pom.xml"), true) }
     }
 
     @Test
