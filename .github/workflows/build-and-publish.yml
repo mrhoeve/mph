@@ -11,10 +11,6 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-      SONAR_ORGANIZATION: ${{ secrets.SONAR_ORGANIZATION }}
-      SONAR_PROJECT_KEY: ${{ secrets.SONAR_PROJECT_KEY }}
     outputs:
       version: ${{ steps.get_version.outputs.version }}
 
@@ -63,21 +59,6 @@ jobs:
       run: |
         chmod +x mvnw
         ./mvnw -B test -Dexec.skip=true
-
-    - name: SonarQube Cloud Scan
-      if: ${{ env.SONAR_TOKEN != '' && env.SONAR_ORGANIZATION != '' && env.SONAR_PROJECT_KEY != '' }}
-      uses: SonarSource/sonarqube-scan-action@v8
-      with:
-        args: >-
-          -Dsonar.organization=${{ env.SONAR_ORGANIZATION }}
-          -Dsonar.projectKey=${{ env.SONAR_PROJECT_KEY }}
-          -Dsonar.sources=src/main,frontend/mph/src/app
-          -Dsonar.tests=src/test,frontend/mph/src/app
-          -Dsonar.test.inclusions=src/test/**/*,frontend/mph/src/**/*.spec.ts
-          -Dsonar.exclusions=frontend/mph/src/**/*.spec.ts
-          -Dsonar.java.binaries=target/classes
-          -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
-          -Dsonar.javascript.lcov.reportPaths=frontend/mph/coverage/mph/lcov.info
 
     - name: Build with Maven
       run: |
