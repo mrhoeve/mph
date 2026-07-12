@@ -42,6 +42,18 @@ This project is also developed and maintained with the assistance of **OpenAI Co
 
 [<img src="https://images.ctfassets.net/kftzwdyauwt9/77tJ5U1tgxHMZflZ5m4Z24/ace4d8b6ad200d87ebcb69c466344343/Blossom_4k_Icon_1.png?fm=webp&q=90&w=256" width="100" alt="OpenAI Logo">](https://openai.com/codex/)
 
+## Continuous Integration
+
+GitHub Actions runs the frontend and backend unit tests on every push and pull request. Frontend coverage is written as LCOV and backend coverage as JaCoCo XML.
+
+To enable SonarQube Cloud analysis, import this repository into SonarQube Cloud, disable automatic analysis, and configure these GitHub Actions settings:
+
+- Repository secret `SONAR_TOKEN`: a SonarQube Cloud token with permission to execute analysis.
+- Repository variable `SONAR_ORGANIZATION`: the SonarQube Cloud organization key.
+- Repository variable `SONAR_PROJECT_KEY`: the SonarQube Cloud project key.
+
+The scan is skipped when any of these settings is unavailable, such as for pull requests from forks.
+
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
