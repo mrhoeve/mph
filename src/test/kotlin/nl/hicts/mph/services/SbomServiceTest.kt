@@ -16,31 +16,19 @@ class SbomServiceTest {
         val parentPom = File(testDataPath, "pom.xml")
         val serviceParentPom = File(testDataPath, "service-parent/pom.xml")
         val commonPom = File(testDataPath, "common/pom.xml")
-        val servicePom = File(testDataPath, "service-parent/service/pom.xml")
 
         val workspaceMap = mapOf(
-            "nl.hicts.test:multi-module-project:1.0.0" to parentPom,
-            "nl.hicts.test:service-parent:1.0.0" to serviceParentPom,
-            "nl.hicts.test:common:1.0.0" to commonPom,
-            "nl.hicts.test:service:1.0.0" to servicePom
+            "com.example:multi-module-project:2.0.0" to parentPom,
+            "com.example:service-parent:2.0.0" to serviceParentPom,
+            "com.example:common:2.0.0" to commonPom
         )
         sbomService.setWorkspace(workspaceMap)
 
         val parentSbom = sbomService.getSbomDetails(parentPom.absolutePath)
         val submoduleSbom = sbomService.getSbomDetails(serviceParentPom.absolutePath)
 
-        val parentComponentNames = parentSbom.components.map { it.artifactId }.sorted()
-        val submoduleComponentNames = submoduleSbom.components.map { it.artifactId }.sorted()
-
-        println("[DEBUG_LOG] Parent components: $parentComponentNames")
-        println("[DEBUG_LOG] Submodule components: $submoduleComponentNames")
-
         // In the CycloneDX Bom (which SbomDetails uses as fallback or basis for rawXml/Json)
         // We now expect them to be different.
-
-        // We'll check the raw JSON as well to be sure
-        println("[DEBUG_LOG] Parent Raw JSON: ${parentSbom.rawJson}")
-        println("[DEBUG_LOG] Submodule Raw JSON: ${submoduleSbom.rawJson}")
 
         assertTrue(parentSbom.rawJson.contains("multi-module-project"), "Parent SBOM should have its name in metadata")
         assertTrue(submoduleSbom.rawJson.contains("service-parent"), "Submodule SBOM should have its name in metadata")
@@ -48,11 +36,9 @@ class SbomServiceTest {
         // Verify they are not identical
         assertTrue(parentSbom.rawJson != submoduleSbom.rawJson, "Parent and submodule SBOMs should be different")
 
-        // Verify that parent SBOM includes common but service-parent SBOM does not (if it's not a direct/transitive dep)
-        // Note: in multi-module-project, parent has modules: common, service-parent, client-parent.
-        // service-parent has module: service.
+        // The parent includes common as a module and service-parent includes it as a direct dependency.
         assertTrue(parentSbom.rawJson.contains("common"), "Parent SBOM should contain common module")
-        assertTrue(!submoduleSbom.rawJson.contains("common"), "service-parent SBOM should not contain common module (it is its sibling, not child)")
+        assertTrue(submoduleSbom.rawJson.contains("common"), "service-parent SBOM should contain its common dependency")
     }
 
     @Test
@@ -72,9 +58,6 @@ class SbomServiceTest {
 
         // Directly test buildBom to see the result
         val sbomDetails = sbomService.getSbomDetails(serviceParentPom.absolutePath)
-
-        println("[DEBUG_LOG] Components found: ${sbomDetails.components.map { it.artifactId }}")
-        println("[DEBUG_LOG] Raw JSON: ${sbomDetails.rawJson}")
 
         // If resolution worked, we should see dependencies or at least the raw JSON should contain 'dependencies'
         // Given we are in a test env without full maven repo, we might just verify that the structure is correct
