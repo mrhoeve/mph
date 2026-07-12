@@ -171,18 +171,17 @@ class MavenProjectService(
 
             PomSurgicalEditor.edit(project.pomLocation) {
                 // Update parent
-                if (model.parent != null) {
-                    val key = Pair(model.parent.groupId, model.parent.artifactId)
-                    if (versionMap.containsKey(key)) {
-                        updateParentVersion(model.parent.groupId, model.parent.artifactId, versionMap[key]!!)
+                model.parent?.let { parent ->
+                    val key = Pair(parent.groupId, parent.artifactId)
+                    versionMap[key]?.let { newVersion ->
+                        updateParentVersion(parent.groupId, parent.artifactId, newVersion)
                     }
                 }
 
                 // Update dependencies
                 model.dependencies?.forEach { dep ->
                     val key = Pair(dep.groupId, dep.artifactId)
-                    if (versionMap.containsKey(key)) {
-                        val newVersion = versionMap[key]!!
+                    versionMap[key]?.let { newVersion ->
                         if (dep.version != null && dep.version.startsWith("\${")) {
                             val propName = dep.version.substring(2, dep.version.length - 1)
                             if (!isMavenInternalProperty(propName)) {
@@ -197,8 +196,7 @@ class MavenProjectService(
                 // Update dependency management
                 model.dependencyManagement?.dependencies?.forEach { dep ->
                     val key = Pair(dep.groupId, dep.artifactId)
-                    if (versionMap.containsKey(key)) {
-                        val newVersion = versionMap[key]!!
+                    versionMap[key]?.let { newVersion ->
                         if (dep.version != null && dep.version.startsWith("\${")) {
                             val propName = dep.version.substring(2, dep.version.length - 1)
                             if (!isMavenInternalProperty(propName)) {
@@ -713,7 +711,10 @@ class MavenProjectService(
             return managedProperties
         }
 
-        val violations = if (projectModelResult != null) getProjectVulnerabilitiesFromModel(projectModelResult!!.effectiveModel) else emptyList()
+        val violations = projectModelResult
+            ?.effectiveModel
+            ?.let(::getProjectVulnerabilitiesFromModel)
+            ?: emptyList()
 
         if (violations.isEmpty()) {
             return managedProperties
@@ -850,9 +851,12 @@ class MavenProjectService(
             val nextStage = mutableListOf<String>()
             currentStage.forEach { u ->
                 adj[u]?.forEach { v ->
-                    inDegree[v] = inDegree[v]!! - 1
-                    if (inDegree[v] == 0) {
-                        nextStage.add(v)
+                    inDegree[v]?.let { degree ->
+                        val newDegree = degree - 1
+                        inDegree[v] = newDegree
+                        if (newDegree == 0) {
+                            nextStage.add(v)
+                        }
                     }
                 }
             }
