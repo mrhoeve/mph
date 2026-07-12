@@ -1,6 +1,6 @@
 # Maven Project Helper (MPH)
 
-[![SonarQube Cloud](https://sonarcloud.io/images/project_badges/sonarcloud-highlight.svg)](https://sonarcloud.io/summary/new_code?id=mrhoeve_mph)
+[![Quality gate](https://sonarcloud.io/api/project_badges/quality_gate?project=mrhoeve_mph)](https://sonarcloud.io/summary/new_code?id=mrhoeve_mph)
 
 **Maven Project Helper (MPH)** is a powerful local tool designed for Java and Kotlin developers to streamline the management of complex Maven multi-module project ecosystems.
 
