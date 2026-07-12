@@ -1,5 +1,7 @@
 # Maven Project Helper (MPH)
 
+[![SonarQube Cloud](https://sonarcloud.io/images/project_badges/sonarcloud-highlight.svg)](https://sonarcloud.io/summary/new_code?id=mrhoeve_mph)
+
 **Maven Project Helper (MPH)** is a powerful local tool designed for Java and Kotlin developers to streamline the management of complex Maven multi-module project ecosystems.
 
 ## Purpose
@@ -45,6 +47,8 @@ This project is also developed and maintained with the assistance of **OpenAI Co
 ## Continuous Integration
 
 GitHub Actions runs the frontend and backend unit tests on every push and pull request. Frontend coverage is written as LCOV and backend coverage as JaCoCo XML.
+
+Every push also builds the application and runs SonarQube Cloud analysis when its repository settings are available. Releases are created only when the workflow is started manually from the `main` branch using GitHub Actions' **Run workflow** button.
 
 To enable SonarQube Cloud analysis, import this repository into SonarQube Cloud, disable automatic analysis, and configure these GitHub Actions settings:
 
