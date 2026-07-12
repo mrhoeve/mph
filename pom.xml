@@ -48,10 +48,10 @@
 		<maven.version>3.9.16</maven.version>
 		<maven-resolver.version>1.9.27</maven-resolver.version>
 		<poi.version>5.5.1</poi.version>
-		<cyclonedx.version>9.1.0</cyclonedx.version>
+		<cyclonedx.version>12.2.0</cyclonedx.version>
 		<mockk.version>1.14.11</mockk.version>
 		<exec-maven-plugin.version>3.6.3</exec-maven-plugin.version>
-		<jacoco.version>0.8.14</jacoco.version>
+		<jacoco.version>0.8.15</jacoco.version>
 		<jgit.version>7.7.0.202606012155-r</jgit.version>
 		<skipTests>false</skipTests>
 		<skipUTs>${skipTests}</skipUTs>
