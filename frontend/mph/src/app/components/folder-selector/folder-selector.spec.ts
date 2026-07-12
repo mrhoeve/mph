@@ -7,7 +7,7 @@ import { FolderSelector } from './folder-selector';
 
 const current: FolderResponse = {
   path: '/projects', parentPath: '/', remembered: false, maxScanDepth: 4,
-  nexusIqUrl: 'https://iq.example.org', nexusIqUser: 'api-user', nexusIqPass: 'secret',
+  nexusIqUrl: 'https://iq.example.org', nexusIqUser: 'api-user',
   nexusIqAppIdPrefix: 'pre-', nexusIqAppIdSuffix: '-suffix',
   children: [{ name: 'child', path: '/projects/child' }]
 };
@@ -63,8 +63,23 @@ describe('FolderSelector', () => {
       .find(button => button.textContent?.includes('Use this folder'));
     useButton?.click();
 
-    expect(saveBase).toHaveBeenCalledWith('/projects', 4, 'https://iq.example.org', 'api-user', 'secret', 'pre-', '-suffix');
+    expect(saveBase).toHaveBeenCalledWith('/projects', 4, 'https://iq.example.org', 'api-user', undefined, 'pre-', '-suffix');
     expect(emitted).toEqual(['/projects']);
+  });
+
+  it('sends a newly entered Nexus IQ secret', () => {
+    const passwordInput = (fixture.nativeElement as HTMLElement).querySelector('#nexusIqPass') as HTMLInputElement;
+    passwordInput.value = 'replacement-secret';
+    passwordInput.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+
+    const useButton = [...(fixture.nativeElement as HTMLElement).querySelectorAll<HTMLButtonElement>('button')]
+      .find(button => button.textContent?.includes('Use this folder'));
+    useButton?.click();
+
+    expect(saveBase).toHaveBeenCalledWith(
+      '/projects', 4, 'https://iq.example.org', 'api-user', 'replacement-secret', 'pre-', '-suffix'
+    );
   });
 
   it('reports current-folder loading failure', async () => {

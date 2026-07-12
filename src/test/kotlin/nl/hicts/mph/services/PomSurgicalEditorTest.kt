@@ -185,4 +185,26 @@ class PomSurgicalEditorTest {
         
         tempFile.delete()
     }
+
+    @Test
+    fun `should ignore properties markup inside XML comments`() {
+        val tempFile = Files.createTempFile("pom", ".xml").toFile()
+        tempFile.writeText("""
+            <project>
+                <!-- <properties><library.version>commented</library.version></properties> -->
+                <properties>
+                    <library.version>1.0.0</library.version>
+                </properties>
+            </project>
+        """.trimIndent())
+
+        PomSurgicalEditor.edit(tempFile) {
+            updateProperty("library.version", "2.0.0")
+        }
+
+        val updated = tempFile.readText()
+        assertTrue(updated.contains("<library.version>commented</library.version>"))
+        assertTrue(updated.contains("<library.version>2.0.0</library.version>"))
+        tempFile.delete()
+    }
 }

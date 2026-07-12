@@ -7,6 +7,8 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
 import java.nio.file.Path
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
 
 class GitServiceTest {
 
@@ -192,6 +194,41 @@ class GitServiceTest {
 
             assertEquals("Exact Name", identity.name)
             assertEquals(defaultIdentity.emailAddress, identity.emailAddress)
+        }
+    }
+
+    @Test
+    fun `cache can be cleared while tag information is read concurrently`() {
+        val repoDir = tempDir.resolve("concurrent-cache").toFile().also { it.mkdirs() }
+        Git.init().setDirectory(repoDir).call().use { git ->
+            val pomFile = File(repoDir, "pom.xml")
+            pomFile.writeText("""
+                <project>
+                    <modelVersion>4.0.0</modelVersion>
+                    <groupId>org.example</groupId>
+                    <artifactId>sample</artifactId>
+                    <version>1.0.0</version>
+                </project>
+            """.trimIndent())
+            git.add().addFilepattern("pom.xml").call()
+            val commit = git.commit().setMessage("initial").setSign(false).call()
+            git.tag().setName("v1.0.0").setObjectId(commit).call()
+
+            val executor = Executors.newFixedThreadPool(6)
+            try {
+                val tasks = (1..30).map { index ->
+                    Callable {
+                        if (index % 3 == 0) gitService.clearCache()
+                        gitService.getLatestTagInfo(pomFile.absolutePath)?.version
+                    }
+                }
+
+                val versions = executor.invokeAll(tasks).map { it.get() }.filterNotNull()
+                assertTrue(versions.isNotEmpty())
+                assertTrue(versions.all { it == "1.0.0" })
+            } finally {
+                executor.shutdownNow()
+            }
         }
     }
 }

@@ -49,7 +49,9 @@ object PomSurgicalEditor {
         }
 
         fun updateProperty(propertyName: String, newValue: String) {
+            val commentRanges = Regex("(?s)<!--.*?-->").findAll(content).map { it.range }.toList()
             val propertiesBlocks = Regex("(?s)<properties>.*?</properties>").findAll(content)
+                .filter { block -> commentRanges.none { block.range.first in it } }
             for (propBlock in propertiesBlocks) {
                 val propRegex = Regex("<${Regex.escape(propertyName)}>(.*?)</${Regex.escape(propertyName)}>")
                 val match = propRegex.find(propBlock.value)

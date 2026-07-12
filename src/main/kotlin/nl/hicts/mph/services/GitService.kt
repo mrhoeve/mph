@@ -22,6 +22,7 @@ import org.springframework.stereotype.Service
 import java.io.File
 import java.io.InputStreamReader
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.ConcurrentHashMap
 
 @Service
 class GitService {
@@ -42,9 +43,10 @@ class GitService {
         }
     }
     
-    private val tagCache = mutableMapOf<String, TagInfo?>() // path -> TagInfo
-    private val repoTagsCache = mutableMapOf<File, List<org.eclipse.jgit.lib.Ref>>()
-    private val fetchedRepos = mutableSetOf<File>()
+    private val noTag = Any()
+    private val tagCache = ConcurrentHashMap<String, Any>() // TagInfo or noTag sentinel
+    private val repoTagsCache = ConcurrentHashMap<File, List<org.eclipse.jgit.lib.Ref>>()
+    private val fetchedRepos = ConcurrentHashMap.newKeySet<File>()
 
     fun clearCache() {
         tagCache.clear()
@@ -261,7 +263,7 @@ class GitService {
         val normalizedProjectPath = File(projectPath).toPath().toAbsolutePath().normalize().toString()
         
         if (tagCache.containsKey(normalizedProjectPath)) {
-            return tagCache[normalizedProjectPath]
+            return tagCache[normalizedProjectPath].let { if (it === noTag) null else it as TagInfo }
         }
 
         val gitRootPath = repoDir.toPath().toAbsolutePath().normalize()
@@ -292,7 +294,7 @@ class GitService {
                 }
                 
                 if (tags.isEmpty()) {
-                    tagCache[normalizedProjectPath] = null
+                    tagCache[normalizedProjectPath] = noTag
                     return null
                 }
 
@@ -335,7 +337,7 @@ class GitService {
                         TagInfo(version, latestTagRefName.substringAfter("refs/tags/"))
                     } else null
                     
-                    tagCache[normalizedProjectPath] = result
+                    tagCache[normalizedProjectPath] = result ?: noTag
                     result
                 } finally {
                     walk.dispose()
@@ -343,7 +345,7 @@ class GitService {
             }
         } catch (e: Exception) {
             logger.warn("Failed to get latest tag version for $projectPath: ${e.message}")
-            tagCache[normalizedProjectPath] = null
+            tagCache[normalizedProjectPath] = noTag
             null
         }
     }

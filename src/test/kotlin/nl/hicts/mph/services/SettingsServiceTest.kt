@@ -90,4 +90,17 @@ class SettingsServiceTest {
         assertEquals(false, content.contains("nexusIqPass"))
         assertEquals(true, content.contains("maxScanDepth=2"))
     }
+
+    @Test
+    fun `should preserve existing secret when UI does not send it back`() {
+        System.setProperty("user.home", tempDir.toString())
+        val basePath = Files.createDirectories(tempDir.resolve("projects"))
+        val service = SettingsService()
+        service.saveSettings(basePath, 3, nexusIqPass = "test-secret")
+
+        service.saveSettings(basePath, 4, nexusIqPass = null)
+
+        assertEquals("test-secret", service.loadSettings().nexusIqPass)
+        assertEquals(4, service.loadSettings().maxScanDepth)
+    }
 }

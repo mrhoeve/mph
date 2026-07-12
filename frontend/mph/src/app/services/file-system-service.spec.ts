@@ -56,4 +56,12 @@ describe('FileSystemService', () => {
     });
     request.flush(response);
   });
+
+  it('omits an unavailable secret so the backend can preserve the stored value', () => {
+    service.saveBase('/projects', 6, 'https://iq.example.org', 'api-user', undefined, 'pre-', '-suffix').subscribe();
+
+    const request = http.expectOne('http://test-host/api/filesystem/base');
+    expect(Object.prototype.hasOwnProperty.call(request.request.body, 'nexusIqPass')).toBe(false);
+    request.flush(response);
+  });
 });

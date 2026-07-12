@@ -46,7 +46,7 @@ export class FileSystemService {
       maxScanDepth,
       nexusIqUrl,
       nexusIqUser,
-      nexusIqPass,
+      ...(nexusIqPass ? { nexusIqPass } : {}),
       nexusIqAppIdPrefix,
       nexusIqAppIdSuffix
     });

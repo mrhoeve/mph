@@ -45,11 +45,19 @@ class SettingsService {
         Files.createDirectories(settingsDirectory)
 
         val properties = Properties()
+        val existingSecret = if (settingsFile.exists()) {
+            Properties().also { existing ->
+                Files.newInputStream(settingsFile).use(existing::load)
+            }.getProperty("nexusIqPass")
+        } else {
+            null
+        }
         properties.setProperty("basePath", path.toAbsolutePath().normalize().absolutePathString())
         properties.setProperty("maxScanDepth", maxScanDepth.toString())
         nexusIqUrl?.let { properties.setProperty("nexusIqUrl", it) }
         nexusIqUser?.let { properties.setProperty("nexusIqUser", it) }
-        nexusIqPass?.let { properties.setProperty("nexusIqPass", it) }
+        (nexusIqPass?.takeIf { it.isNotBlank() } ?: existingSecret)
+            ?.let { properties.setProperty("nexusIqPass", it) }
         nexusIqAppIdPrefix?.let { properties.setProperty("nexusIqAppIdPrefix", it) }
         nexusIqAppIdSuffix?.let { properties.setProperty("nexusIqAppIdSuffix", it) }
 

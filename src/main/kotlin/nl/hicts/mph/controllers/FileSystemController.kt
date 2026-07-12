@@ -1,5 +1,6 @@
 package nl.hicts.mph.controllers
 
+import com.fasterxml.jackson.annotation.JsonIgnore
 import nl.hicts.mph.models.Settings
 import nl.hicts.mph.services.SettingsService
 import org.springframework.http.HttpStatus
@@ -103,6 +104,7 @@ data class FolderResponse(
     val maxScanDepth: Int,
     val nexusIqUrl: String? = null,
     val nexusIqUser: String? = null,
+    @get:JsonIgnore
     val nexusIqPass: String? = null,
     val nexusIqAppIdPrefix: String? = null,
     val nexusIqAppIdSuffix: String? = null,
