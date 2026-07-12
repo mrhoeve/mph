@@ -64,26 +64,48 @@ class SbomService {
                     model.version ?: model.parent?.version ?: ""
                 )
                 val rootComp = mapNode(rootNode)
-                rootComp.dependencies
+                rootComp.dependencies.ifEmpty { declaredDependencies(model) }
             } catch (e: Exception) {
-                // FALLBACK: Use CycloneDX Bom components if Aether fails
-                bom.components?.map { comp ->
-                    SbomComponent(
-                        groupId = comp.group,
-                        artifactId = comp.name,
-                        version = comp.version,
-                        scope = comp.scope?.name,
-                        type = comp.type?.name,
-                        description = comp.description,
-                        licenses = comp.licenseChoice?.licenses?.mapNotNull { it.name ?: it.id } ?: emptyList()
-                    )
-                } ?: emptyList()
+                declaredDependencies(model).ifEmpty {
+                    // Final fallback for reactor modules collected while building the CycloneDX BOM.
+                    bom.components?.map { comp ->
+                        SbomComponent(
+                            groupId = comp.group,
+                            artifactId = comp.name,
+                            version = comp.version,
+                            scope = comp.scope?.name,
+                            type = comp.type?.name,
+                            description = comp.description,
+                            licenses = comp.licenseChoice?.licenses?.mapNotNull { it.name ?: it.id } ?: emptyList()
+                        )
+                    } ?: emptyList()
+                }
             }
         } else {
             emptyList()
         }
 
         return SbomDetails(components, rawXml, rawJson)
+    }
+
+    private fun declaredDependencies(model: Model): List<SbomComponent> {
+        return model.dependencies.orEmpty().map { dependency ->
+            val dependencyModel = try {
+                modelResolver.resolveModel(dependency.groupId, dependency.artifactId, dependency.version)
+            } catch (exception: Exception) {
+                null
+            }
+
+            SbomComponent(
+                groupId = dependency.groupId,
+                artifactId = dependency.artifactId,
+                version = dependency.version,
+                scope = dependency.scope,
+                type = dependency.type,
+                description = dependencyModel?.description,
+                licenses = dependencyModel?.licenses?.mapNotNull { it.name } ?: emptyList()
+            )
+        }
     }
 
     private fun mapNode(node: org.eclipse.aether.graph.DependencyNode): SbomComponent {

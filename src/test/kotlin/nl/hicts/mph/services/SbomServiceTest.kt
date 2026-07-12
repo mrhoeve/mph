@@ -3,10 +3,16 @@ package nl.hicts.mph.services
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
 import java.io.File
-import java.nio.file.Paths
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 
 class SbomServiceTest {
+
+    @TempDir
+    lateinit var tempDir: Path
 
     private val sbomService = SbomService()
 
@@ -68,15 +74,16 @@ class SbomServiceTest {
 
     @Test
     fun `should find dependencies for d-project service`() {
-        val dProjectPath = File("src/test/resources/test-data/d-project").absoluteFile
-        val multiModulePath = File("src/test/resources/test-data/multi-module-project").absoluteFile
+        val cleanTestData = copyPomFixturesWithoutBuildOutputs()
+        val dProjectPath = cleanTestData.resolve("d-project").toFile()
+        val multiModulePath = cleanTestData.resolve("multi-module-project").toFile()
 
         val dRootPom = File(dProjectPath, "pom.xml")
         val dApiPom = File(dProjectPath, "api/pom.xml")
         val dClientPom = File(dProjectPath, "client/pom.xml")
         val dServicePom = File(dProjectPath, "service/pom.xml")
 
-        val cClientPom = File("src/test/resources/test-data/c-project/client/pom.xml").absoluteFile
+        val cClientPom = cleanTestData.resolve("c-project/client/pom.xml").toFile()
 
         val serviceParentPom = File(multiModulePath, "service-parent/pom.xml")
 
@@ -97,5 +104,20 @@ class SbomServiceTest {
         val componentNames = sbomDetails.components.map { it.artifactId }
         assertTrue(componentNames.contains("d-project-api"), "Should contain d-project-api. Found: $componentNames")
         assertTrue(componentNames.contains("c-project-client"), "Should contain c-project-client. Found: $componentNames")
+    }
+
+    private fun copyPomFixturesWithoutBuildOutputs(): Path {
+        val source = Path.of("src/test/resources/test-data").toAbsolutePath().normalize()
+        val destination = tempDir.resolve("test-data")
+
+        Files.walk(source).use { paths ->
+            paths.filter { Files.isRegularFile(it) && it.fileName.toString() == "pom.xml" }
+                .forEach { pom ->
+                    val target = destination.resolve(source.relativize(pom).toString())
+                    Files.createDirectories(target.parent)
+                    Files.copy(pom, target, StandardCopyOption.REPLACE_EXISTING)
+                }
+        }
+        return destination
     }
 }
