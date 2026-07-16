@@ -16,6 +16,10 @@ import org.eclipse.aether.connector.basic.BasicRepositoryConnectorFactory
 import org.eclipse.aether.impl.DefaultServiceLocator
 import org.eclipse.aether.repository.LocalRepository
 import org.eclipse.aether.repository.RemoteRepository
+import org.eclipse.aether.util.repository.AuthenticationBuilder
+import org.eclipse.aether.util.repository.DefaultAuthenticationSelector
+import org.eclipse.aether.util.repository.DefaultMirrorSelector
+import org.eclipse.aether.util.repository.DefaultProxySelector
 import org.eclipse.aether.resolution.ArtifactDescriptorRequest
 import org.eclipse.aether.resolution.ArtifactRequest
 import org.eclipse.aether.resolution.ArtifactResolutionException
@@ -29,16 +33,18 @@ import java.io.File
 typealias MavenDependency = org.apache.maven.model.Dependency
 typealias AetherDependency = org.eclipse.aether.graph.Dependency
 
-class MavenModelResolver(private val workspaceProjects: Map<String, File> = emptyMap()) {
+class MavenModelResolver(
+    private val workspaceProjects: Map<String, File> = emptyMap(),
+    private val localRepositoryPath: File? = null,
+    settingsLoader: MavenSettingsLoader = MavenSettingsLoader()
+) {
 
     private val modelBuilder: ModelBuilder = DefaultModelBuilderFactory().newInstance()
-    private val localRepositoryPath = File(System.getProperty("user.home"), ".m2/repository")
+    private val resolverConfiguration = settingsLoader.load()
 
     private val repositorySystem: RepositorySystem = newRepositorySystem()
-    private val session: RepositorySystemSession = newSession(repositorySystem)
-    private val remoteRepositories = mutableListOf(
-        RemoteRepository.Builder("central", "default", "https://repo.maven.apache.org/maven2/").build()
-    )
+    private val session: RepositorySystemSession = newSession(repositorySystem, resolverConfiguration)
+    private val remoteRepositories = newRemoteRepositories(repositorySystem, session, resolverConfiguration)
 
     private fun newRepositorySystem(): RepositorySystem {
         val locator = MavenRepositorySystemUtils.newServiceLocator()
@@ -48,10 +54,61 @@ class MavenModelResolver(private val workspaceProjects: Map<String, File> = empt
         return locator.getService(RepositorySystem::class.java)
     }
 
-    private fun newSession(system: RepositorySystem): RepositorySystemSession {
+    private fun newSession(
+        system: RepositorySystem,
+        configuration: MavenResolverConfiguration
+    ): RepositorySystemSession {
         val session = MavenRepositorySystemUtils.newSession()
-        session.isOffline = true
-        val localRepo = LocalRepository(localRepositoryPath)
+        session.isOffline = configuration.settings.isOffline
+        session.mirrorSelector = DefaultMirrorSelector().also { selector ->
+            configuration.settings.mirrors.forEach { mirror ->
+                selector.add(
+                    mirror.id,
+                    mirror.url,
+                    mirror.layout ?: "default",
+                    false,
+                    mirror.isBlocked,
+                    mirror.mirrorOf,
+                    mirror.mirrorOfLayouts ?: "*"
+                )
+            }
+        }
+        session.authenticationSelector = DefaultAuthenticationSelector().also { selector ->
+            configuration.settings.servers.forEach { server ->
+                val username = resolvedSetting(server.username)
+                val password = resolvedSetting(server.password)
+                val privateKey = resolvedSetting(server.privateKey)
+                if (username != null || password != null || privateKey != null) {
+                    val authentication = AuthenticationBuilder().apply {
+                        username?.let(::addUsername)
+                        password?.let(::addPassword)
+                        privateKey?.let { addPrivateKey(it, resolvedSetting(server.passphrase)) }
+                    }.build()
+                    selector.add(server.id, authentication)
+                }
+            }
+        }
+        session.proxySelector = DefaultProxySelector().also { selector ->
+            configuration.settings.proxies.filter { it.isActive }.forEach { proxy ->
+                val authentication = AuthenticationBuilder().apply {
+                    resolvedSetting(proxy.username)?.let(::addUsername)
+                    resolvedSetting(proxy.password)?.let(::addPassword)
+                }.build()
+                selector.add(
+                    org.eclipse.aether.repository.Proxy(
+                        proxy.protocol ?: "http",
+                        proxy.host,
+                        proxy.port,
+                        authentication
+                    ),
+                    proxy.nonProxyHosts
+                )
+            }
+        }
+        // Trust physically present cache entries regardless of _remote.repositories origin
+        // tracking. Missing artifacts may still be fetched through the effective Maven settings
+        // when those settings do not enable offline mode.
+        val localRepo = LocalRepository(localRepositoryPath ?: configuration.localRepository, "simple")
         session.localRepositoryManager = system.newLocalRepositoryManager(session, localRepo)
 
         if (workspaceProjects.isNotEmpty()) {
@@ -90,6 +147,46 @@ class MavenModelResolver(private val workspaceProjects: Map<String, File> = empt
         }
 
         return session
+    }
+
+    private fun newRemoteRepositories(
+        system: RepositorySystem,
+        session: RepositorySystemSession,
+        configuration: MavenResolverConfiguration
+    ): MutableList<RemoteRepository> {
+        val repositories = mutableListOf(
+            RemoteRepository.Builder("central", "default", "https://repo.maven.apache.org/maven2/").build()
+        )
+        val explicitlyActiveProfiles = configuration.settings.activeProfiles.toSet()
+        val activeProfiles = if (explicitlyActiveProfiles.isNotEmpty()) {
+            configuration.settings.profiles.filter { it.id in explicitlyActiveProfiles }
+        } else {
+            configuration.settings.profiles.filter { it.activation?.isActiveByDefault == true }
+        }
+        activeProfiles.flatMap { it.repositories }.forEach { repository ->
+            repositories.removeIf { it.id == repository.id }
+            repositories.add(repository.toRemoteRepository())
+        }
+        return system.newResolutionRepositories(session, repositories).toMutableList()
+    }
+
+    private fun org.apache.maven.settings.Repository.toRemoteRepository(): RemoteRepository {
+        return RemoteRepository.Builder(id, layout ?: "default", url)
+            .setReleasePolicy(releases.toRepositoryPolicy())
+            .setSnapshotPolicy(snapshots.toRepositoryPolicy())
+            .build()
+    }
+
+    private fun org.apache.maven.settings.RepositoryPolicy?.toRepositoryPolicy(): org.eclipse.aether.repository.RepositoryPolicy {
+        return org.eclipse.aether.repository.RepositoryPolicy(
+            this?.isEnabled ?: true,
+            this?.updatePolicy ?: org.eclipse.aether.repository.RepositoryPolicy.UPDATE_POLICY_DAILY,
+            this?.checksumPolicy ?: org.eclipse.aether.repository.RepositoryPolicy.CHECKSUM_POLICY_WARN
+        )
+    }
+
+    private fun resolvedSetting(value: String?): String? {
+        return value?.takeIf { it.isNotBlank() && !it.contains("\${") }
     }
 
     fun resolveEffectiveModel(pomFile: File): Model {
@@ -281,7 +378,15 @@ class MavenModelResolver(private val workspaceProjects: Map<String, File> = empt
                     return
                 }
             }
-            repositories.add(RemoteRepository.Builder(repository.id, repository.layout, repository.url).build())
+            val configuredRepository = RemoteRepository.Builder(
+                repository.id,
+                repository.layout,
+                repository.url
+            ).build()
+            system.newResolutionRepositories(session, listOf(configuredRepository)).forEach { resolvedRepository ->
+                repositories.removeIf { it.id == resolvedRepository.id }
+                repositories.add(resolvedRepository)
+            }
         }
 
         override fun newCopy(): ModelResolver {
