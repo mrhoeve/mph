@@ -42,18 +42,21 @@
   <ul>
     @for (item of items; track item.path) {
       <li class="project-item" [class.root-project]="isRoot">
-        <div class="project-item-header" [class.selected]="projectState.selectedProject()?.path === item.path" (click)="selectProject(item)">
+        <div class="project-item-header" tabindex="0" [class.selected]="projectState.selectedProject()?.path === item.path" (click)="selectProject(item)" (keydown.enter)="selectProject(item)" (keydown.space)="selectProject(item); $event.preventDefault()">
           <div class="header-left">
             @if (item.modules.length > 0) {
-              <span class="expand-icon" [class.expanded]="isExpanded(item)" (click)="toggleExpand(item, $event)">
+              <button type="button" class="expand-icon" [attr.aria-label]="(isExpanded(item) ? 'Collapse ' : 'Expand ') + item.artifactId" [class.expanded]="isExpanded(item)" (click)="toggleExpand(item, $event)">
                 ▶
-              </span>
+              </button>
             } @else {
               <span class="expand-spacer"></span>
             }
             
             @if (isRoot) {
-              <input type="checkbox" class="project-checkbox" [checked]="isProjectSelected(item)" (change)="toggleProjectSelection(item)" (click)="$event.stopPropagation()">
+              <label class="visually-hidden-label" (click)="$event.stopPropagation()" (keydown)="$event.stopPropagation()">
+                <input type="checkbox" class="project-checkbox" [checked]="isProjectSelected(item)" (change)="toggleProjectSelection(item)">
+                <span class="visually-hidden">Select {{ item.artifactId }}</span>
+              </label>
             }
           </div>
 

@@ -55,9 +55,9 @@
 
 
   @if (isLoading()) {
-    <div class="folder-empty" role="status">
+    <output class="folder-empty">
       Loading folders…
-    </div>
+    </output>
   } @else {
     <ul class="folder-list" aria-label="Folders">
       @if (parentPath(); as parent) {

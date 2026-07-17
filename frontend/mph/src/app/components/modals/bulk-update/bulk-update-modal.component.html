@@ -1,5 +1,5 @@
-<div class="modal-overlay" (click)="close.emit()">
-  <div class="modal-content" (click)="$event.stopPropagation()">
+<div class="modal-overlay" tabindex="-1" (click)="$event.target === $event.currentTarget && dismissed.emit()" (keydown.escape)="dismissed.emit()">
+  <div class="modal-content" role="dialog" aria-modal="true">
     <h3>Bulk Version Update</h3>
     <p>Modify the version of {{ projectState.selectedRootProjects().size }} selected projects.</p>
     
@@ -20,7 +20,7 @@
     </div>
     
     <div class="form-group checkbox-group">
-      <input type="checkbox" id="updateDependents" [ngModel]="bulkUpdateDependents()" (ngModelChange)="bulkUpdateDependents.set($event)">
+      <input type="checkbox" id="updateDependents" [checked]="bulkUpdateDependents()" (click)="bulkUpdateDependents.update(value => !value)">
       <label for="updateDependents">Update version in dependent projects</label>
     </div>
 
@@ -30,7 +30,7 @@
     </div>
     
     <div class="modal-actions">
-      <button class="secondary-button" (click)="close.emit()">Cancel</button>
+      <button class="secondary-button" (click)="dismissed.emit()">Cancel</button>
       <button class="primary-button" [disabled]="!bulkPrefix()" (click)="onExecute()">Apply Update</button>
     </div>
   </div>

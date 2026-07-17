@@ -138,6 +138,13 @@
 .finding.low { border-left-color: #0284c7; }
 
 .finding-heading {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
   display: flex;
   align-items: center;
   gap: 0.8rem;
@@ -156,20 +163,17 @@
   background: #fdfdfd;
 }
 
-.finding-heading > div:nth-child(2) {
+.finding-component {
   min-width: 0;
   flex: 1;
-}
-
-.finding h4,
-.finding p {
-  margin: 0;
-}
-
-.finding h4 {
   color: #1e293b;
   font-size: 0.95rem;
+  font-weight: 700;
   overflow-wrap: anywhere;
+}
+
+.finding p {
+  margin: 0;
 }
 
 .finding p {

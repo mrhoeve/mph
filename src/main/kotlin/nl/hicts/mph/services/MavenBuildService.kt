@@ -74,85 +74,97 @@ class MavenBuildService(
     private fun executeBuild(basePath: String, maxDepth: Int, projectPathsToBuild: List<String>, options: BuildOptions) {
         val rootProjects = mavenProjectService.scanAndAnalyze(Paths.get(basePath), maxDepth)
         val allProjects = rootProjects.flatMap { flattenAnalysis(it) }
-        
-    val projectsToBuild = allProjects.filter { p -> 
-            val normalizedPPath = Paths.get(p.path).toAbsolutePath().normalize().toString()
-            projectPathsToBuild.any { 
-                Paths.get(it).toAbsolutePath().normalize().toString() == normalizedPPath 
-            } 
-        }
-        
+        val requestedPaths = projectPathsToBuild.map(::normalizePath).toSet()
+        val projectsToBuild = allProjects.filter { normalizePath(it.path) in requestedPaths }
+
         if (projectsToBuild.isEmpty()) {
             logger.warn("No projects found to build matching the requested paths")
             return
         }
-        
-        // Initial status update
-        projectsToBuild.forEach { p ->
-            val normalizedPath = Paths.get(p.path).toAbsolutePath().normalize().toString()
-            projectLogs[normalizedPath] = mutableListOf()
-            buildSink.tryEmitNext(ProjectProgress(p.path, p.artifactId, BuildStatus.PENDING))
-        }
 
+        projectsToBuild.forEach { project ->
+            projectLogs[normalizePath(project.path)] = mutableListOf()
+            buildSink.tryEmitNext(ProjectProgress(project.path, project.artifactId, BuildStatus.PENDING))
+        }
+        runBuildLoop(projectsToBuild, options)
+    }
+
+    private fun runBuildLoop(projectsToBuild: List<ProjectAnalysis>, options: BuildOptions) {
         val completed = ConcurrentHashMap<String, BuildStatus>()
         val inProgress = ConcurrentHashMap<String, Boolean>()
 
-        // Recursive build function or loop
         while (completed.size < projectsToBuild.size) {
-            val readyToBuild = projectsToBuild.filter { p ->
-                !completed.containsKey(p.path) && !inProgress.containsKey(p.path) &&
-                isDependenciesMet(p, projectsToBuild, completed)
+            val readyToBuild = projectsToBuild.filter { project ->
+                !completed.containsKey(project.path) && !inProgress.containsKey(project.path) &&
+                    isDependenciesMet(project, projectsToBuild, completed)
             }
-
             if (readyToBuild.isEmpty() && inProgress.isEmpty()) {
-                // Should not happen if no cycles
-                projectsToBuild.filter { !completed.containsKey(it.path) }.forEach { 
-                    completed[it.path] = BuildStatus.FAILED
-                    buildSink.tryEmitNext(ProjectProgress(it.path, it.artifactId, BuildStatus.FAILED, "Dependency cycle or error"))
-                }
-                break
+                failBlockedProjects(projectsToBuild, completed)
+                return
             }
-
             if (readyToBuild.isEmpty()) {
-                Thread.sleep(500)
+                pauseBuildLoop()
                 continue
             }
 
-            val toStart = if (options.parallel) {
-                val currentRunning = inProgress.size
-                val canStart = options.maxParallel - currentRunning
-                if (canStart > 0) {
-                    readyToBuild.take(canStart)
-                } else {
-                    emptyList()
-                }
-            } else {
-                if (inProgress.isEmpty()) listOf(readyToBuild.first()) else emptyList()
-            }
-
-            if (toStart.isEmpty() && inProgress.isNotEmpty()) {
-                Thread.sleep(500)
+            val toStart = selectProjectsToStart(readyToBuild, inProgress.size, options)
+            if (toStart.isEmpty()) {
+                pauseBuildLoop()
                 continue
             }
+            startProjects(toStart, options, completed, inProgress)
+            if (!options.parallel) waitForRunningProjects(inProgress)
+        }
+    }
 
-            toStart.forEach { p ->
-                inProgress[p.path] = true
-                executor.execute {
-                    val status = runMavenCommand(p, options)
-                    completed[p.path] = status
-                    inProgress.remove(p.path)
-                    buildSink.tryEmitNext(ProjectProgress(p.path, p.artifactId, status))
-                }
-            }
-            
-            if (!options.parallel) {
-                // Wait for the single build to finish
-                while (inProgress.isNotEmpty()) {
-                    Thread.sleep(100)
-                }
+    private fun failBlockedProjects(
+        projects: List<ProjectAnalysis>,
+        completed: ConcurrentHashMap<String, BuildStatus>
+    ) {
+        projects.filterNot { completed.containsKey(it.path) }.forEach { project ->
+            completed[project.path] = BuildStatus.FAILED
+            buildSink.tryEmitNext(
+                ProjectProgress(project.path, project.artifactId, BuildStatus.FAILED, "Dependency cycle or error")
+            )
+        }
+    }
+
+    private fun selectProjectsToStart(
+        ready: List<ProjectAnalysis>,
+        runningCount: Int,
+        options: BuildOptions
+    ): List<ProjectAnalysis> {
+        if (!options.parallel) return if (runningCount == 0) listOf(ready.first()) else emptyList()
+        val capacity = options.maxParallel - runningCount
+        return if (capacity > 0) ready.take(capacity) else emptyList()
+    }
+
+    private fun startProjects(
+        projects: List<ProjectAnalysis>,
+        options: BuildOptions,
+        completed: ConcurrentHashMap<String, BuildStatus>,
+        inProgress: ConcurrentHashMap<String, Boolean>
+    ) {
+        projects.forEach { project ->
+            inProgress[project.path] = true
+            executor.execute {
+                val status = runMavenCommand(project, options)
+                completed[project.path] = status
+                inProgress.remove(project.path)
+                buildSink.tryEmitNext(ProjectProgress(project.path, project.artifactId, status))
             }
         }
     }
+
+    private fun waitForRunningProjects(inProgress: Map<String, Boolean>) {
+        while (inProgress.isNotEmpty()) Thread.sleep(100)
+    }
+
+    private fun pauseBuildLoop() {
+        Thread.sleep(500)
+    }
+
+    private fun normalizePath(path: String): String = Paths.get(path).toAbsolutePath().normalize().toString()
 
     private fun isDependenciesMet(p: ProjectAnalysis, allToBuild: List<ProjectAnalysis>, completed: Map<String, BuildStatus>): Boolean {
         val deps = findDependencies(p, allToBuild)
@@ -184,7 +196,7 @@ class MavenBuildService(
         val mvnw = findMvnw(projectDir) ?: "mvn"
         
         val isWindows = System.getProperty("os.name").lowercase().contains("win")
-        val args = mutableListOf("install", "-DskipUTs=${options.skipUTs}", "-DskipITs=${options.skipITs}")
+        val args = listOf("install", "-DskipUTs=${options.skipUTs}", "-DskipITs=${options.skipITs}")
         
         val command = if (mvnw.contains("mvnw")) {
             if (isWindows) listOf("cmd.exe", "/c", mvnw) + args
@@ -237,7 +249,7 @@ class MavenBuildService(
     }
 
     fun stopBuild() {
-        activeProcesses.forEach { (path, process) ->
+        activeProcesses.values.forEach { process ->
             process.destroy()
             // Try to kill more aggressively if needed
             if (process.isAlive) {

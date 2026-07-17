@@ -35,6 +35,15 @@ data class GitStatus(
     val behindCount: Int
 )
 
+data class BulkVersionUpdate(
+    val rootProjectPaths: List<String>,
+    val prefix: String,
+    val updateDependents: Boolean,
+    val mode: String = "ADD_PREFIX",
+    val branchName: String? = null,
+    val updateProjects: Boolean = true
+)
+
 @Service
 class MavenProjectService(
     private val mavenCommandService: MavenCommandService,
@@ -43,6 +52,12 @@ class MavenProjectService(
     private val settingsService: SettingsService,
     private val sbomService: SbomService
 ) {
+    private companion object {
+        const val SPRING_BOOT_GROUP = "org.springframework.boot"
+        const val SPRING_BOOT_DEPENDENCIES = "spring-boot-dependencies"
+        const val LOCAL_POM = "Local POM"
+        const val VERSION_SUFFIX = ".version"
+    }
     private val logger = LoggerFactory.getLogger(MavenProjectService::class.java)
 
     private var modelResolver = MavenModelResolver()
@@ -86,138 +101,84 @@ class MavenProjectService(
     fun bulkUpdateVersions(
         basePath: Path,
         maxDepth: Int,
-        rootProjectPaths: List<String>,
-        prefix: String,
-        updateDependents: Boolean,
-        mode: String = "ADD_PREFIX",
-        branchName: String? = null,
-        updateProjects: Boolean = true
+        update: BulkVersionUpdate
     ) {
         gitService.clearCache()
         val rootProjects = ScanProjectUtil.searchAllMavenProjects(basePath.toFile(), maxDepth)
         val allProjects = flattenProjects(rootProjects)
-
-        // Prepare branch if requested
-        if (!branchName.isNullOrBlank()) {
-            for (rootPath in rootProjectPaths) {
-                try {
-                    val project = allProjects.find { it.pomLocation.absolutePath == rootPath }
-                        ?: throw IllegalArgumentException("Project was not found in the configured workspace: $rootPath")
-                    gitService.prepareBranch(project.pomLocation, branchName)
-                } catch (e: Exception) {
-                    throw RuntimeException("Failed to prepare Git branch for $rootPath: ${e.message}")
-                }
-            }
-        }
-
-        // If no prefix but branch name given, we just wanted to create branches
-        if (prefix.isBlank() && !branchName.isNullOrBlank()) {
+        prepareBranches(allProjects, update.rootProjectPaths, update.branchName)
+        if (update.prefix.isBlank() && !update.branchName.isNullOrBlank()) {
             logger.info("Prefix is blank and branch name is given. Skipping version update.")
             return
         }
-
         val versionMap = mutableMapOf<Pair<String, String>, String>()
-        val allProjectsToUpdate = mutableListOf<MavenProject>()
-
-        // 1. Update the selected projects and their modules
-        for (rootPath in rootProjectPaths) {
-            val normalizedRootPath = Paths.get(rootPath).toAbsolutePath().normalize().toString()
+        for (rootPath in update.rootProjectPaths) {
+            val normalizedRootPath = normalizePath(rootPath)
             val rootProject = allProjects.find { 
-                Paths.get(it.pomLocation.absolutePath).toAbsolutePath().normalize().toString() == normalizedRootPath 
+                normalizePath(it.pomLocation.absolutePath) == normalizedRootPath
             } ?: continue
             val projectsToUpdate = flattenProjects(listOf(rootProject))
-            allProjectsToUpdate.addAll(projectsToUpdate)
-
             for (project in projectsToUpdate) {
                 val oldVersion = project.version()
-                val newVersion = when (mode) {
-                    "REMOVE_PREFIX" -> {
-                        if (oldVersion.startsWith(prefix)) {
-                            oldVersion.substring(prefix.length)
-                        } else {
-                            oldVersion
-                        }
-                    }
-                    "MANUAL" -> prefix
+                val newVersion = when (update.mode) {
+                    "REMOVE_PREFIX" -> oldVersion.removePrefix(update.prefix)
+                    "MANUAL" -> update.prefix
                     "CURRENT" -> oldVersion
-                    else -> prefix + oldVersion
+                    else -> update.prefix + oldVersion
                 }
-                
-                val groupId = project.groupId()
-                val artifactId = project.artifactId()
-
-                if (updateProjects) {
-                    PomSurgicalEditor.edit(project.pomLocation) {
-                        updateProjectVersion(newVersion)
-                    }
-                }
-
-                versionMap[Pair(groupId, artifactId)] = newVersion
+                if (update.updateProjects) PomSurgicalEditor.edit(project.pomLocation) { updateProjectVersion(newVersion) }
+                versionMap[project.groupId() to project.artifactId()] = newVersion
             }
         }
+        if (update.updateDependents && versionMap.isNotEmpty()) updateProjectsDependents(allProjects, versionMap)
+    }
 
-        // 2. Update dependents if requested
-        if (updateDependents && versionMap.isNotEmpty()) {
-            // Fix: even if updateProjects is false, we should still update usages in all projects
-            // including those that were "updated" (e.g. to update modules to use the correct parent version)
-            val projectsToUpdateUsagesIn = allProjects
-            updateProjectsDependents(projectsToUpdateUsagesIn, versionMap)
+    private fun prepareBranches(projects: List<MavenProject>, paths: List<String>, branchName: String?) {
+        if (branchName.isNullOrBlank()) return
+        paths.forEach { path ->
+            try {
+                val project = projects.find { it.pomLocation.absolutePath == path }
+                    ?: throw IllegalArgumentException("Project was not found in the configured workspace: $path")
+                gitService.prepareBranch(project.pomLocation, branchName)
+            } catch (e: Exception) {
+                throw RuntimeException("Failed to prepare Git branch for $path: ${e.message}")
+            }
         }
     }
 
-    private fun updateProjectsDependents(allProjects: List<MavenProject>, versionMap: Map<Pair<String, String>, String>) {
-        for (project in allProjects) {
-            val model = project.model
+    private fun normalizePath(path: String): String = Paths.get(path).toAbsolutePath().normalize().toString()
 
+    private fun updateProjectsDependents(allProjects: List<MavenProject>, versionMap: Map<Pair<String, String>, String>) {
+        allProjects.forEach { project ->
+            val model = project.model
             PomSurgicalEditor.edit(project.pomLocation) {
-                // Update parent
                 model.parent?.let { parent ->
-                    val key = Pair(parent.groupId, parent.artifactId)
-                    versionMap[key]?.let { newVersion ->
+                    versionMap[parent.groupId to parent.artifactId]?.let { newVersion ->
                         updateParentVersion(parent.groupId, parent.artifactId, newVersion)
                     }
                 }
-
-                // Update dependencies
-                model.dependencies?.forEach { dep ->
-                    val key = Pair(dep.groupId, dep.artifactId)
-                    versionMap[key]?.let { newVersion ->
-                        if (dep.version != null && dep.version.startsWith("\${")) {
-                            val propName = dep.version.substring(2, dep.version.length - 1)
-                            if (!isMavenInternalProperty(propName)) {
-                                updateProperty(propName, newVersion)
-                            }
-                        } else if (dep.version != null) {
-                            updateDependencyVersion(dep.groupId, dep.artifactId, newVersion)
-                        }
-                    }
-                }
-
-                // Update dependency management
-                model.dependencyManagement?.dependencies?.forEach { dep ->
-                    val key = Pair(dep.groupId, dep.artifactId)
-                    versionMap[key]?.let { newVersion ->
-                        if (dep.version != null && dep.version.startsWith("\${")) {
-                            val propName = dep.version.substring(2, dep.version.length - 1)
-                            if (!isMavenInternalProperty(propName)) {
-                                updateProperty(propName, newVersion)
-                            }
-                        } else if (dep.version != null) {
-                            updateDependencyVersion(dep.groupId, dep.artifactId, newVersion)
-                        }
-                    }
-                }
-
-                // Also check properties directly for pattern artifactId.version
+                model.dependencies.orEmpty().forEach { updateDependencyReference(it, versionMap) }
+                model.dependencyManagement?.dependencies.orEmpty().forEach { updateDependencyReference(it, versionMap) }
                 versionMap.forEach { (key, newVersion) ->
-                    val artifactId = key.second
-                    val directPropName = "$artifactId.version"
-                    if (model.properties.containsKey(directPropName)) {
-                        updateProperty(directPropName, newVersion)
-                    }
+                    val directPropName = key.second + VERSION_SUFFIX
+                    if (model.properties.containsKey(directPropName)) updateProperty(directPropName, newVersion)
                 }
             }
         }
+    }
+
+    private fun PomSurgicalEditor.Session.updateDependencyReference(
+        dependency: org.apache.maven.model.Dependency,
+        versionMap: Map<Pair<String, String>, String>
+    ) {
+        val newVersion = versionMap[dependency.groupId to dependency.artifactId] ?: return
+        val currentVersion = dependency.version ?: return
+        if (!currentVersion.startsWith("\${")) {
+            updateDependencyVersion(dependency.groupId, dependency.artifactId, newVersion)
+            return
+        }
+        val propertyName = currentVersion.substring(2, currentVersion.length - 1)
+        if (!isMavenInternalProperty(propertyName)) updateProperty(propertyName, newVersion)
     }
 
     fun syncDevelop(basePath: Path, maxDepth: Int, rootProjectPaths: List<String>, mergeDevelop: Boolean = false): List<String> {
@@ -267,19 +228,19 @@ class MavenProjectService(
             ?: throw IllegalArgumentException("Project was not found in the configured workspace: $projectPath")
     }
 
-    private fun isSpringBootProject(project: MavenProject, allProjects: List<MavenProject>, projectMap: Map<String, MavenProject>): Boolean {
+    private fun isSpringBootProject(project: MavenProject): Boolean {
         fun isSb(p: org.apache.maven.model.Parent?): Boolean {
             if (p == null) return false
-            return p.groupId == "org.springframework.boot" || 
+            return p.groupId == SPRING_BOOT_GROUP ||
                    p.artifactId == "spring-boot-starter-parent" || 
-                   p.artifactId == "spring-boot-dependencies"
+                   p.artifactId == SPRING_BOOT_DEPENDENCIES
         }
 
         if (isSb(project.model.parent)) return true
         
         // Check for BOM import
         val hasBom = project.model.dependencyManagement?.dependencies?.any { 
-            it.groupId == "org.springframework.boot" && it.artifactId == "spring-boot-dependencies" && it.scope == "import" 
+            it.groupId == SPRING_BOOT_GROUP && it.artifactId == SPRING_BOOT_DEPENDENCIES && it.scope == "import"
         } == true
         if (hasBom) return true
         
@@ -293,13 +254,12 @@ class MavenProjectService(
         
         val usages = usageMap[Pair(groupId, artifactId)]?.filter { it.path != project.pomLocation.absolutePath } ?: emptyList()
         
-        val hasSpringBootParent = isSpringBootProject(project, allProjects, projectMap)
-        val springBootVersion = findSpringBootVersion(project, allProjects, projectMap)
+        val hasSpringBootParent = isSpringBootProject(project)
+        val springBootVersion = findSpringBootVersion(project)
 
         var managedProperties = emptyList<ManagedProperty>()
         var error: String? = null
         var nexusIqResult: NexusIqResult? = null
-        var effectiveModel: Model? = null
 
         val settings = settingsService.loadSettings()
         val applicationId = nexusIqService.extractNexusIqAppId(project.pomLocation.parent, settings)
@@ -308,7 +268,6 @@ class MavenProjectService(
         if (resolveProps) {
             try {
                 val result = modelResolver.resolveModelResult(project.pomLocation)
-                effectiveModel = result.effectiveModel
                 managedProperties = resolveManagedPropertiesFromResult(project, result)
                 
                 if (settings.nexusIqUrl.isNullOrBlank()) {
@@ -322,7 +281,7 @@ class MavenProjectService(
                         message = "Nexus IQ scan skipped: No Jenkinsfile found"
                     )
                 } else {
-                    val violations = getProjectVulnerabilitiesFromModel(effectiveModel)
+                    val violations = getProjectVulnerabilitiesFromModel(result.effectiveModel)
                     nexusIqResult = NexusIqResult(
                         applicationPublicId = applicationId,
                         policyViolations = violations,
@@ -339,7 +298,7 @@ class MavenProjectService(
                             name = name,
                             value = rawProps.getProperty(name) ?: "",
                             inheritedValue = null,
-                            source = "Local POM",
+                            source = LOCAL_POM,
                             isOverridden = true,
                             comment = findCommentForProperty(project.pomLocation, name)
                         )
@@ -354,7 +313,7 @@ class MavenProjectService(
                 val vArtifactId = parts.getOrNull(2)
                 val vVersion = parts.getOrNull(3)
                 
-                (vVersion == prop.value) && (prop.name.contains(vArtifactId ?: "___") || (vArtifactId?.contains(prop.name.replace(".version", "")) == true))
+                (vVersion == prop.value) && (prop.name.contains(vArtifactId ?: "___") || (vArtifactId?.contains(prop.name.replace(VERSION_SUFFIX, "")) == true))
             } ?: emptyList()
             if (violationsForProp.isNotEmpty()) prop.copy(nexusIqViolations = violationsForProp) else prop
         }
@@ -393,12 +352,12 @@ class MavenProjectService(
         return nexusIqService.getVulnerabilitiesBatch(components).distinctBy { it.componentIdentifier }
     }
 
-    private fun findSpringBootVersion(project: MavenProject, allProjects: List<MavenProject>, projectMap: Map<String, MavenProject>): String? {
+    private fun findSpringBootVersion(project: MavenProject): String? {
         fun getSbVersion(p: org.apache.maven.model.Parent?): String? {
             if (p == null) return null
-            if (p.groupId == "org.springframework.boot" || 
+            if (p.groupId == SPRING_BOOT_GROUP ||
                 p.artifactId == "spring-boot-starter-parent" || 
-                p.artifactId == "spring-boot-dependencies") return p.version
+                p.artifactId == SPRING_BOOT_DEPENDENCIES) return p.version
             return null
         }
 
@@ -406,7 +365,7 @@ class MavenProjectService(
 
         // Check for BOM import
         project.model.dependencyManagement?.dependencies?.find { 
-            it.groupId == "org.springframework.boot" && it.artifactId == "spring-boot-dependencies" && it.scope == "import" 
+            it.groupId == SPRING_BOOT_GROUP && it.artifactId == SPRING_BOOT_DEPENDENCIES && it.scope == "import"
         }?.let { return it.version }
         
         return null
@@ -415,130 +374,117 @@ class MavenProjectService(
     private fun resolveManagedPropertiesFromResult(project: MavenProject, result: ModelBuildingResult): List<ManagedProperty> {
         val effectiveModel = result.effectiveModel
         val rawProps = project.model.properties
-        
-        val bomModels = mutableMapOf<String, Model>()
-        val allImports = result.modelIds.flatMap { modelId ->
-            result.getRawModel(modelId).dependencyManagement?.dependencies ?: emptyList()
-        }.filter { it.scope == "import" && it.type == "pom" }
-         .distinctBy { "${it.groupId}:${it.artifactId}:${it.version}" }
+        val bomModels = resolveImportedBoms(result, effectiveModel.properties)
+        val properties = effectiveVersionProperties(project, result, bomModels).toMutableMap()
+        addMissingRawProperties(project, properties)
+        addMissingBomProperties(bomModels, properties)
+        return properties.values.sortedBy { it.name }
+    }
 
-        fun collectBom(groupId: String, artifactId: String, version: String) {
+    private data class PendingBom(val dependency: org.apache.maven.model.Dependency, val properties: Properties)
+    private data class PropertyOrigin(val source: String, val inheritedValue: String?)
+
+    private fun resolveImportedBoms(result: ModelBuildingResult, properties: Properties): Map<String, Model> {
+        val pending = ArrayDeque<PendingBom>()
+        importedDependencies(result).forEach { pending.add(PendingBom(it, properties)) }
+        val models = mutableMapOf<String, Model>()
+        while (pending.isNotEmpty()) {
+            val item = pending.removeFirst()
+            val groupId = interpolate(item.dependency.groupId, item.properties)
+            val artifactId = interpolate(item.dependency.artifactId, item.properties)
+            val version = interpolate(item.dependency.version, item.properties)
             val key = "$groupId:$artifactId:$version"
-            if (bomModels.containsKey(key)) return
-            
+            if (key in models) continue
             try {
                 val bomResult = modelResolver.resolveModelResult(groupId, artifactId, version)
-                val bomModel = bomResult.effectiveModel
-                bomModels[key] = bomModel
-
-                bomResult.modelIds
-                    .flatMap { modelId ->
-                        bomResult.getRawModel(modelId).dependencyManagement?.dependencies ?: emptyList()
-                    }
-                    .filter { it.scope == "import" && it.type == "pom" }
-                    .forEach { nestedImport ->
-                        collectBom(
-                            interpolate(nestedImport.groupId, bomModel.properties),
-                            interpolate(nestedImport.artifactId, bomModel.properties),
-                            interpolate(nestedImport.version, bomModel.properties)
-                        )
-                    }
+                val model = bomResult.effectiveModel
+                models[key] = model
+                importedDependencies(bomResult).forEach { pending.add(PendingBom(it, model.properties)) }
             } catch (e: Exception) {
-                // Skip BOMs that cannot be resolved
+                logger.debug("Could not resolve imported BOM $key", e)
             }
         }
-
-        for (imp in allImports) {
-            collectBom(
-                interpolate(imp.groupId, effectiveModel.properties),
-                interpolate(imp.artifactId, effectiveModel.properties),
-                interpolate(imp.version, effectiveModel.properties)
-            )
-        }
-
-        val allPropsMap = mutableMapOf<String, ManagedProperty>()
-        
-        // 1. Process effective model properties (Local and Parents)
-        effectiveModel.properties.stringPropertyNames().forEach { name ->
-            if (name.endsWith(".version") || name.contains("version")) {
-                val value = effectiveModel.properties.getProperty(name)
-                val isInRaw = rawProps.containsKey(name)
-                
-                // Determine source and inherited value from model hierarchy
-                var source = if (isInRaw) "Local POM" else "Inherited"
-                var inheritedValue: String? = null
-                
-                // Traverse hierarchy from child to parent (index 0 is project, index 1 is first parent)
-                for (i in 1 until result.modelIds.size) {
-                    val modelId = result.modelIds[i]
-                    val rawModel = result.getRawModel(modelId)
-                    if (rawModel.properties.containsKey(name)) {
-                        inheritedValue = rawModel.properties.getProperty(name)
-                        if (!isInRaw) {
-                            source = rawModel.artifactId ?: "Parent"
-                            if (source.contains("spring-boot")) source = "Spring Boot"
-                        }
-                        break
-                    }
-                }
-                
-                // If not found in parent hierarchy, check BOMs
-                if (inheritedValue == null) {
-                    for (bomModel in bomModels.values) {
-                        val v = bomModel.properties.getProperty(name)
-                        if (v != null) {
-                            inheritedValue = v
-                            if (!isInRaw) {
-                                source = bomModel.artifactId
-                            }
-                            break
-                        }
-                    }
-                }
-
-                allPropsMap[name] = ManagedProperty(
-                    name = name,
-                    value = value,
-                    inheritedValue = inheritedValue,
-                    source = source,
-                    isOverridden = isInRaw,
-                    comment = if (isInRaw) findCommentForProperty(project.pomLocation, name) else null
-                )
-            }
-        }
-
-        // 2. Add properties from raw POM that were missed (e.g. if effective model resolution was incomplete)
-        rawProps.stringPropertyNames().forEach { name ->
-            if (!allPropsMap.containsKey(name) && (name.endsWith(".version") || name.contains("version"))) {
-                allPropsMap[name] = ManagedProperty(
-                    name = name,
-                    value = rawProps.getProperty(name) ?: "",
-                    inheritedValue = null,
-                    source = "Local POM",
-                    isOverridden = true,
-                    comment = findCommentForProperty(project.pomLocation, name)
-                )
-            }
-        }
-
-        // 3. Add properties from BOMs that weren't in effective model
-        for (bomModel in bomModels.values) {
-            bomModel.properties.stringPropertyNames().forEach { name ->
-                if ((name.endsWith(".version") || name.contains("version")) && !allPropsMap.containsKey(name)) {
-                    val value = bomModel.properties.getProperty(name)
-                    allPropsMap[name] = ManagedProperty(
-                        name = name,
-                        value = value,
-                        inheritedValue = value,
-                        source = bomModel.artifactId,
-                        isOverridden = false
-                    )
-                }
-            }
-        }
-
-        return allPropsMap.values.sortedBy { it.name }
+        return models
     }
+
+    private fun importedDependencies(result: ModelBuildingResult): List<org.apache.maven.model.Dependency> =
+        result.modelIds.flatMap { modelId ->
+            result.getRawModel(modelId).dependencyManagement?.dependencies.orEmpty()
+        }.filter { it.scope == "import" && it.type == "pom" }
+            .distinctBy { "${it.groupId}:${it.artifactId}:${it.version}" }
+
+    private fun effectiveVersionProperties(
+        project: MavenProject,
+        result: ModelBuildingResult,
+        bomModels: Map<String, Model>
+    ): Map<String, ManagedProperty> {
+        val rawProps = project.model.properties
+        return result.effectiveModel.properties.stringPropertyNames()
+            .filter(::isVersionProperty)
+            .associateWith { name ->
+                val isLocal = rawProps.containsKey(name)
+                val origin = findPropertyOrigin(name, isLocal, result, bomModels.values)
+                ManagedProperty(
+                    name = name,
+                    value = result.effectiveModel.properties.getProperty(name),
+                    inheritedValue = origin.inheritedValue,
+                    source = origin.source,
+                    isOverridden = isLocal,
+                    comment = if (isLocal) findCommentForProperty(project.pomLocation, name) else null
+                )
+            }
+    }
+
+    private fun findPropertyOrigin(
+        name: String,
+        isLocal: Boolean,
+        result: ModelBuildingResult,
+        bomModels: Collection<Model>
+    ): PropertyOrigin {
+        val parent = result.modelIds.drop(1).map(result::getRawModel)
+            .firstOrNull { it.properties.containsKey(name) }
+        if (parent != null) {
+            val inheritedValue = parent.properties.getProperty(name)
+            if (isLocal) return PropertyOrigin(LOCAL_POM, inheritedValue)
+            val source = parent.artifactId?.let { if (it.contains("spring-boot")) "Spring Boot" else it } ?: "Parent"
+            return PropertyOrigin(source, inheritedValue)
+        }
+        val bom = bomModels.firstOrNull { it.properties.containsKey(name) }
+        return when {
+            bom == null -> PropertyOrigin(if (isLocal) LOCAL_POM else "Inherited", null)
+            isLocal -> PropertyOrigin(LOCAL_POM, bom.properties.getProperty(name))
+            else -> PropertyOrigin(bom.artifactId, bom.properties.getProperty(name))
+        }
+    }
+
+    private fun addMissingRawProperties(project: MavenProject, properties: MutableMap<String, ManagedProperty>) {
+        project.model.properties.stringPropertyNames()
+            .filter(::isVersionProperty)
+            .filterNot(properties::containsKey)
+            .forEach { name ->
+                properties[name] = ManagedProperty(
+                    name, project.model.properties.getProperty(name) ?: "", null, LOCAL_POM, true,
+                    findCommentForProperty(project.pomLocation, name)
+                )
+            }
+    }
+
+    private fun addMissingBomProperties(
+        bomModels: Map<String, Model>,
+        properties: MutableMap<String, ManagedProperty>
+    ) {
+        bomModels.values.forEach { model ->
+            model.properties.stringPropertyNames()
+                .filter(::isVersionProperty)
+                .filterNot(properties::containsKey)
+                .forEach { name ->
+                    val value = model.properties.getProperty(name)
+                    properties[name] = ManagedProperty(name, value, value, model.artifactId, false)
+                }
+        }
+    }
+
+    private fun isVersionProperty(name: String): Boolean = name.endsWith(VERSION_SUFFIX) || name.contains("version")
 
     private fun interpolate(value: String?, properties: Properties): String {
         if (value == null) return ""
@@ -552,44 +498,6 @@ class MavenProjectService(
             match = regex.find(result)
         }
         return result
-    }
-
-    private fun valueFromParent(propertyName: String, project: MavenProject, allProjects: List<MavenProject>): String? {
-        val parent = project.model.parent ?: return null
-
-        // 1. Try workspace first
-        val workspaceParent = allProjects.find {
-            val gid = it.getAppropiateGroupId().value
-            val aid = it.getAppropiateArtifactId().value
-            val v = it.getAppropiateVersion().value
-            gid == parent.groupId && aid == parent.artifactId && v == parent.version
-        }
-        if (workspaceParent != null) {
-            return try {
-                val parentModel = modelResolver.resolveEffectiveModel(workspaceParent.pomLocation)
-                parentModel.properties.getProperty(propertyName)
-            } catch (e: Exception) {
-                null
-            }
-        }
-
-        // 2. Fallback to local repository
-        return try {
-            val localRepository = File(System.getProperty("user.home"), ".m2/repository")
-            val parentPom = localRepository.resolve(parent.groupId.replace('.', File.separatorChar))
-                .resolve(parent.artifactId)
-                .resolve(parent.version)
-                .resolve("${parent.artifactId}-${parent.version}.pom")
-            
-            if (parentPom.exists()) {
-                val parentModel = modelResolver.resolveEffectiveModel(parentPom)
-                parentModel.properties.getProperty(propertyName)
-            } else {
-                null
-            }
-        } catch (e: Exception) {
-            null
-        }
     }
 
     private fun findCommentForProperty(pomFile: File, propertyName: String): String? {
@@ -697,7 +605,7 @@ class MavenProjectService(
                         name = name,
                         value = rawProps.getProperty(name) ?: "",
                         inheritedValue = null,
-                        source = "Local POM",
+                        source = LOCAL_POM,
                         isOverridden = true,
                         comment = findCommentForProperty(project.pomLocation, name)
                     )
@@ -726,7 +634,7 @@ class MavenProjectService(
                 val vArtifactId = parts.getOrNull(2)
                 val vVersion = parts.getOrNull(3)
                 
-                (vVersion == prop.value) && (prop.name.contains(vArtifactId ?: "___") || (vArtifactId?.contains(prop.name.replace(".version", "")) == true))
+                (vVersion == prop.value) && (prop.name.contains(vArtifactId ?: "___") || (vArtifactId?.contains(prop.name.replace(VERSION_SUFFIX, "")) == true))
             }
             if (violationsForProp.isNotEmpty()) prop.copy(nexusIqViolations = violationsForProp) else prop
         }
@@ -818,61 +726,45 @@ class MavenProjectService(
         return listOf(project) + project.modules.flatMap { flattenAnalysis(it) }
     }
 
-    private fun findRootAnalysisByPath(roots: List<ProjectAnalysis>, path: String): ProjectAnalysis? {
-        val normalizedPath = Paths.get(path).toAbsolutePath().normalize().toString()
-        return roots.find { root ->
-            flattenAnalysis(root).any { 
-                Paths.get(it.path).toAbsolutePath().normalize().toString() == normalizedPath 
-            }
-        }
-    }
-
     private fun topologicalSortIntoStages(nodes: Set<String>, dependencies: Map<String, Set<String>>): List<List<String>> {
-        val inDegree = mutableMapOf<String, Int>()
-        val adj = mutableMapOf<String, MutableSet<String>>() // node -> things that depend on it
-
-        nodes.forEach { inDegree[it] = 0 }
-
-        dependencies.forEach { (dependent, deps) ->
-            deps.forEach { dep ->
-                if (nodes.contains(dep) && nodes.contains(dependent)) {
-                    if (adj.getOrPut(dep) { mutableSetOf() }.add(dependent)) {
-                        inDegree[dependent] = (inDegree[dependent] ?: 0) + 1
-                    }
-                }
-            }
-        }
-
+        val (inDegree, adjacency) = buildDependencyGraph(nodes, dependencies)
         val result = mutableListOf<List<String>>()
         var currentStage = nodes.filter { (inDegree[it] ?: 0) == 0 }
-
         while (currentStage.isNotEmpty()) {
             result.add(currentStage)
-            val nextStage = mutableListOf<String>()
-            currentStage.forEach { u ->
-                adj[u]?.forEach { v ->
-                    inDegree[v]?.let { degree ->
-                        val newDegree = degree - 1
-                        inDegree[v] = newDegree
-                        if (newDegree == 0) {
-                            nextStage.add(v)
-                        }
-                    }
+            currentStage = nextBuildStage(currentStage, adjacency, inDegree)
+        }
+        val processedNodes = result.flatten().toSet()
+        val remaining = (nodes - processedNodes).sorted()
+        if (remaining.isNotEmpty()) result.add(remaining)
+        return result
+    }
+
+    private fun buildDependencyGraph(
+        nodes: Set<String>,
+        dependencies: Map<String, Set<String>>
+    ): Pair<MutableMap<String, Int>, Map<String, Set<String>>> {
+        val inDegree = nodes.associateWith { 0 }.toMutableMap()
+        val adjacency = mutableMapOf<String, MutableSet<String>>()
+        dependencies.forEach { (dependent, required) ->
+            if (dependent !in nodes) return@forEach
+            required.filter(nodes::contains).forEach { dependency ->
+                if (adjacency.getOrPut(dependency) { mutableSetOf() }.add(dependent)) {
+                    inDegree[dependent] = inDegree.getValue(dependent) + 1
                 }
             }
-            currentStage = nextStage
         }
+        return inDegree to adjacency
+    }
 
-        // Handle cycles
-        val processedNodes = result.flatten().toSet()
-        if (processedNodes.size < nodes.size) {
-            val remaining = (nodes - processedNodes).sorted()
-            if (remaining.isNotEmpty()) {
-                result.add(remaining)
-            }
-        }
-
-        return result
+    private fun nextBuildStage(
+        current: List<String>,
+        adjacency: Map<String, Set<String>>,
+        inDegree: MutableMap<String, Int>
+    ): List<String> = current.flatMap { adjacency[it].orEmpty() }.mapNotNull { dependent ->
+        val degree = inDegree.getValue(dependent) - 1
+        inDegree[dependent] = degree
+        dependent.takeIf { degree == 0 }
     }
 
     private fun buildUsageMap(allProjects: List<MavenProject>): Map<Pair<String, String>, List<ProjectUsage>> {

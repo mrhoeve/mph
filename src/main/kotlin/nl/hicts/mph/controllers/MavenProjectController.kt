@@ -3,6 +3,7 @@ package nl.hicts.mph.controllers
 import nl.hicts.mph.models.Settings
 import nl.hicts.mph.services.MavenProjectService
 import nl.hicts.mph.services.ManagedProperty
+import nl.hicts.mph.services.BulkVersionUpdate
 import nl.hicts.mph.services.ProjectAnalysis
 import nl.hicts.mph.services.TagInfo
 import nl.hicts.mph.services.SettingsService
@@ -31,18 +32,21 @@ class MavenProjectController(
     private val settingsService: SettingsService,
     private val sbomService: SbomService
 ) {
+    private companion object {
+        const val BASE_PATH_NOT_SET = "Base path not set"
+    }
 
     @GetMapping("/api/projects/analyze")
     fun analyze(): List<ProjectAnalysis> {
         val settings = settingsService.loadSettings()
-        val basePath = settings.basePath ?: throw RuntimeException("Base path not set")
+        val basePath = settings.basePath ?: throw RuntimeException(BASE_PATH_NOT_SET)
         return mavenProjectService.scanAndAnalyze(basePath, settings.maxScanDepth)
     }
 
     @PostMapping("/api/projects/update-version")
     fun updateVersion(@RequestBody request: UpdateVersionRequest): List<ProjectAnalysis> {
         val settings = settingsService.loadSettings()
-        val basePath = settings.basePath ?: throw RuntimeException("Base path not set")
+        val basePath = settings.basePath ?: throw RuntimeException(BASE_PATH_NOT_SET)
         mavenProjectService.updateVersions(
             basePath, 
             settings.maxScanDepth, 
@@ -56,16 +60,13 @@ class MavenProjectController(
     @PostMapping("/api/projects/bulk-update-version")
     fun bulkUpdateVersion(@RequestBody request: BulkUpdateVersionRequest): List<ProjectAnalysis> {
         val settings = settingsService.loadSettings()
-        val basePath = settings.basePath ?: throw RuntimeException("Base path not set")
+        val basePath = settings.basePath ?: throw RuntimeException(BASE_PATH_NOT_SET)
         mavenProjectService.bulkUpdateVersions(
-            basePath,
-            settings.maxScanDepth,
-            request.rootProjectPaths,
-            request.prefix,
-            request.updateDependents,
-            request.mode ?: "ADD_PREFIX",
-            request.branchName,
-            request.updateProjects ?: true
+            basePath, settings.maxScanDepth,
+            BulkVersionUpdate(
+                request.rootProjectPaths, request.prefix, request.updateDependents,
+                request.mode ?: "ADD_PREFIX", request.branchName, request.updateProjects ?: true
+            )
         )
         return mavenProjectService.scanAndAnalyze(basePath, settings.maxScanDepth)
     }
@@ -74,7 +75,7 @@ class MavenProjectController(
     @PostMapping("/api/projects/upgrade-spring-boot")
     fun upgradeSpringBoot(@RequestBody request: UpgradeSpringBootRequest): List<ProjectAnalysis> {
         val settings = settingsService.loadSettings()
-        val basePath = settings.basePath ?: throw RuntimeException("Base path not set")
+        val basePath = settings.basePath ?: throw RuntimeException(BASE_PATH_NOT_SET)
         mavenProjectService.upgradeSpringBoot(basePath, settings.maxScanDepth, request.path, request.newVersion)
         return mavenProjectService.scanAndAnalyze(basePath, settings.maxScanDepth)
     }
@@ -82,7 +83,7 @@ class MavenProjectController(
     @PostMapping("/api/projects/override-property")
     fun overrideProperty(@RequestBody request: OverridePropertyRequest): List<ProjectAnalysis> {
         val settings = settingsService.loadSettings()
-        val basePath = settings.basePath ?: throw RuntimeException("Base path not set")
+        val basePath = settings.basePath ?: throw RuntimeException(BASE_PATH_NOT_SET)
         mavenProjectService.overrideProperty(
             basePath,
             settings.maxScanDepth,
@@ -97,7 +98,7 @@ class MavenProjectController(
     @PostMapping("/api/projects/remove-property-override")
     fun removePropertyOverride(@RequestBody request: RemovePropertyOverrideRequest): List<ProjectAnalysis> {
         val settings = settingsService.loadSettings()
-        val basePath = settings.basePath ?: throw RuntimeException("Base path not set")
+        val basePath = settings.basePath ?: throw RuntimeException(BASE_PATH_NOT_SET)
         mavenProjectService.removePropertyOverride(
             basePath,
             settings.maxScanDepth,
@@ -110,21 +111,21 @@ class MavenProjectController(
     @GetMapping("/api/projects/managed-properties")
     fun getManagedProperties(@RequestParam path: String): List<ManagedProperty> {
         val settings = settingsService.loadSettings()
-        val basePath = settings.basePath ?: throw RuntimeException("Base path not set")
+        val basePath = settings.basePath ?: throw RuntimeException(BASE_PATH_NOT_SET)
         return mavenProjectService.getManagedProperties(basePath, settings.maxScanDepth, path)
     }
 
     @GetMapping("/api/projects/latest-tag")
     fun getLatestTag(@RequestParam path: String): TagInfo? {
         val settings = settingsService.loadSettings()
-        val basePath = settings.basePath ?: throw RuntimeException("Base path not set")
+        val basePath = settings.basePath ?: throw RuntimeException(BASE_PATH_NOT_SET)
         return mavenProjectService.getLatestTag(basePath, settings.maxScanDepth, path)
     }
 
     @GetMapping("/api/projects/build-order")
     fun getBuildOrder(): List<ProjectAnalysis> {
         val settings = settingsService.loadSettings()
-        val basePath = settings.basePath ?: throw RuntimeException("Base path not set")
+        val basePath = settings.basePath ?: throw RuntimeException(BASE_PATH_NOT_SET)
         return mavenProjectService.getBuildOrder(basePath, settings.maxScanDepth)
     }
 
@@ -132,7 +133,7 @@ class MavenProjectController(
     @PostMapping("/api/projects/sync-develop")
     fun syncDevelop(@RequestBody request: SyncDevelopRequest): SyncDevelopResponse {
         val settings = settingsService.loadSettings()
-        val basePath = settings.basePath ?: throw RuntimeException("Base path not set")
+        val basePath = settings.basePath ?: throw RuntimeException(BASE_PATH_NOT_SET)
         val messages = mavenProjectService.syncDevelop(basePath, settings.maxScanDepth, request.rootProjectPaths, request.mergeDevelop ?: false)
         val projects = mavenProjectService.scanAndAnalyze(basePath, settings.maxScanDepth)
         return SyncDevelopResponse(projects, messages)
@@ -141,7 +142,7 @@ class MavenProjectController(
     @GetMapping("/api/projects/export-excel")
     fun exportExcel(): ResponseEntity<ByteArray> {
         val settings = settingsService.loadSettings()
-        val basePath = settings.basePath ?: throw RuntimeException("Base path not set")
+        val basePath = settings.basePath ?: throw RuntimeException(BASE_PATH_NOT_SET)
         val buildOrder = mavenProjectService.getBuildOrder(basePath, settings.maxScanDepth)
         val excelBytes = mavenProjectService.exportToExcel(buildOrder)
 
@@ -165,7 +166,7 @@ class MavenProjectController(
         val pomFile = File(path)
         val artifactId = try {
             val settings = settingsService.loadSettings()
-            val basePath = settings.basePath ?: throw RuntimeException("Base path not set")
+            val basePath = settings.basePath ?: throw RuntimeException(BASE_PATH_NOT_SET)
             // Try to find the project in analyzed projects
             val projects = mavenProjectService.scanAndAnalyze(basePath, settings.maxScanDepth)
             val project = projects.flatMap { p -> flattenAnalysis(p) }.find { 

@@ -1,6 +1,6 @@
 import { Component, EventEmitter, Output, input, inject, OnInit, signal, DestroyRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ProjectAnalysis, MavenProjectService } from '../../../services/maven-project-service';
+import { ProjectAnalysis } from '../../../services/maven-project-service';
 import { SpringBootDiscoveryService, SpringBootUpgradeSuggestions } from '../../../services/spring-boot-discovery.service';
 
 @Component({
@@ -19,7 +19,7 @@ export class SpringBootUpgradeModalComponent implements OnInit {
   readonly isLoading = signal(true);
   readonly errorMessage = signal<string | null>(null);
 
-  @Output() close = new EventEmitter<void>();
+  @Output() dismissed = new EventEmitter<void>();
   @Output() upgrade = new EventEmitter<string>();
 
   ngOnInit(): void {

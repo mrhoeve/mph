@@ -81,7 +81,7 @@ export class SpringBootDiscoveryService {
       return { currentVersion, latestInSeries: null, latestOverall: null };
     }
 
-    const latestOverall = stableVersions[stableVersions.length - 1];
+    const latestOverall = stableVersions.at(-1)!;
     
     const parts = currentVersion.split('.');
     let latestInSeries: string | null = null;
@@ -89,7 +89,7 @@ export class SpringBootDiscoveryService {
       const series = `${parts[0]}.${parts[1]}.`;
       const seriesVersions = stableVersions.filter(v => v.startsWith(series));
       if (seriesVersions.length > 0) {
-        latestInSeries = seriesVersions[seriesVersions.length - 1];
+        latestInSeries = seriesVersions.at(-1)!;
       }
     }
 
@@ -110,8 +110,8 @@ export class SpringBootDiscoveryService {
   }
 
   private compareVersions(v1: string, v2: string): number {
-    const p1 = v1.split('.').map(s => parseInt(s, 10)).filter(n => !isNaN(n));
-    const p2 = v2.split('.').map(s => parseInt(s, 10)).filter(n => !isNaN(n));
+    const p1 = v1.split('.').map(s => Number.parseInt(s, 10)).filter(n => !Number.isNaN(n));
+    const p2 = v2.split('.').map(s => Number.parseInt(s, 10)).filter(n => !Number.isNaN(n));
     const size = Math.max(p1.length, p2.length);
     for (let i = 0; i < size; i++) {
       const val1 = p1[i] || 0;

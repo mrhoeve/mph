@@ -91,7 +91,7 @@ import { ProjectAnalysis, MavenProjectService } from '../../../services/maven-pr
 })
 export class UpdateModulesModalComponent implements OnInit {
   @Input({ required: true }) project!: ProjectAnalysis;
-  @Output() close = new EventEmitter<void>();
+  @Output() dismissed = new EventEmitter<void>();
   @Output() execute = new EventEmitter<{path: string, version: string}>();
 
   private readonly mavenProjectService = inject(MavenProjectService);

@@ -1,8 +1,8 @@
-<div class="modal-overlay" (click)="close.emit()">
-  <div class="modal-content wide" (click)="$event.stopPropagation()">
+<div class="modal-overlay" tabindex="-1" (click)="$event.target === $event.currentTarget && dismissed.emit()" (keydown.escape)="dismissed.emit()">
+  <div class="modal-content wide" role="dialog" aria-modal="true">
     <div class="modal-header">
       <h3>Managed Component Versions</h3>
-      <button class="close-icon" (click)="close.emit()">×</button>
+      <button class="close-icon" aria-label="Close" (click)="dismissed.emit()">×</button>
     </div>
     
     <p>Managed properties for <strong>{{ project().artifactId }}</strong>.</p>
@@ -19,14 +19,15 @@
     }
 
     <div class="search-container">
-      <input type="text" 
+      <label for="managed-property-search">Search properties or versions</label>
+      <input id="managed-property-search" type="text"
              class="search-input" 
              placeholder="Search properties or versions..." 
              [ngModel]="propertySearchQuery()" 
              (ngModelChange)="propertySearchQuery.set($event)">
       
       <label class="filter-checkbox">
-        <input type="checkbox" [ngModel]="showOnlyOverrides()" (ngModelChange)="showOnlyOverrides.set($event)">
+        <input type="checkbox" [checked]="showOnlyOverrides()" (click)="showOnlyOverrides.update(value => !value)">
         Show only overrides
       </label>
     </div>
@@ -97,7 +98,7 @@
     </div>
     
     <div class="modal-actions">
-      <button class="secondary-button" (click)="close.emit()">Close</button>
+      <button class="secondary-button" (click)="dismissed.emit()">Close</button>
     </div>
   </div>
 </div>

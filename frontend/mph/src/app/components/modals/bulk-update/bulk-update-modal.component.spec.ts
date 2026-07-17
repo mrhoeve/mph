@@ -36,4 +36,14 @@ describe('BulkUpdateModalComponent', () => {
       mode: 'REMOVE_PREFIX', branchName: 'feature/update'
     }]);
   });
+
+  it('updates the dependent-project option when its checkbox is clicked', () => {
+    const checkbox = fixture.nativeElement.querySelector('#updateDependents') as HTMLInputElement;
+
+    expect(fixture.componentInstance.bulkUpdateDependents()).toBe(true);
+    checkbox.click();
+    fixture.detectChanges();
+
+    expect(fixture.componentInstance.bulkUpdateDependents()).toBe(false);
+  });
 });

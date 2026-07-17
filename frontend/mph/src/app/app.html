@@ -76,7 +76,7 @@
 
 @if (isBulkModalOpen()) {
   <app-bulk-update-modal
-    (close)="isBulkModalOpen.set(false)"
+    (dismissed)="isBulkModalOpen.set(false)"
     (execute)="executeBulkUpdate($event)">
   </app-bulk-update-modal>
 }
@@ -85,7 +85,7 @@
   @if (projectState.selectedProject(); as selected) {
     <app-spring-boot-upgrade-modal
       [project]="selected"
-      (close)="isSpringBootModalOpen.set(false)"
+      (dismissed)="isSpringBootModalOpen.set(false)"
       (upgrade)="upgradeSpringBoot($event)">
     </app-spring-boot-upgrade-modal>
   }
@@ -95,7 +95,7 @@
   @if (versionsModalProject(); as project) {
     <app-managed-properties-modal
       [project]="project"
-      (close)="isVersionsModalOpen.set(false)"
+      (dismissed)="isVersionsModalOpen.set(false)"
       (override)="openOverrideModal($event)"
       (removeOverride)="removeOverride($event)">
     </app-managed-properties-modal>
@@ -107,7 +107,7 @@
     <app-property-override-modal
       [project]="data.project"
       [prop]="data.prop"
-      (close)="isOverrideModalOpen.set(false)"
+      (dismissed)="isOverrideModalOpen.set(false)"
       (execute)="executeOverride($event)">
     </app-property-override-modal>
   }
@@ -115,20 +115,20 @@
 
 @if (projectState.isBuildOrderModalOpen()) {
   <app-build-order-modal
-    (close)="projectState.isBuildOrderModalOpen.set(false)">
+    (dismissed)="projectState.isBuildOrderModalOpen.set(false)">
   </app-build-order-modal>
 }
 
 @if (projectState.isMavenBuildModalOpen()) {
   <app-maven-build-modal
-    (close)="projectState.isMavenBuildModalOpen.set(false)">
+    (dismissed)="projectState.isMavenBuildModalOpen.set(false)">
   </app-maven-build-modal>
 }
 
 @if (projectState.isUpdateModulesModalOpen()) {
   <app-update-modules-modal
     [project]="projectState.projectForUpdateModules()!"
-    (close)="projectState.isUpdateModulesModalOpen.set(false)"
+    (dismissed)="projectState.isUpdateModulesModalOpen.set(false)"
     (execute)="executeUpdateModulesAndUsages($event)">
   </app-update-modules-modal>
 }
@@ -137,7 +137,7 @@
   <app-nexus-iq-report-modal
     [result]="report.result"
     [projectName]="report.projectName"
-    (close)="nexusIqReport.set(null)">
+    (dismissed)="nexusIqReport.set(null)">
   </app-nexus-iq-report-modal>
 }
 

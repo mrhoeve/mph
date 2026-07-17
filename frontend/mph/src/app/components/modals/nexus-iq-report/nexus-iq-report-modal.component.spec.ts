@@ -71,7 +71,7 @@ describe('NexusIqReportModalComponent', () => {
 
     expect([...element.querySelectorAll('.summary-card strong')].map(node => node.textContent?.trim())).toEqual(['1', '2', '3', '4', '10', '5']);
     expect(element.querySelector('.nexus-report-link')?.getAttribute('href')).toBe(result.reportUrl);
-    expect(element.querySelector('.finding h4')?.textContent?.trim()).toBe('org.example : sample : 1.0');
+    expect(element.querySelector('.finding-component')?.textContent?.trim()).toBe('org.example : sample : 1.0');
 
     // Details should be hidden by default
     expect(element.querySelector('.violation-details')).toBeNull();

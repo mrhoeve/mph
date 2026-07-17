@@ -20,33 +20,12 @@ class MavenCommandService {
         maskArguments: List<String> = emptyList()
     ): CompletableFuture<Int> {
         val mvnw = findMvnw(projectDir) ?: "mvn"
-
-        val isWindows = System.getProperty("os.name").lowercase().contains("win")
-        val baseCommand = if (mvnw.contains("mvnw")) {
-            if (isWindows) listOf("cmd.exe", "/c", mvnw)
-            else listOf(mvnw)
-        } else {
-            if (isWindows) listOf("cmd.exe", "/c", "mvn")
-            else listOf(mvnw)
-        }
-
-        val command = baseCommand + args
+        val command = buildBaseCommand(mvnw) + args
 
         val future = CompletableFuture<Int>()
         CompletableFuture.runAsync {
             try {
-                val maskedCommand = command.map { arg ->
-                    var maskedArg = arg
-                    maskArguments.forEach { mask ->
-                        if (arg.startsWith("-D$mask=") || arg.startsWith("$mask=")) {
-                            val parts = arg.split("=", limit = 2)
-                            if (parts.size == 2) {
-                                maskedArg = "${parts[0]}=***"
-                            }
-                        }
-                    }
-                    maskedArg
-                }
+                val maskedCommand = command.map { maskArgument(it, maskArguments) }
                 logger.info("Running $label: ${maskedCommand.joinToString(" ")} in ${projectDir.absolutePath}")
                 val process = ProcessBuilder(command)
                     .directory(projectDir)
@@ -54,13 +33,7 @@ class MavenCommandService {
                     .start()
 
                 process.inputStream.bufferedReader().use { reader ->
-                    reader.forEachLine { line ->
-                        if (line.contains("[ERROR]") || line.contains("BUILD SUCCESS") || line.contains("BUILD FAILURE")) {
-                            logger.info("[Maven $label] $line")
-                        } else {
-                            logger.debug("[Maven $label] $line")
-                        }
-                    }
+                    reader.forEachLine { line -> logOutputLine(label, line) }
                 }
 
                 val exitCode = process.waitFor()
@@ -72,6 +45,23 @@ class MavenCommandService {
             }
         }
         return future
+    }
+
+    private fun buildBaseCommand(mvnw: String): List<String> {
+        val isWindows = System.getProperty("os.name").lowercase().contains("win")
+        val executable = if (mvnw.contains("mvnw")) mvnw else "mvn"
+        return if (isWindows) listOf("cmd.exe", "/c", executable) else listOf(executable)
+    }
+
+    private fun maskArgument(argument: String, masks: List<String>): String {
+        val shouldMask = masks.any { argument.startsWith("-D$it=") || argument.startsWith("$it=") }
+        if (!shouldMask) return argument
+        return "${argument.substringBefore('=')}=***"
+    }
+
+    private fun logOutputLine(label: String, line: String) {
+        val isImportant = listOf("[ERROR]", "BUILD SUCCESS", "BUILD FAILURE").any(line::contains)
+        if (isImportant) logger.info("[Maven $label] $line") else logger.debug("[Maven $label] $line")
     }
 
     private fun findMvnw(dir: File): String? {

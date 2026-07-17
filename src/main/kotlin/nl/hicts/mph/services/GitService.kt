@@ -82,7 +82,7 @@ class GitService {
                 }
 
                 // 2. Check if branch exists
-                val localBranches = git.branchList().call()
+                val localBranches = git.branchList().call().toList()
                 val existsLocally = localBranches.any { it.name == "refs/heads/$branchName" }
 
                 if (existsLocally) {
@@ -91,7 +91,7 @@ class GitService {
                         .setName(branchName)
                         .call()
                 } else {
-                    val remoteBranches = git.branchList().setListMode(ListBranchCommand.ListMode.REMOTE).call()
+                    val remoteBranches = git.branchList().setListMode(ListBranchCommand.ListMode.REMOTE).call().toList()
                     val remoteBranchName = "refs/remotes/origin/$branchName"
                     val existsOnRemote = remoteBranches.any { it.name == remoteBranchName }
 
@@ -127,52 +127,46 @@ class GitService {
             val repository = git.repository
             val currentBranch = repository.branch
             if (currentBranch == null) return "Could not determine current branch for ${repoDir.name}"
-
             logger.info("Syncing develop for ${repoDir.absolutePath}. Current branch: $currentBranch")
-
             try {
-                // 1. Check if develop exists locally
-                val localBranches = git.branchList().call()
-                val existsLocally = localBranches.any { it.name == "refs/heads/develop" }
-
-                if (!existsLocally) {
-                    logger.info("Branch 'develop' not found locally for ${repoDir.absolutePath}. Skipping.")
-                    return "Branch 'develop' not found locally for ${repoDir.name}. Skipped."
-                }
-
-                // 2. Checkout develop
-                git.checkout().setName("develop").call()
-
-                // 3. Pull origin develop
-                git.pull().setRemote("origin").setRemoteBranchName("develop").setCredentialsProvider(CredentialsProvider.getDefault()).call()
-
-                // 4. Switch back to original branch
-                git.checkout().setName(currentBranch).call()
-
-                // 5. Optionally merge develop into current branch
-                if (mergeIntoCurrent && currentBranch != "develop") {
-                    logger.info("Merging develop into $currentBranch for ${repoDir.absolutePath}")
-                    val developRef = repository.findRef("develop")
-                    val result = mergeIntoCurrent(git, developRef, currentBranch)
-                    if (!result.mergeStatus.isSuccessful) {
-                        logger.warn("Merge develop into $currentBranch failed for ${repoDir.absolutePath}: ${result.mergeStatus}")
-                        return "Sync completed, but merge into $currentBranch failed with status: ${result.mergeStatus}. You may have conflicts."
-                    }
-                }
-
-                return null
+                return syncDevelopRepository(git, repoDir, currentBranch, mergeIntoCurrent)
             } catch (e: Exception) {
                 logger.error("Sync develop failed for ${repoDir.absolutePath}: ${e.message}", e)
-                // Try to switch back if we are not on the original branch
-                try {
-                    if (git.repository.branch != currentBranch) {
-                        git.checkout().setName(currentBranch).call()
-                    }
-                } catch (ce: Exception) {
-                    logger.error("Failed to switch back to original branch $currentBranch: ${ce.message}")
-                }
+                restoreBranch(git, currentBranch)
                 throw RuntimeException("Sync develop failed for ${repoDir.name}: ${e.message}")
             }
+        }
+    }
+
+    private fun syncDevelopRepository(
+        git: Git,
+        repoDir: File,
+        currentBranch: String,
+        mergeDevelop: Boolean
+    ): String? {
+        val hasDevelop = git.branchList().call().any { it.name == "refs/heads/develop" }
+        if (!hasDevelop) {
+            logger.info("Branch 'develop' not found locally for ${repoDir.absolutePath}. Skipping.")
+            return "Branch 'develop' not found locally for ${repoDir.name}. Skipped."
+        }
+        git.checkout().setName("develop").call()
+        git.pull().setRemote("origin").setRemoteBranchName("develop")
+            .setCredentialsProvider(CredentialsProvider.getDefault()).call()
+        git.checkout().setName(currentBranch).call()
+        if (!mergeDevelop || currentBranch == "develop") return null
+
+        logger.info("Merging develop into $currentBranch for ${repoDir.absolutePath}")
+        val result = mergeIntoCurrent(git, git.repository.findRef("develop"), currentBranch)
+        if (result.mergeStatus.isSuccessful) return null
+        logger.warn("Merge develop into $currentBranch failed for ${repoDir.absolutePath}: ${result.mergeStatus}")
+        return "Sync completed, but merge into $currentBranch failed with status: ${result.mergeStatus}. You may have conflicts."
+    }
+
+    private fun restoreBranch(git: Git, branch: String) {
+        try {
+            if (git.repository.branch != branch) git.checkout().setName(branch).call()
+        } catch (e: Exception) {
+            logger.error("Failed to switch back to original branch $branch: ${e.message}")
         }
     }
 
@@ -261,93 +255,69 @@ class GitService {
     fun getLatestTagInfo(projectPath: File): TagInfo? {
         val repoDir = findGitRoot(projectPath) ?: return null
         val normalizedProjectPath = projectPath.toPath().toAbsolutePath().normalize().toString()
-        
         if (tagCache.containsKey(normalizedProjectPath)) {
             return tagCache[normalizedProjectPath].let { if (it === noTag) null else it as TagInfo }
         }
-
         val gitRootPath = repoDir.toPath().toAbsolutePath().normalize()
         val pomPath = projectPath.toPath().toAbsolutePath().normalize()
         val relativePomPath = gitRootPath.relativize(pomPath).toString().replace(File.separator, "/")
-
-        return try {
+        val result = try {
             Git.open(repoDir).use { git ->
-                // 1. Fetch tags from origin once per repo
-                if (!fetchedRepos.contains(repoDir)) {
-                    try {
-                        logger.info("Fetching tags for ${repoDir.absolutePath}")
-                        git.fetch().setRemote("origin").setTagOpt(TagOpt.FETCH_TAGS).setCredentialsProvider(CredentialsProvider.getDefault()).call()
-                    } catch (e: Exception) {
-                        logger.warn("Could not fetch tags from origin for ${repoDir.absolutePath}: ${e.message}")
-                    }
-                    fetchedRepos.add(repoDir)
-                }
-
-                val tags = repoTagsCache.getOrPut(repoDir) {
-                    val tagList = git.tagList().call()
-                    if (tagList.isNotEmpty()) {
-                        logger.info("Found ${tagList.size} tags in repository ${repoDir.absolutePath}. First few: ${tagList.take(5).map { it.name }}")
-                    } else {
-                        logger.info("No tags found in repository ${repoDir.absolutePath}")
-                    }
-                    tagList
-                }
-                
-                if (tags.isEmpty()) {
-                    tagCache[normalizedProjectPath] = noTag
-                    return null
-                }
-
-                val repository = git.repository
-                val walk = RevWalk(repository)
-                try {
-                    val tagWithCommit = tags.mapNotNull { ref ->
-                        try {
-                            val obj = walk.parseAny(ref.objectId)
-                            val commit = if (obj is RevTag) {
-                                walk.parseCommit(obj.getObject())
-                            } else if (obj is RevCommit) {
-                                obj
-                            } else {
-                                null
-                            }
-                            commit?.let { TagCommitInfo(ref.name, it.commitTime, it) }
-                        } catch (e: Exception) {
-                            null
-                        }
-                    }
-                    
-                    // Sort by commit time descending
-                    val sortedTags = tagWithCommit.sortedByDescending { it.commitTime }
-                    val latestEntry = sortedTags.firstOrNull()
-                    val latestTagRefName = latestEntry?.tagName
-                    val latestCommit = latestEntry?.commit
-                    
-                    if (latestTagRefName != null) {
-                        logger.info("Latest tag in repo is $latestTagRefName on commit ${latestCommit?.name?.take(7)}")
-                    }
-
-                    val version = if (latestCommit != null) {
-                        // 2. Read the specific pom.xml from this commit
-                        readPomVersionFromCommit(repository, latestCommit, relativePomPath)
-                    } else null
-                    
-                    val result = if (version != null && latestTagRefName != null) {
-                        logger.info("Version found for $relativePomPath in tag $latestTagRefName: $version")
-                        TagInfo(version, latestTagRefName.substringAfter("refs/tags/"))
-                    } else null
-                    
-                    tagCache[normalizedProjectPath] = result ?: noTag
-                    result
-                } finally {
-                    walk.dispose()
-                }
+                fetchTagsOnce(git, repoDir)
+                resolveLatestTag(git, repoDir, relativePomPath)
             }
         } catch (e: Exception) {
             logger.warn("Failed to get latest tag version for $projectPath: ${e.message}")
-            tagCache[normalizedProjectPath] = noTag
             null
         }
+        tagCache[normalizedProjectPath] = result ?: noTag
+        return result
+    }
+
+    private fun fetchTagsOnce(git: Git, repoDir: File) {
+        if (!fetchedRepos.add(repoDir)) return
+        try {
+            logger.info("Fetching tags for ${repoDir.absolutePath}")
+            git.fetch().setRemote("origin").setTagOpt(TagOpt.FETCH_TAGS)
+                .setCredentialsProvider(CredentialsProvider.getDefault()).call()
+        } catch (e: Exception) {
+            logger.warn("Could not fetch tags from origin for ${repoDir.absolutePath}: ${e.message}")
+        }
+    }
+
+    private fun resolveLatestTag(git: Git, repoDir: File, relativePomPath: String): TagInfo? {
+        val tags = repoTagsCache.getOrPut(repoDir) { loadTags(git, repoDir) }
+        if (tags.isEmpty()) return null
+        val latest = findLatestTag(git.repository, tags) ?: return null
+        logger.info("Latest tag in repo is ${latest.tagName} on commit ${latest.commit.name.take(7)}")
+        val version = readPomVersionFromCommit(git.repository, latest.commit, relativePomPath) ?: return null
+        logger.info("Version found for $relativePomPath in tag ${latest.tagName}: $version")
+        return TagInfo(version, latest.tagName.substringAfter("refs/tags/"))
+    }
+
+    private fun loadTags(git: Git, repoDir: File): List<Ref> {
+        val tags = git.tagList().call().toList()
+        if (tags.isEmpty()) logger.info("No tags found in repository ${repoDir.absolutePath}")
+        else logger.info("Found ${tags.size} tags in repository ${repoDir.absolutePath}. First few: ${tags.take(5).map { it.name }}")
+        return tags
+    }
+
+    private fun findLatestTag(repository: Repository, tags: List<Ref>): TagCommitInfo? {
+        RevWalk(repository).use { walk ->
+            return tags.mapNotNull { ref -> tagCommitInfo(walk, ref) }.maxByOrNull { it.commitTime }
+        }
+    }
+
+    private fun tagCommitInfo(walk: RevWalk, ref: Ref): TagCommitInfo? = try {
+        val obj = walk.parseAny(ref.objectId)
+        val commit = when (obj) {
+            is RevTag -> walk.parseCommit(obj.getObject())
+            is RevCommit -> obj
+            else -> null
+        }
+        commit?.let { TagCommitInfo(ref.name, it.commitTime, it) }
+    } catch (e: Exception) {
+        null
     }
 
     private data class TagCommitInfo(val tagName: String, val commitTime: Int, val commit: RevCommit)

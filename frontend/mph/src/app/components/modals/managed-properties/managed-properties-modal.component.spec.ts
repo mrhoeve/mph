@@ -48,6 +48,23 @@ describe('ManagedPropertiesModalComponent', () => {
     expect(fixture.componentInstance.filteredProperties()).toEqual([properties[1]]);
   });
 
+  it('filters the rendered table when show only overrides is clicked', () => {
+    const element: HTMLElement = fixture.nativeElement;
+    const overrideToggle = element.querySelector<HTMLInputElement>('.filter-checkbox input');
+
+    expect(overrideToggle).not.toBeNull();
+    expect(element.querySelectorAll('tbody tr')).toHaveLength(2);
+
+    overrideToggle!.click();
+    fixture.detectChanges();
+
+    const rows = element.querySelectorAll('tbody tr');
+    expect(fixture.componentInstance.showOnlyOverrides()).toBe(true);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].textContent).toContain('beta.version');
+    expect(rows[0].textContent).not.toContain('alpha.version');
+  });
+
   it('emits override and removal requests with exact property', () => {
     const overrides: Array<{ prop: ManagedProperty }> = [];
     const removals: ManagedProperty[] = [];

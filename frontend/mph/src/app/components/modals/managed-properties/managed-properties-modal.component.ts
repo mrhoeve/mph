@@ -20,7 +20,7 @@ export class ManagedPropertiesModalComponent implements OnInit {
   readonly propertySearchQuery = signal('');
   readonly showOnlyOverrides = signal(false);
 
-  @Output() close = new EventEmitter<void>();
+  @Output() dismissed = new EventEmitter<void>();
   @Output() override = new EventEmitter<{prop: ManagedProperty}>();
   @Output() removeOverride = new EventEmitter<ManagedProperty>();
 

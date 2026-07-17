@@ -1,5 +1,5 @@
-<div class="modal-overlay" (click)="close.emit()">
-  <div class="modal-content" (click)="$event.stopPropagation()">
+<div class="modal-overlay" tabindex="-1" (click)="$event.target === $event.currentTarget && dismissed.emit()" (keydown.escape)="dismissed.emit()">
+  <div class="modal-content" role="dialog" aria-modal="true">
     <h3>Upgrade Spring Boot</h3>
     
     @if (isLoading()) {
@@ -43,7 +43,7 @@
     }
 
     <div class="modal-actions">
-      <button class="secondary-button" (click)="close.emit()">Close</button>
+      <button class="secondary-button" (click)="dismissed.emit()">Close</button>
     </div>
   </div>
 </div>

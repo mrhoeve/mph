@@ -1,11 +1,11 @@
-<div class="modal-overlay" (click)="close.emit()">
-  <div class="modal-content wide nexus-report-modal" (click)="$event.stopPropagation()">
+<div class="modal-overlay" tabindex="-1" (click)="$event.target === $event.currentTarget && dismissed.emit()" (keydown.escape)="dismissed.emit()">
+  <div class="modal-content wide nexus-report-modal" role="dialog" aria-modal="true">
     <div class="modal-header">
       <div>
         <h2>Nexus IQ scan report</h2>
         <p class="report-subtitle">{{ projectName }}</p>
       </div>
-      <button class="close-button" (click)="close.emit()">&times;</button>
+      <button class="close-button" aria-label="Close" (click)="dismissed.emit()">&times;</button>
     </div>
 
     <div class="modal-body">
@@ -44,17 +44,15 @@
           <div class="findings-list">
             @for (violation of result.violations; track $index) {
               <article class="finding" [class]="'finding ' + severity(violation)" [class.expanded]="isExpanded($index)">
-                <div class="finding-heading" (click)="toggleExpand($index)" role="button" [attr.aria-expanded]="isExpanded($index)">
+                <button type="button" class="finding-heading" (click)="toggleExpand($index)" [attr.aria-expanded]="isExpanded($index)">
                   <span class="expand-icon">{{ isExpanded($index) ? '▼' : '▶' }}</span>
                   <span class="threat-level">{{ violation.threatLevel }}</span>
-                  <div>
-                    <h4>{{ violation.componentIdentifier || 'Unknown Component' }}</h4>
-                  </div>
-                  <div class="finding-badges">
+                  <span class="finding-component">{{ violation.componentIdentifier || 'Unknown Component' }}</span>
+                  <span class="finding-badges">
                     <span>{{ violation.directDependency ? 'Direct' : 'Transitive' }}</span>
                     @if (violation.waived) { <span class="waived">Waived</span> }
-                  </div>
-                </div>
+                  </span>
+                </button>
 
                 @if (isExpanded($index)) {
                   <div class="violation-details">

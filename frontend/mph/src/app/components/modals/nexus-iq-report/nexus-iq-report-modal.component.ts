@@ -12,7 +12,7 @@ import { NexusIqReportViolation, NexusIqScanResponse } from '../../../services/m
 export class NexusIqReportModalComponent {
   @Input({ required: true }) result!: NexusIqScanResponse;
   @Input({ required: true }) projectName!: string;
-  @Output() close = new EventEmitter<void>();
+  @Output() dismissed = new EventEmitter<void>();
 
   expandedItems = signal<Set<number>>(new Set());
 

@@ -117,8 +117,7 @@ class NexusIqService(
     }
 
     fun getReportUrl(applicationId: String?, settings: Settings, forceRefresh: Boolean = false): String? {
-        val serverUrl = settings.nexusIqUrl ?: return null
-        if (applicationId == null) return null
+        if (settings.nexusIqUrl == null || applicationId == null) return null
 
         if (!forceRefresh && reportUrlCache.containsKey(applicationId)) {
             return reportUrlCache[applicationId]

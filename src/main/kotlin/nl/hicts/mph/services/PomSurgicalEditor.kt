@@ -4,6 +4,8 @@ import java.io.File
 import java.nio.charset.StandardCharsets
 
 object PomSurgicalEditor {
+    private const val VERSION_ELEMENT_PATTERN = "<version>(.*?)</version>"
+    private const val PROPERTIES_BLOCK_PATTERN = "(?s)<properties>.*?</properties>"
 
     class Session(var content: String) {
         var modified = false
@@ -14,7 +16,7 @@ object PomSurgicalEditor {
                 Regex("(?s)<$tag>.*?</$tag>").findAll(content).map { it.range }
             }
             
-            val versionRegex = Regex("<version>(.*?)</version>")
+            val versionRegex = Regex(VERSION_ELEMENT_PATTERN)
             val matches = versionRegex.findAll(content)
             
             for (match in matches) {
@@ -35,7 +37,7 @@ object PomSurgicalEditor {
             val parentContent = parentMatch.value
             
             if (containsElement(parentContent, "groupId", groupId) && containsElement(parentContent, "artifactId", artifactId)) {
-                val versionRegex = Regex("<version>(.*?)</version>")
+                val versionRegex = Regex(VERSION_ELEMENT_PATTERN)
                 val versionMatch = versionRegex.find(parentContent) ?: return
                 
                 val oldVersion = versionMatch.groups[1]!!.value
@@ -50,7 +52,7 @@ object PomSurgicalEditor {
 
         fun updateProperty(propertyName: String, newValue: String) {
             val commentRanges = Regex("(?s)<!--.*?-->").findAll(content).map { it.range }.toList()
-            val propertiesBlocks = Regex("(?s)<properties>.*?</properties>").findAll(content)
+            val propertiesBlocks = Regex(PROPERTIES_BLOCK_PATTERN).findAll(content)
                 .filter { block -> commentRanges.none { block.range.first in it } }
             for (propBlock in propertiesBlocks) {
                 val propRegex = Regex("<${Regex.escape(propertyName)}>(.*?)</${Regex.escape(propertyName)}>")
@@ -70,7 +72,7 @@ object PomSurgicalEditor {
         }
 
         fun upsertProperty(propertyName: String, newValue: String, remark: String?) {
-            val propertiesMatch = Regex("(?s)<properties>.*?</properties>").find(content)
+            val propertiesMatch = Regex(PROPERTIES_BLOCK_PATTERN).find(content)
             
             val remarkBlock = if (remark != null && remark.isNotBlank()) "<!-- $remark -->\n        " else ""
             val newPropLine = "$remarkBlock<$propertyName>$newValue</$propertyName>"
@@ -100,7 +102,7 @@ object PomSurgicalEditor {
         }
 
         fun removeProperty(propertyName: String) {
-            val propertiesMatch = Regex("(?s)<properties>.*?</properties>").find(content) ?: return
+            val propertiesMatch = Regex(PROPERTIES_BLOCK_PATTERN).find(content) ?: return
             val propertiesContent = propertiesMatch.value
             // Regex to find property and its optional preceding comment, including leading whitespace/newline
             // We match at most one preceding comment line to be safe
@@ -119,7 +121,7 @@ object PomSurgicalEditor {
             for (block in depBlocks) {
                 val blockContent = block.value
                 if (containsElement(blockContent, "groupId", groupId) && containsElement(blockContent, "artifactId", artifactId)) {
-                    val versionMatch = Regex("<version>(.*?)</version>").find(blockContent)
+                    val versionMatch = Regex(VERSION_ELEMENT_PATTERN).find(blockContent)
                     if (versionMatch != null) {
                         val oldVersion = versionMatch.groups[1]!!.value
                         if (oldVersion != newVersion) {

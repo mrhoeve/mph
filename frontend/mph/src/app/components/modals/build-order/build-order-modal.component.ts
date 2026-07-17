@@ -45,7 +45,7 @@ export class BuildOrderModalComponent implements OnInit {
   
   private panZoomInstance: SvgPanZoom.Instance | null = null;
 
-  @Output() close = new EventEmitter<void>();
+  @Output() dismissed = new EventEmitter<void>();
 
   ngOnInit(): void {
     this.loadBuildOrder();
@@ -134,7 +134,10 @@ export class BuildOrderModalComponent implements OnInit {
       }
     };
 
-    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+    const encodedSvg = new TextEncoder().encode(svgData);
+    let binarySvg = '';
+    encodedSvg.forEach(byte => binarySvg += String.fromCodePoint(byte));
+    img.src = 'data:image/svg+xml;base64,' + btoa(binarySvg);
   }
 
   private getFormattedTimestamp(): string {
@@ -305,16 +308,16 @@ export class BuildOrderModalComponent implements OnInit {
   private isUsefulParent(p: ProjectAnalysis, allFlattened: ProjectAnalysis[], includedPaths: Set<string>): boolean {
     if (p.path === this.selectedProjectPath()) return true;
 
-    const descendants = this.flatten(p).map(d => d.path);
+    const descendants = new Set(this.flatten(p).map(d => d.path));
     
     // 1. External usages from INCLUDED projects (not from its own descendants)
-    const hasExternalUsages = p.usages.some(u => includedPaths.has(u.path) && !descendants.includes(u.path));
+    const hasExternalUsages = p.usages.some(u => includedPaths.has(u.path) && !descendants.has(u.path));
     if (hasExternalUsages) return true;
 
     // 2. Outgoing dependencies to INCLUDED projects (p depends on someone else who is not itself or its descendant)
     const hasOutgoingDependencies = allFlattened.some(other => 
       includedPaths.has(other.path) && 
-      !descendants.includes(other.path) && 
+      !descendants.has(other.path) &&
       other.usages.some(u => u.path === p.path)
     );
     if (hasOutgoingDependencies) return true;

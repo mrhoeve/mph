@@ -10,8 +10,6 @@ import org.cyclonedx.model.License
 import org.cyclonedx.model.LicenseChoice
 import org.cyclonedx.model.ExternalReference
 import org.cyclonedx.model.Hash
-import org.cyclonedx.model.OrganizationalContact
-import org.cyclonedx.model.OrganizationalEntity
 import org.springframework.stereotype.Service
 import java.io.File
 import java.nio.file.Path
@@ -48,6 +46,7 @@ class SbomService {
         }
     }
 
+    @Suppress("DEPRECATION")
     fun getSbomDetails(projectPath: String): SbomDetails {
         val bom = buildBom(projectPath)
         val rawXml = BomGeneratorFactory.createXml(Version.VERSION_15, bom).toXmlString()
@@ -131,136 +130,126 @@ class SbomService {
     private fun buildBom(projectPath: String): Bom {
         val pomFile = File(projectPath).absoluteFile
         val model = modelResolver.resolveEffectiveModel(pomFile)
-
         val bom = Bom()
-        val rootComponent = Component()
         val groupId = model.groupId ?: model.parent?.groupId ?: ""
         val artifactId = model.artifactId
         val version = model.version ?: model.parent?.version ?: ""
-
-        rootComponent.group = groupId
-        rootComponent.name = artifactId
-        rootComponent.version = version
-        rootComponent.type = Component.Type.LIBRARY
-        rootComponent.bomRef = "pkg:maven/$groupId/$artifactId@$version?type=jar"
-        rootComponent.purl = rootComponent.bomRef
+        val rootComponent = createComponent(groupId, artifactId, version)
         extractMetadata(rootComponent, model)
-
         bom.metadata = org.cyclonedx.model.Metadata().apply {
             timestamp = java.util.Date()
             component = rootComponent
         }
+        val context = BomBuildContext()
+        processProject(model, true, context)
+        processReactorProjects(findReactorProjects(projectPath), pomFile, context)
+        context.components.values.forEach(bom::addComponent)
+        addDependencyGraph(bom, context.dependencies)
+        return bom
+    }
 
-        val reactorProjects = findReactorProjects(projectPath)
-        val allComponents = mutableMapOf<String, Component>()
-        val dependencyGraph = mutableMapOf<String, MutableSet<String>>()
+    private data class BomBuildContext(
+        val components: MutableMap<String, Component> = mutableMapOf(),
+        val dependencies: MutableMap<String, MutableSet<String>> = mutableMapOf()
+    )
 
-        // Function to process a project (root or reactor module)
-        fun processProject(m: Model, isRoot: Boolean) {
-            val pGroupId = m.groupId ?: m.parent?.groupId ?: ""
-            val pArtifactId = m.artifactId
-            val pVersion = m.version ?: m.parent?.version ?: ""
-            val pKey = "$pGroupId:$pArtifactId:$pVersion"
-
-            if (!isRoot) {
-                val comp = Component()
-                comp.group = pGroupId
-                comp.name = pArtifactId
-                comp.version = pVersion
-                comp.type = Component.Type.LIBRARY
-                comp.bomRef = "pkg:maven/$pGroupId/$pArtifactId@$pVersion?type=jar"
-                comp.purl = comp.bomRef
-                extractMetadata(comp, m)
-                allComponents[pKey] = comp
+    private fun processProject(model: Model, isRoot: Boolean, context: BomBuildContext) {
+        val groupId = model.groupId ?: model.parent?.groupId ?: ""
+        val artifactId = model.artifactId
+        val version = model.version ?: model.parent?.version ?: ""
+        val projectKey = "$groupId:$artifactId:$version"
+        if (!isRoot) {
+            context.components[projectKey] = createComponent(groupId, artifactId, version).also {
+                extractMetadata(it, model)
             }
+        }
+        try {
+            walkDependencyTree(modelResolver.resolveDependencyTree(groupId, artifactId, version), projectKey, context)
+        } catch (e: Exception) {
+            addFlatDependencies(groupId, artifactId, version, projectKey, context)
+        }
+    }
 
+    private fun walkDependencyTree(
+        node: org.eclipse.aether.graph.DependencyNode,
+        projectKey: String,
+        context: BomBuildContext
+    ) {
+        val artifact = node.artifact
+        val nodeKey = "${artifact.groupId}:${artifact.artifactId}:${artifact.version}"
+        if (nodeKey != projectKey && nodeKey !in context.components) {
+            context.components[nodeKey] = componentForDependency(node)
+        }
+        val parentRef = packageUrl(artifact)
+        node.children.forEach { child ->
+            context.dependencies.computeIfAbsent(parentRef) { mutableSetOf() }.add(packageUrl(child.artifact))
+            walkDependencyTree(child, projectKey, context)
+        }
+    }
+
+    private fun componentForDependency(node: org.eclipse.aether.graph.DependencyNode): Component {
+        val artifact = node.artifact
+        val component = createComponent(artifact.groupId, artifact.artifactId, artifact.version, artifact.extension)
+        component.scope = mapScope(node.dependency?.scope)
+        if ("${artifact.groupId}:${artifact.artifactId}:${artifact.version}" in workspaceProjects) {
+            component.hashes = getHashes(artifact.file)
+        }
+        try {
+            extractMetadata(component, modelResolver.resolveModel(artifact.groupId, artifact.artifactId, artifact.version))
+        } catch (e: Exception) {
+            // Metadata is optional; retain the dependency coordinates when its POM is unavailable.
+        }
+        return component
+    }
+
+    private fun addFlatDependencies(
+        groupId: String,
+        artifactId: String,
+        version: String,
+        projectKey: String,
+        context: BomBuildContext
+    ) {
+        try {
+            modelResolver.resolveAllDependencies(groupId, artifactId, version).forEach { dependency ->
+                val artifact = dependency.artifact
+                val key = "${artifact.groupId}:${artifact.artifactId}:${artifact.version}"
+                context.components.computeIfAbsent(key) {
+                    createComponent(artifact.groupId, artifact.artifactId, artifact.version).also {
+                        it.scope = mapScope(dependency.scope)
+                        it.bomRef = key
+                    }
+                }
+                context.dependencies.computeIfAbsent(projectKey) { mutableSetOf() }.add(key)
+            }
+        } catch (e: Exception) {
+            // The project component remains useful even if dependency resolution fails completely.
+        }
+    }
+
+    private fun processReactorProjects(files: List<File>, rootPom: File, context: BomBuildContext) {
+        files.filterNot { it.absolutePath == rootPom.absolutePath }.forEach { file ->
             try {
-                val rootNode = modelResolver.resolveDependencyTree(pGroupId, pArtifactId, pVersion)
-
-                fun walk(node: org.eclipse.aether.graph.DependencyNode) {
-                    val art = node.artifact
-                    val nodeKey = "${art.groupId}:${art.artifactId}:${art.version}"
-
-                    // If it's not the project itself, add as component
-                    if (nodeKey != pKey) {
-                        if (!allComponents.containsKey(nodeKey)) {
-                            val comp = Component()
-                            comp.group = art.groupId
-                            comp.name = art.artifactId
-                            comp.version = art.version
-                            comp.scope = mapScope(node.dependency?.scope)
-                            comp.type = Component.Type.LIBRARY
-                            comp.bomRef = "pkg:maven/${art.groupId}/${art.artifactId}@${art.version}?type=${art.extension ?: "jar"}"
-                            comp.purl = comp.bomRef
-                            if (workspaceProjects.containsKey("${art.groupId}:${art.artifactId}:${art.version}")) {
-                                comp.hashes = getHashes(art.file)
-                            }
-
-                            // Try to get more metadata if it's a local project or we can resolve its model
-                            try {
-                                val depModel = modelResolver.resolveModel(art.groupId, art.artifactId, art.version)
-                                extractMetadata(comp, depModel)
-                            } catch (e: Exception) {
-                                // Ignore if metadata cannot be fetched
-                            }
-
-                            allComponents[nodeKey] = comp
-                        }
-                    }
-
-                    // Build dependency relationships
-                    node.children.forEach { child ->
-                        val childArt = child.artifact
-                        val childKey = "${childArt.groupId}:${childArt.artifactId}:${childArt.version}"
-                        val parentRef = "pkg:maven/${art.groupId}/${art.artifactId}@${art.version}?type=${art.extension ?: "jar"}"
-                        val childRef = "pkg:maven/${childArt.groupId}/${childArt.artifactId}@${childArt.version}?type=${childArt.extension ?: "jar"}"
-                        dependencyGraph.computeIfAbsent(parentRef) { mutableSetOf() }.add(childRef)
-                        walk(child)
-                    }
-                }
-                walk(rootNode)
+                processProject(modelResolver.resolveEffectiveModel(file), false, context)
             } catch (e: Exception) {
-                // Fallback to resolveAllDependencies if tree resolution fails
-                try {
-                    val deps = modelResolver.resolveAllDependencies(pGroupId, pArtifactId, pVersion)
-                    deps.forEach { dep ->
-                        val art = dep.artifact
-                        val depKey = "${art.groupId}:${art.artifactId}:${art.version}"
-                        if (!allComponents.containsKey(depKey)) {
-                            val comp = Component()
-                            comp.group = art.groupId
-                            comp.name = art.artifactId
-                            comp.version = art.version
-                            comp.scope = mapScope(dep.scope)
-                            comp.type = Component.Type.LIBRARY
-                            comp.bomRef = depKey
-                            allComponents[depKey] = comp
-                        }
-                        dependencyGraph.computeIfAbsent(pKey) { mutableSetOf() }.add(depKey)
-                    }
-                } catch (ee: Exception) {
-                    // Ignore
-                }
+                // A reactor module without a resolvable model is omitted from the generated BOM.
             }
         }
+    }
 
-        // Process root project
-        processProject(model, true)
-
-        // Process other reactor projects
-        reactorProjects.forEach { file ->
-            if (file.absolutePath != pomFile.absolutePath) {
-                try {
-                    val m = modelResolver.resolveEffectiveModel(file)
-                    processProject(m, false)
-                } catch (e: Exception) {}
-            }
+    private fun createComponent(groupId: String, artifactId: String, version: String, type: String = "jar") =
+        Component().apply {
+            group = groupId
+            name = artifactId
+            this.version = version
+            this.type = Component.Type.LIBRARY
+            bomRef = "pkg:maven/$groupId/$artifactId@$version?type=$type"
+            purl = bomRef
         }
 
-        // Add all found components to the BOM
-        allComponents.values.forEach { bom.addComponent(it) }
+    private fun packageUrl(artifact: org.eclipse.aether.artifact.Artifact): String =
+        "pkg:maven/${artifact.groupId}/${artifact.artifactId}@${artifact.version}?type=${artifact.extension ?: "jar"}"
 
-        // Add dependency relationships to the BOM
+    private fun addDependencyGraph(bom: Bom, dependencyGraph: Map<String, Set<String>>) {
         dependencyGraph.forEach { (parentRef, childRefs) ->
             val dep = org.cyclonedx.model.Dependency(parentRef)
             childRefs.forEach { childRef ->
@@ -268,8 +257,6 @@ class SbomService {
             }
             bom.addDependency(dep)
         }
-
-        return bom
     }
 
     private fun mapScope(scope: String?): Component.Scope? {
@@ -297,50 +284,11 @@ class SbomService {
         }
     }
 
+    @Suppress("DEPRECATION")
     private fun extractMetadata(component: Component, model: Model) {
         component.description = model.description
-
-        val licenses = model.licenses.mapNotNull { l ->
-            val license = License()
-            if (l.name != null) {
-                if (l.name.contains("Apache License, Version 2.0", true) || l.name == "Apache-2.0") {
-                    license.id = "Apache-2.0"
-                } else if (l.name.contains("MIT License", true) || l.name == "MIT") {
-                    license.id = "MIT"
-                } else {
-                    license.name = l.name
-                }
-            } else {
-                return@mapNotNull null
-            }
-            license.url = l.url
-            val lc = LicenseChoice()
-            lc.addLicense(license)
-            lc
-        }
-        if (licenses.isNotEmpty()) {
-            val choice = LicenseChoice()
-            licenses.forEach { l ->
-                l.licenses?.forEach { choice.addLicense(it) }
-            }
-            component.licenseChoice = choice
-        }
-
-        if (model.organization != null) {
-            val org = OrganizationalEntity()
-            org.name = model.organization.name
-            // OrganizationalEntity.urls is a List<String> in recent CycloneDX versions, but it might be just urls
-            // Let's check how to set it if addUrl is missing.
-            // In some versions it's setUrls(List<String>)
-            try {
-                val method = org.javaClass.getMethod("setUrls", List::class.java)
-                method.invoke(org, listOf(model.organization.url))
-            } catch (e: Exception) {
-                // Ignore if not found
-            }
-            component.publisher = model.organization.name
-        }
-
+        createLicenseChoice(model)?.let { component.licenseChoice = it }
+        model.organization?.let { component.publisher = it.name }
         if (model.url != null) {
             val extRef = ExternalReference()
             extRef.type = ExternalReference.Type.WEBSITE
@@ -353,6 +301,25 @@ class SbomService {
             scmRef.type = ExternalReference.Type.VCS
             scmRef.url = model.scm.url ?: model.scm.connection
             component.addExternalReference(scmRef)
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun createLicenseChoice(model: Model): LicenseChoice? {
+        val licenses = model.licenses.mapNotNull { source -> createLicense(source.name, source.url) }
+        if (licenses.isEmpty()) return null
+        return LicenseChoice().also { choice -> licenses.forEach(choice::addLicense) }
+    }
+
+    private fun createLicense(name: String?, url: String?): License? {
+        if (name == null) return null
+        return License().apply {
+            when {
+                name.contains("Apache License, Version 2.0", true) || name == "Apache-2.0" -> id = "Apache-2.0"
+                name.contains("MIT License", true) || name == "MIT" -> id = "MIT"
+                else -> this.name = name
+            }
+            this.url = url
         }
     }
 

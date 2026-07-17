@@ -199,7 +199,7 @@ p {
 .toast-close {
   background: rgba(0, 0, 0, 0.05);
   border: none;
-  color: #64748b;
+  color: #475569;
   font-size: 1.25rem;
   width: 24px;
   height: 24px;
@@ -215,14 +215,14 @@ p {
 
 .toast-close:hover {
   background: rgba(0, 0, 0, 0.1);
-  color: #1e293b;
+  color: #0f172a;
 }
 
 .toast-message {
   color: #475569;
   font-size: 0.875rem;
   line-height: 1.5;
-  word-break: break-word;
+  overflow-wrap: anywhere;
   max-height: 200px;
   overflow-y: auto;
 }
@@ -235,4 +235,3 @@ p {
   min-height: 0;
   padding: 0 2rem 2rem 2rem;
 }
-

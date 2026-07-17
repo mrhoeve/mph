@@ -1,7 +1,7 @@
 import { Component, inject, Input, OnInit, OnChanges, SimpleChanges, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { MavenProjectService, SbomDetails, SbomComponent, ProjectAnalysis } from '../../services/maven-project-service';
+import { MavenProjectService, SbomComponent, ProjectAnalysis } from '../../services/maven-project-service';
 
 @Component({
   selector: 'app-sbom-item',

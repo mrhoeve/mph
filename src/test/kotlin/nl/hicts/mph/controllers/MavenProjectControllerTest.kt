@@ -5,6 +5,7 @@ import io.mockk.justRun
 import io.mockk.mockk
 import io.mockk.verify
 import nl.hicts.mph.models.Settings
+import nl.hicts.mph.services.BulkVersionUpdate
 import nl.hicts.mph.services.ManagedProperty
 import nl.hicts.mph.services.MavenProjectService
 import nl.hicts.mph.services.ProjectAnalysis
@@ -59,7 +60,7 @@ class MavenProjectControllerTest {
     @Test
     fun `version endpoints should delegate mutations and return refreshed analysis`() {
         justRun { projectService.updateVersions(tempDir, 5, "org.example", "sample", "2.0.0") }
-        justRun { projectService.bulkUpdateVersions(tempDir, 5, any(), any(), any(), any(), any(), any()) }
+        justRun { projectService.bulkUpdateVersions(tempDir, 5, any()) }
 
         val updateResult = controller.updateVersion(UpdateVersionRequest("org.example", "sample", "2.0.0"))
         val bulkResult = controller.bulkUpdateVersion(
@@ -70,7 +71,10 @@ class MavenProjectControllerTest {
         assertEquals(analyzedProjects, bulkResult)
         verify(exactly = 1) { projectService.updateVersions(tempDir, 5, "org.example", "sample", "2.0.0") }
         verify(exactly = 1) {
-            projectService.bulkUpdateVersions(tempDir, 5, listOf("/sample/pom.xml"), "feature-", true, "ADD_PREFIX", "feature/test", false)
+            projectService.bulkUpdateVersions(
+                tempDir, 5,
+                BulkVersionUpdate(listOf("/sample/pom.xml"), "feature-", true, "ADD_PREFIX", "feature/test", false)
+            )
         }
     }
 

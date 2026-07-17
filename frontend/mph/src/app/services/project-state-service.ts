@@ -1,5 +1,5 @@
 import { Injectable, signal, computed, inject, DestroyRef } from '@angular/core';
-import { MavenProjectService, ProjectAnalysis, ManagedProperty } from './maven-project-service';
+import { MavenProjectService, ProjectAnalysis } from './maven-project-service';
 
 @Injectable({
   providedIn: 'root'

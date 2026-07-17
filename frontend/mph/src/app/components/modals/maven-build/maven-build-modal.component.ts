@@ -54,9 +54,10 @@ export class MavenBuildModalComponent implements OnInit, AfterViewInit, OnDestro
     const hasResults = list.some(p => p.status === BuildStatus.FAILED || p.status === BuildStatus.SUCCESS || p.status === BuildStatus.RUNNING);
 
     if (!currentlyBuilding && !hasResults) {
+      list.sort((a, b) => a.originalIndex - b.originalIndex);
       return [{
         name: '',
-        projects: list.sort((a, b) => a.originalIndex - b.originalIndex)
+        projects: list
       }];
     }
 
@@ -80,9 +81,9 @@ export class MavenBuildModalComponent implements OnInit, AfterViewInit, OnDestro
   private eventsSubscription?: Subscription;
   private logLinesSubscription?: Subscription;
 
-  @ViewChild('logContainer') private logContainer?: ElementRef;
-  @ViewChildren('logLine') private logLines?: QueryList<ElementRef>;
-  @Output() close = new EventEmitter<void>();
+  @ViewChild('logContainer') private readonly logContainer?: ElementRef;
+  @ViewChildren('logLine') private readonly logLines?: QueryList<ElementRef>;
+  @Output() dismissed = new EventEmitter<void>();
 
   ngOnInit(): void {
     this.loadProjects();
@@ -284,8 +285,8 @@ export class MavenBuildModalComponent implements OnInit, AfterViewInit, OnDestro
   }
 
   setMaxParallel(event: Event): void {
-    const val = parseInt((event.target as HTMLInputElement).value, 10);
-    if (!isNaN(val) && val > 0) {
+    const val = Number.parseInt((event.target as HTMLInputElement).value, 10);
+    if (!Number.isNaN(val) && val > 0) {
       this.maxParallel.set(val);
     }
   }

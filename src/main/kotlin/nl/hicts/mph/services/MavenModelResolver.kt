@@ -16,6 +16,8 @@ import org.eclipse.aether.connector.basic.BasicRepositoryConnectorFactory
 import org.eclipse.aether.impl.DefaultServiceLocator
 import org.eclipse.aether.repository.LocalRepository
 import org.eclipse.aether.repository.RemoteRepository
+import org.eclipse.aether.repository.WorkspaceReader
+import org.eclipse.aether.repository.WorkspaceRepository
 import org.eclipse.aether.util.repository.AuthenticationBuilder
 import org.eclipse.aether.util.repository.DefaultAuthenticationSelector
 import org.eclipse.aether.util.repository.DefaultMirrorSelector
@@ -46,6 +48,7 @@ class MavenModelResolver(
     private val session: RepositorySystemSession = newSession(repositorySystem, resolverConfiguration)
     private val remoteRepositories = newRemoteRepositories(repositorySystem, session, resolverConfiguration)
 
+    @Suppress("DEPRECATION")
     private fun newRepositorySystem(): RepositorySystem {
         val locator = MavenRepositorySystemUtils.newServiceLocator()
         locator.addService(RepositoryConnectorFactory::class.java, BasicRepositoryConnectorFactory::class.java)
@@ -60,7 +63,20 @@ class MavenModelResolver(
     ): RepositorySystemSession {
         val session = MavenRepositorySystemUtils.newSession()
         session.isOffline = configuration.settings.isOffline
-        session.mirrorSelector = DefaultMirrorSelector().also { selector ->
+        session.mirrorSelector = createMirrorSelector(configuration)
+        session.authenticationSelector = createAuthenticationSelector(configuration)
+        session.proxySelector = createProxySelector(configuration)
+        // Trust physically present cache entries regardless of _remote.repositories origin
+        // tracking. Missing artifacts may still be fetched through the effective Maven settings
+        // when those settings do not enable offline mode.
+        val localRepo = LocalRepository(localRepositoryPath ?: configuration.localRepository, "simple")
+        session.localRepositoryManager = system.newLocalRepositoryManager(session, localRepo)
+        createWorkspaceReader()?.let(session::setWorkspaceReader)
+        return session
+    }
+
+    private fun createMirrorSelector(configuration: MavenResolverConfiguration) =
+        DefaultMirrorSelector().also { selector ->
             configuration.settings.mirrors.forEach { mirror ->
                 selector.add(
                     mirror.id,
@@ -73,7 +89,9 @@ class MavenModelResolver(
                 )
             }
         }
-        session.authenticationSelector = DefaultAuthenticationSelector().also { selector ->
+
+    private fun createAuthenticationSelector(configuration: MavenResolverConfiguration) =
+        DefaultAuthenticationSelector().also { selector ->
             configuration.settings.servers.forEach { server ->
                 val username = resolvedSetting(server.username)
                 val password = resolvedSetting(server.password)
@@ -88,7 +106,9 @@ class MavenModelResolver(
                 }
             }
         }
-        session.proxySelector = DefaultProxySelector().also { selector ->
+
+    private fun createProxySelector(configuration: MavenResolverConfiguration) =
+        DefaultProxySelector().also { selector ->
             configuration.settings.proxies.filter { it.isActive }.forEach { proxy ->
                 val authentication = AuthenticationBuilder().apply {
                     resolvedSetting(proxy.username)?.let(::addUsername)
@@ -105,16 +125,12 @@ class MavenModelResolver(
                 )
             }
         }
-        // Trust physically present cache entries regardless of _remote.repositories origin
-        // tracking. Missing artifacts may still be fetched through the effective Maven settings
-        // when those settings do not enable offline mode.
-        val localRepo = LocalRepository(localRepositoryPath ?: configuration.localRepository, "simple")
-        session.localRepositoryManager = system.newLocalRepositoryManager(session, localRepo)
 
-        if (workspaceProjects.isNotEmpty()) {
-            session.setWorkspaceReader(object : org.eclipse.aether.repository.WorkspaceReader {
-                override fun getRepository(): org.eclipse.aether.repository.WorkspaceRepository {
-                    return org.eclipse.aether.repository.WorkspaceRepository("ide", workspaceProjects.keys)
+    private fun createWorkspaceReader(): WorkspaceReader? {
+        if (workspaceProjects.isEmpty()) return null
+        return object : WorkspaceReader {
+                override fun getRepository(): WorkspaceRepository {
+                    return WorkspaceRepository("ide", workspaceProjects.keys)
                 }
 
                 override fun findArtifact(artifact: Artifact): File? {
@@ -143,10 +159,7 @@ class MavenModelResolver(
                     val key = "${artifact.groupId}:${artifact.artifactId}:${artifact.version}"
                     return if (workspaceProjects.containsKey(key)) listOf(artifact.version) else emptyList()
                 }
-            })
-        }
-
-        return session
+            }
     }
 
     private fun newRemoteRepositories(
@@ -315,6 +328,7 @@ class MavenModelResolver(
             }
     }
 
+    @Suppress("DEPRECATION")
     private class RepositoryModelResolver : ModelResolver {
         private val system: RepositorySystem
         private val session: RepositorySystemSession

@@ -1,8 +1,8 @@
-<div class="modal-overlay" (click)="close.emit()">
-  <div class="modal-content wide" (click)="$event.stopPropagation()">
+<div class="modal-overlay" tabindex="-1" (click)="$event.target === $event.currentTarget && dismissed.emit()" (keydown.escape)="dismissed.emit()">
+  <div class="modal-content wide" role="dialog" aria-modal="true">
     <div class="modal-header">
       <h3>Project Build Order</h3>
-      <button class="close-icon" (click)="close.emit()">×</button>
+      <button class="close-icon" aria-label="Close" (click)="dismissed.emit()">×</button>
     </div>
 
     <div class="build-order-container">
@@ -73,7 +73,7 @@
     </div>
 
     <div class="modal-actions">
-      <button class="secondary-button" (click)="close.emit()">Close</button>
+      <button class="secondary-button" (click)="dismissed.emit()">Close</button>
     </div>
   </div>
 </div>

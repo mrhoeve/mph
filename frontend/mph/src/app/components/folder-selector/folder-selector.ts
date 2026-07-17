@@ -38,7 +38,7 @@ export class FolderSelector implements OnInit {
 
   protected onDepthChange(event: Event): void {
     const input = event.target as HTMLInputElement;
-    this.maxScanDepth.set(parseInt(input.value, 10));
+    this.maxScanDepth.set(Number.parseInt(input.value, 10));
   }
 
   protected useCurrentFolder(): void {

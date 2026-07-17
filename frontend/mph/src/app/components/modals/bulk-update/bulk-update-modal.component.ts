@@ -17,7 +17,7 @@ export class BulkUpdateModalComponent {
   readonly bulkMode = signal('ADD_PREFIX');
   readonly gitBranchName = signal('');
 
-  @Output() close = new EventEmitter<void>();
+  @Output() dismissed = new EventEmitter<void>();
   @Output() execute = new EventEmitter<{paths: string[], prefix: string, updateDependents: boolean, mode: string, branchName: string}>();
 
   onExecute(): void {

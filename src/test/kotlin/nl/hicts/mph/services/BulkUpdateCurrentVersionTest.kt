@@ -67,11 +67,13 @@ class BulkUpdateCurrentVersionTest {
         service.bulkUpdateVersions(
             basePath = tempDir,
             maxDepth = 2,
-            rootProjectPaths = listOf(projectAPom.absolutePath),
-            prefix = "",
-            updateDependents = true,
-            mode = "CURRENT",
-            updateProjects = false
+            update = BulkVersionUpdate(
+                rootProjectPaths = listOf(projectAPom.absolutePath),
+                prefix = "",
+                updateDependents = true,
+                mode = "CURRENT",
+                updateProjects = false
+            )
         )
 
         // Verify results
