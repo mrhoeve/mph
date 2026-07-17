@@ -43,6 +43,8 @@
 		<url/>
 	</scm>
 	<properties>
+		<skipTests>false</skipTests>
+		<skipUTs>${skipTests}</skipUTs>
 		<java.version>21</java.version>
 		<kotlin.version>2.2.21</kotlin.version>
 		<maven.version>3.9.16</maven.version>
@@ -53,10 +55,14 @@
 		<exec-maven-plugin.version>3.6.3</exec-maven-plugin.version>
 		<jacoco.version>0.8.15</jacoco.version>
 		<jgit.version>7.7.0.202606012155-r</jgit.version>
-		<skipTests>false</skipTests>
-		<skipUTs>${skipTests}</skipUTs>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 		<project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+		<sonar.sources>src/main/kotlin,frontend/mph/src</sonar.sources>
+		<sonar.tests>src/test/kotlin,frontend/mph/src</sonar.tests>
+		<sonar.exclusions>frontend/mph/src/**/*.spec.ts</sonar.exclusions>
+		<sonar.test.inclusions>src/test/kotlin/**/*,frontend/mph/src/**/*.spec.ts</sonar.test.inclusions>
+		<sonar.coverage.jacoco.xmlReportPaths>target/site/jacoco/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
+		<sonar.javascript.lcov.reportPaths>frontend/mph/coverage/mph/lcov.info</sonar.javascript.lcov.reportPaths>
 	</properties>
 	<dependencies>
 		<dependency>

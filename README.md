@@ -50,13 +50,15 @@ GitHub Actions runs the frontend and backend unit tests on every push and pull r
 
 Every push also builds the application and runs SonarQube Cloud analysis when its repository settings are available. Releases are created only when the workflow is started manually from the `main` branch using GitHub Actions' **Run workflow** button.
 
-To enable SonarQube Cloud analysis, import this repository into SonarQube Cloud, disable automatic analysis, and configure these GitHub Actions settings:
+The CI-based scan analyzes both `src/main/kotlin` and `frontend/mph/src`. It imports backend coverage from JaCoCo XML and frontend coverage from LCOV. Before enabling it, open the SonarQube Cloud project and turn off **Administration → Analysis Method → Automatic Analysis**; automatic and CI-based analysis cannot be enabled together.
 
-- Repository secret `SONAR_TOKEN`: a SonarQube Cloud token with permission to execute analysis.
-- Repository variable `SONAR_ORGANIZATION`: the SonarQube Cloud organization key.
-- Repository variable `SONAR_PROJECT_KEY`: the SonarQube Cloud project key.
+Configure the following under **GitHub repository → Settings → Secrets and variables → Actions**:
 
-The scan is skipped when any of these settings is unavailable, such as for pull requests from forks.
+- On the **Secrets** tab, create `SONAR_TOKEN` using a SonarQube Cloud token whose owner can execute analysis for this project. Generate a personal token under **SonarQube Cloud → account menu → My Account → Security**, and copy it when it is shown because it cannot be retrieved later.
+- On the **Variables** tab, create `SONAR_ORGANIZATION` with the organization key shown on the SonarQube Cloud organization page.
+- On the **Variables** tab, create `SONAR_PROJECT_KEY` with the project key shown under **SonarQube Cloud project → Project Information**.
+
+Do not store the token as a variable: GitHub variables are not masked and are intended for non-sensitive values. The scan is skipped when any required setting is unavailable, such as for pull requests from forks.
 
 ## License
 
