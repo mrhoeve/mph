@@ -65,4 +65,18 @@ describe('ProjectListComponent', () => {
     expect(fixture.componentInstance.isExpanded(root)).toBe(false);
     expect(stop).toHaveBeenCalledTimes(2);
   });
+
+  it('enables and emits the rebase action only for selected roots', () => {
+    const emitted = vi.fn();
+    fixture.componentInstance.rebaseDevelop.subscribe(emitted);
+    const button = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('button'))
+      .find(candidate => candidate.textContent?.includes('Rebase on develop')) as HTMLButtonElement;
+
+    expect(button.disabled).toBe(true);
+    selectedRootProjects.set(new Set(['/root']));
+    fixture.detectChanges();
+    expect(button.disabled).toBe(false);
+    button.click();
+    expect(emitted).toHaveBeenCalledOnce();
+  });
 });

@@ -1,15 +1,33 @@
-name: Build, Analyze, and Release
+name: Build and SonarQube
 
 on:
   push:
   pull_request:
-  workflow_dispatch:
+  workflow_call:
+    inputs:
+      release_version:
+        description: Optional release version used for the packaged artifact
+        required: false
+        type: string
+        default: ''
+    secrets:
+      SONAR_TOKEN:
+        required: true
+    outputs:
+      version:
+        description: Release version derived from the Maven project version
+        value: ${{ jobs.build.outputs.version }}
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
 jobs:
   build:
+    name: Build, test, and analyze
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.get_version.outputs.version }}
@@ -28,10 +46,14 @@ jobs:
 
     - name: Extract Version
       id: get_version
+      env:
+        REQUESTED_RELEASE_VERSION: ${{ inputs.release_version || '' }}
       run: |
         chmod +x mvnw
         VERSION=$(./mvnw help:evaluate -Dexpression=project.version -q -DforceStdout)
-        if [[ $VERSION == *"-SNAPSHOT" ]]; then
+        if [[ -n "$REQUESTED_RELEASE_VERSION" ]]; then
+          RELEASE_VERSION=$REQUESTED_RELEASE_VERSION
+        elif [[ $VERSION == *"-SNAPSHOT" ]]; then
           RELEASE_VERSION=${VERSION%-SNAPSHOT}
         else
           RELEASE_VERSION=$VERSION
@@ -90,22 +112,17 @@ jobs:
         if-no-files-found: ignore
         retention-days: 7
 
-    - name: Check SonarQube Cloud Configuration
-      id: sonar_config
+    - name: Verify SonarQube Cloud Configuration
       env:
         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
         SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
       run: |
-        if [[ -n "$SONAR_TOKEN" && -n "$SONAR_ORGANIZATION" && -n "$SONAR_PROJECT_KEY" ]]; then
-          echo "enabled=true" >> "$GITHUB_OUTPUT"
-        else
-          echo "enabled=false" >> "$GITHUB_OUTPUT"
-          echo "SonarQube Cloud analysis is skipped because one or more required repository settings are unavailable."
-        fi
+        [[ -n "$SONAR_TOKEN" ]] || { echo "::error::SONAR_TOKEN is not configured"; exit 1; }
+        [[ -n "$SONAR_ORGANIZATION" ]] || { echo "::error::SONAR_ORGANIZATION is not configured"; exit 1; }
+        [[ -n "$SONAR_PROJECT_KEY" ]] || { echo "::error::SONAR_PROJECT_KEY is not configured"; exit 1; }
 
     - name: Run SonarQube Cloud Analysis
-      if: steps.sonar_config.outputs.enabled == 'true'
       env:
         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
@@ -116,82 +133,12 @@ jobs:
           -DskipTests \
           -Dsonar.host.url=https://sonarcloud.io \
           -Dsonar.organization="$SONAR_ORGANIZATION" \
-          -Dsonar.projectKey="$SONAR_PROJECT_KEY"
+          -Dsonar.projectKey="$SONAR_PROJECT_KEY" \
+          -Dsonar.qualitygate.wait=true \
+          -Dsonar.qualitygate.timeout=300
 
     - name: Upload Build Artifact
       uses: actions/upload-artifact@v7
       with:
         name: mph-jar
         path: target/mph.jar
-
-  release:
-    needs: build
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-    - uses: actions/checkout@v6
-      with:
-        fetch-depth: 0
-
-    - name: Set up JDK 21
-      uses: actions/setup-java@v5
-      with:
-        java-version: '21'
-        distribution: 'temurin'
-
-    - name: Download Build Artifact
-      uses: actions/download-artifact@v7
-      with:
-        name: mph-jar
-        path: .
-        merge-multiple: true
-
-    - name: Create Version Tag
-      run: |
-        git config user.name "github-actions[bot]"
-        git config user.email "github-actions[bot]@users.noreply.github.com"
-        
-        VERSION="${{ needs.build.outputs.version }}"
-        TAG_NAME="v$VERSION"
-        
-        if git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
-          echo "Tag $TAG_NAME already exists. Skipping tag creation."
-        else
-          # Update pom.xml to release version to make the tag "proper"
-          chmod +x mvnw
-          ./mvnw versions:set -DnewVersion=$VERSION -DgenerateBackupPoms=false
-          git add pom.xml
-          git commit -m "Release $VERSION"
-          git tag "$TAG_NAME"
-          
-          # Bump to next snapshot version
-          IFS='.' read -ra PARTS <<< "$VERSION"
-          LAST_PART_INDEX=$((${#PARTS[@]} - 1))
-          if [[ "${PARTS[$LAST_PART_INDEX]}" =~ ^[0-9]+$ ]]; then
-            PARTS[$LAST_PART_INDEX]=$((PARTS[$LAST_PART_INDEX] + 1))
-          fi
-          NEXT_VERSION=$(IFS='.'; echo "${PARTS[*]}")-SNAPSHOT
-          
-          echo "Bumping to next version: $NEXT_VERSION"
-          ./mvnw versions:set -DnewVersion=$NEXT_VERSION -DgenerateBackupPoms=false
-          git add pom.xml
-          git commit -m "Prepare for next development iteration: $NEXT_VERSION"
-          
-          git push origin main
-          git push origin "$TAG_NAME"
-        fi
-
-    - name: Create GitHub Release
-      uses: softprops/action-gh-release@v3
-      with:
-        tag_name: v${{ needs.build.outputs.version }}
-        name: Release v${{ needs.build.outputs.version }}
-        body: "Automated release of version ${{ needs.build.outputs.version }} from the main branch."
-        files: mph.jar
-        prerelease: false
-        make_latest: "true"
-        generate_release_notes: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -19,6 +19,8 @@ import { PropertyOverrideModalComponent } from './components/modals/property-ove
 import { MavenBuildModalComponent } from './components/modals/maven-build/maven-build-modal.component';
 import { UpdateModulesModalComponent } from './components/modals/update-modules/update-modules-modal.component';
 import { NexusIqReportModalComponent } from './components/modals/nexus-iq-report/nexus-iq-report-modal.component';
+import { RebaseDevelopModalComponent } from './components/modals/rebase-develop/rebase-develop-modal.component';
+import { RebaseProgressStatus } from './services/rebase-workflow.service';
 
 @Component({
   selector: 'app-root',
@@ -37,7 +39,8 @@ import { NexusIqReportModalComponent } from './components/modals/nexus-iq-report
     PropertyOverrideModalComponent,
     MavenBuildModalComponent,
     UpdateModulesModalComponent,
-    NexusIqReportModalComponent
+    NexusIqReportModalComponent,
+    RebaseDevelopModalComponent
   ],
   templateUrl: './app.html',
   styleUrl: './app.css',
@@ -51,6 +54,7 @@ export class App implements OnInit {
   protected readonly isBulkModalOpen = signal(false);
   protected readonly isSpringBootModalOpen = signal(false);
   protected readonly isVersionsModalOpen = signal(false);
+  protected readonly isRebaseModalOpen = signal(false);
   protected readonly isOverrideModalOpen = signal(false);
   protected readonly systemInfo = signal<SystemInfo | null>(null);
   protected readonly nexusIqReport = signal<{ result: NexusIqScanResponse, projectName: string } | null>(null);
@@ -157,6 +161,14 @@ export class App implements OnInit {
       }
     });
     this.destroyRef.onDestroy(() => subscription.unsubscribe());
+  }
+
+  protected handleRebaseFinished(status: RebaseProgressStatus): void {
+    if (status === RebaseProgressStatus.COMPLETED) {
+      this.projectState.selectedRootProjects.set(new Set());
+      this.projectState.setInfo('Repositories rebased and versions realigned. Changes remain uncommitted.');
+      this.projectState.scan();
+    }
   }
 
   protected executeVersionUpdate(): void {

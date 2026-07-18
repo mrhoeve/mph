@@ -44,6 +44,18 @@ data class BulkVersionUpdate(
     val updateProjects: Boolean = true
 )
 
+data class RebaseRepositoryPlan(
+    val projectPath: String,
+    val artifactId: String,
+    val repositoryPath: String
+)
+
+data class RebaseSelectionPlan(
+    val prefix: String,
+    val rootProjectPaths: List<String>,
+    val repositories: List<RebaseRepositoryPlan>
+)
+
 @Service
 class MavenProjectService(
     private val mavenCommandService: MavenCommandService,
@@ -57,6 +69,7 @@ class MavenProjectService(
         const val SPRING_BOOT_DEPENDENCIES = "spring-boot-dependencies"
         const val LOCAL_POM = "Local POM"
         const val VERSION_SUFFIX = ".version"
+        val PREFIXED_VERSION = Regex("""^(.*?)(\d+(?:\.\d+)+(?:[-.][A-Za-z0-9]+)*)$""")
     }
     private val logger = LoggerFactory.getLogger(MavenProjectService::class.java)
 
@@ -131,6 +144,81 @@ class MavenProjectService(
             }
         }
         if (update.updateDependents && versionMap.isNotEmpty()) updateProjectsDependents(allProjects, versionMap)
+    }
+
+    fun prepareRebaseSelection(
+        basePath: Path,
+        maxDepth: Int,
+        rootProjectPaths: List<String>
+    ): RebaseSelectionPlan {
+        require(rootProjectPaths.isNotEmpty()) { "Select at least one project to rebase." }
+        val roots = ScanProjectUtil.searchAllMavenProjects(basePath.toFile(), maxDepth)
+        val rootsByPath = roots.associateBy { normalizePath(it.pomLocation.absolutePath) }
+        val selectedRoots = rootProjectPaths.map { requestedPath ->
+            rootsByPath[normalizePath(requestedPath)]
+                ?: throw IllegalArgumentException("Project was not found in the configured workspace: $requestedPath")
+        }
+
+        val prefixes = selectedRoots
+            .flatMap { flattenProjects(listOf(it)) }
+            .map { project ->
+                val version = project.version()
+                val match = PREFIXED_VERSION.matchEntire(version)
+                    ?: throw IllegalArgumentException(
+                        "Project ${project.artifactId()} has version '$version', which does not contain a recognizable semantic version."
+                    )
+                match.groupValues[1].takeIf { it.isNotBlank() }
+                    ?: throw IllegalArgumentException(
+                        "Project ${project.artifactId()} has version '$version' without a prefix. " +
+                            "All selected projects must already use the same prefix."
+                    )
+            }
+            .distinct()
+        require(prefixes.size == 1) {
+            "Selected projects do not use the same version prefix: ${prefixes.sorted().joinToString()}"
+        }
+
+        val repositories = selectedRoots.map { project ->
+            val repository = gitService.findGitRoot(project.pomLocation)
+                ?: throw IllegalArgumentException("No Git repository was found for ${project.pomLocation.absolutePath}")
+            RebaseRepositoryPlan(
+                projectPath = project.pomLocation.absolutePath,
+                artifactId = project.artifactId(),
+                repositoryPath = repository.absolutePath
+            )
+        }.distinctBy { normalizePath(it.repositoryPath) }
+
+        return RebaseSelectionPlan(
+            prefix = prefixes.single(),
+            rootProjectPaths = selectedRoots.map { it.pomLocation.absolutePath },
+            repositories = repositories
+        )
+    }
+
+    fun realignPrefixedVersions(
+        basePath: Path,
+        maxDepth: Int,
+        rootProjectPaths: List<String>,
+        prefix: String
+    ) {
+        require(prefix.isNotBlank()) { "A version prefix is required for realignment." }
+        gitService.clearCache()
+        val rootProjects = ScanProjectUtil.searchAllMavenProjects(basePath.toFile(), maxDepth)
+        val allProjects = flattenProjects(rootProjects)
+        val rootsByPath = rootProjects.associateBy { normalizePath(it.pomLocation.absolutePath) }
+        val versionMap = mutableMapOf<Pair<String, String>, String>()
+
+        rootProjectPaths.forEach { requestedPath ->
+            val root = rootsByPath[normalizePath(requestedPath)]
+                ?: throw IllegalArgumentException("Project was not found after rebasing: $requestedPath")
+            flattenProjects(listOf(root)).forEach { project ->
+                val newVersion = prefix + project.version().removePrefix(prefix)
+                PomSurgicalEditor.edit(project.pomLocation) { updateProjectVersion(newVersion) }
+                versionMap[project.groupId() to project.artifactId()] = newVersion
+            }
+        }
+
+        if (versionMap.isNotEmpty()) updateProjectsDependents(allProjects, versionMap)
     }
 
     private fun prepareBranches(projects: List<MavenProject>, paths: List<String>, branchName: String?) {

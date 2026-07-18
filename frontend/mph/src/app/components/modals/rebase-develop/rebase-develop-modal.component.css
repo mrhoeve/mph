@@ -1,0 +1,90 @@
+.rebase-modal {
+  width: min(820px, 94vw);
+}
+
+.rebase-explanation {
+  color: #334155;
+  line-height: 1.5;
+}
+
+.rebase-explanation ol {
+  padding-left: 1.4rem;
+}
+
+.rebase-warning,
+.rebase-error,
+.overall-result,
+.recovery-hint,
+.stash-note {
+  margin-top: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: 0.75rem;
+}
+
+.rebase-warning {
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+}
+
+.rebase-error,
+[data-status="FAILED"],
+[data-status="CONFLICT"] {
+  background: #fef2f2;
+  border-color: #fca5a5;
+}
+
+.rebase-repositories {
+  display: grid;
+  gap: 0.75rem;
+  max-height: 48vh;
+  overflow: auto;
+}
+
+.rebase-repository {
+  padding: 0.9rem 1rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  line-height: 1.4;
+}
+
+.rebase-repository__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.rebase-repository small {
+  display: block;
+  color: #64748b;
+  overflow-wrap: anywhere;
+  margin: 0.25rem 0 0.5rem;
+}
+
+.rebase-status {
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: #475569;
+}
+
+[data-status="SUCCESS"],
+[data-status="COMPLETED"] {
+  background: #f0fdf4;
+  border-color: #86efac;
+}
+
+[data-status="SKIPPED"],
+[data-status="PARTIAL"] {
+  background: #fffbeb;
+  border-color: #fcd34d;
+}
+
+.recovery-hint,
+.stash-note {
+  background: rgba(255, 255, 255, 0.65);
+  padding: 0.5rem 0.75rem;
+}
+
+.overall-result {
+  border: 1px solid #cbd5e1;
+  line-height: 1.5;
+}

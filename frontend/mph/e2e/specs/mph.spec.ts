@@ -134,6 +134,14 @@ test.describe.serial('MPH full-stack journeys', () => {
     await dialog.getByRole('button', { name: 'Cancel' }).click();
     await expect(dialog).toBeHidden();
 
+    await page.getByRole('button', { name: /Rebase on develop \(1\)/ }).click();
+    const rebaseDialog = page.getByRole('dialog');
+    await expect(rebaseDialog.getByRole('heading', { name: 'Rebase on develop' })).toBeVisible();
+    await expect(rebaseDialog).toContainText('Stash tracked and untracked changes');
+    await expect(rebaseDialog).toContainText('Source-code and structural POM conflicts');
+    await rebaseDialog.getByRole('button', { name: 'Cancel' }).click();
+    await expect(rebaseDialog).toBeHidden();
+
     await page.getByRole('button', { name: 'Show Build Order' }).click();
     const buildOrderDialog = page.getByRole('dialog');
     await expect(

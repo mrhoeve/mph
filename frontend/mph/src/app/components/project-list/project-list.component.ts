@@ -18,6 +18,7 @@ export class ProjectListComponent {
   @Output() changeFolder = new EventEmitter<void>();
   @Output() mavenBuild = new EventEmitter<void>();
   @Output() syncDevelop = new EventEmitter<void>();
+  @Output() rebaseDevelop = new EventEmitter<void>();
   @Output() versionUpdate = new EventEmitter<void>();
 
   selectProject(project: ProjectAnalysis): void {

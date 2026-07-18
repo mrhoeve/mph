@@ -59,6 +59,7 @@
         (bulkUpdate)="isBulkModalOpen.set(true)"
         (changeFolder)="changeFolder()"
         (mavenBuild)="projectState.isMavenBuildModalOpen.set(true)"
+        (rebaseDevelop)="isRebaseModalOpen.set(true)"
         (syncDevelop)="executeSyncDevelop()"
         (versionUpdate)="executeVersionUpdate()">
       </app-project-list>
@@ -79,6 +80,13 @@
     (dismissed)="isBulkModalOpen.set(false)"
     (execute)="executeBulkUpdate($event)">
   </app-bulk-update-modal>
+}
+
+@if (isRebaseModalOpen()) {
+  <app-rebase-develop-modal
+    (dismissed)="isRebaseModalOpen.set(false)"
+    (finished)="handleRebaseFinished($event)">
+  </app-rebase-develop-modal>
 }
 
 @if (isSpringBootModalOpen()) {

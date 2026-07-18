@@ -1,0 +1,68 @@
+<div class="modal-overlay" tabindex="-1" (click)="$event.target === $event.currentTarget ? dismiss() : undefined" (keydown.enter)="$event.target === $event.currentTarget ? dismiss() : undefined" (document:keydown.escape)="dismiss()">
+  <dialog class="modal-content rebase-modal" open aria-modal="true">
+    <h3>Rebase on develop</h3>
+
+    @if (!started()) {
+      <p>Update {{ projectState.selectedRootProjects().size }} selected projects while preserving your uncommitted work.</p>
+      <div class="rebase-explanation">
+        <ol>
+          <li>Verify that every selected module uses the same version prefix.</li>
+          <li>Stash tracked and untracked changes in each Git repository.</li>
+          <li>Fetch origin and rebase the current branch onto <code>origin/develop</code>.</li>
+          <li>Restore the stash and automatically resolve version-only POM conflicts.</li>
+          <li>When every repository succeeds, reapply the prefix to current versions and align all dependents.</li>
+        </ol>
+        <div class="rebase-warning" role="note">
+          Source-code and structural POM conflicts remain for manual resolution. Processing continues for other repositories, but version alignment is then skipped.
+        </div>
+      </div>
+    } @else {
+      <p>
+        @if (detectedPrefix(); as prefix) { Detected prefix: <code>{{ prefix }}</code> }
+        @else { Running preflight and preparing repositories... }
+      </p>
+
+      <div class="rebase-repositories" aria-live="polite">
+        @for (repository of repositories(); track repository.repositoryPath) {
+          <section class="rebase-repository" [attr.data-status]="repository.status">
+            <div class="rebase-repository__header">
+              <strong>{{ repository.artifactId }}</strong>
+              <span class="rebase-status">{{ repository.status }}</span>
+            </div>
+            <small>{{ repository.repositoryPath }}</small>
+            <div>{{ repository.message }}</div>
+            @if (repository.recoveryHint) {
+              <div class="recovery-hint"><strong>Recovery:</strong> {{ repository.recoveryHint }}</div>
+            }
+            @if (repository.stashPreserved) {
+              <div class="stash-note">The MPH stash is preserved.</div>
+            }
+          </section>
+        }
+      </div>
+
+      @if (overall(); as result) {
+        <div class="overall-result" [attr.data-status]="result.status">
+          <strong>{{ result.status === status.COMPLETED ? 'Completed' : 'Attention required' }}</strong>
+          <div>{{ result.message }}</div>
+          @if (result.recoveryHint) { <div>{{ result.recoveryHint }}</div> }
+        </div>
+      }
+    }
+
+    @if (errorMessage(); as error) {
+      <div class="rebase-error" role="alert">{{ error }}</div>
+    }
+
+    <div class="modal-actions">
+      @if (!started()) {
+        <button class="secondary-button" (click)="dismiss()">Cancel</button>
+        <button class="primary-button" (click)="start()">Confirm and start</button>
+      } @else {
+        <button class="secondary-button" [disabled]="running()" (click)="dismiss()">
+          {{ running() ? 'Operation in progress...' : 'Close' }}
+        </button>
+      }
+    </div>
+  </dialog>
+</div>
