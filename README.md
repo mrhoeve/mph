@@ -60,6 +60,31 @@ Configure the following under **GitHub repository → Settings → Secrets and v
 
 Do not store the token as a variable: GitHub variables are not masked and are intended for non-sensitive values. The scan is skipped when any required setting is unavailable, such as for pull requests from forks.
 
+## Local verification build
+
+Run the complete local build from PowerShell:
+
+```powershell
+.\build-local.cmd
+```
+
+The script performs a locked `npm ci`, installs the Playwright Chromium runtime when needed, runs the frontend unit tests with coverage, runs `mvnw clean verify`, and finally runs the full-stack Playwright tests against the packaged application. Use `-SkipPlaywright` on a machine that cannot launch a browser, or `-SkipPlaywrightBrowserInstall` when Chromium is already managed separately.
+
+To include analysis against the internal SonarQube instance, create a `.sonar-token` file in the repository root containing only your token. This filename is ignored by Git. Alternatively, set `SONAR_TOKEN` in the current process environment. Then run:
+
+```powershell
+.\build-local.cmd -Sonar
+```
+
+The token is passed to the scanner through the `SONAR_TOKEN` environment variable and is therefore not included in Maven's command-line arguments. The defaults are project key `mrhoeve_mph`, project name `Maven Project Helper`, and server `https://sonarqube.hictsapps.nl`. Override them when necessary:
+
+```powershell
+.\build-local.cmd -Sonar `
+  -SonarHostUrl 'https://sonarqube.example.org' `
+  -SonarProjectKey 'example_project' `
+  -SonarProjectName 'Example Project'
+```
+
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
