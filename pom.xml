@@ -246,6 +246,12 @@
 						<goals>
 							<goal>report</goal>
 						</goals>
+						<configuration>
+							<excludes>
+								<!-- Kotlin inline comparators point to the stdlib-only Comparisons.kt source. -->
+								<exclude>**/*$$inlined$*</exclude>
+							</excludes>
+						</configuration>
 					</execution>
 				</executions>
 			</plugin>
