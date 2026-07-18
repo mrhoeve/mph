@@ -94,7 +94,7 @@ Never commit the private key. If it is exposed, delete that key in the GitHub Ap
 
 To prevent merging until CI succeeds, create a repository ruleset under **GitHub repository -> Settings -> Rules -> Rulesets**:
 
-1. Create a branch ruleset targeting all branches (include pattern `~ALL`).
+1. Create a branch ruleset targeting only the long-lived branches `main` and `develop`. Do not use `~ALL`: feature branches must remain pushable so they can be used as pull-request source branches.
 2. Enable **Require a pull request before merging**.
 3. Enable **Require status checks to pass** and add `Build, test, and analyze` after that check has run at least once.
 4. Enable **Require branches to be up to date before merging** if every PR should be tested against the latest target branch.
