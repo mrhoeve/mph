@@ -71,6 +71,25 @@ jobs:
         chmod +x mvnw
         ./mvnw -B package -DskipTests
 
+    - name: Install Playwright Chromium
+      working-directory: frontend/mph
+      run: npm exec -- playwright install --with-deps chromium
+
+    - name: Run Playwright End-to-End Tests
+      working-directory: frontend/mph
+      run: npm run test:e2e
+
+    - name: Upload Playwright Failure Artifacts
+      if: failure()
+      uses: actions/upload-artifact@v7
+      with:
+        name: playwright-failure-artifacts
+        path: |
+          frontend/mph/playwright-report
+          frontend/mph/test-results
+        if-no-files-found: ignore
+        retention-days: 7
+
     - name: Check SonarQube Cloud Configuration
       id: sonar_config
       env:

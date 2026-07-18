@@ -12,3 +12,7 @@ From the repository root:
 
 Use `npm run test:e2e:headed` to watch the browser or `npm run test:e2e:ui` for Playwright UI mode.
 Failure traces, screenshots, videos, and the HTML report are ignored by Git.
+
+The suite covers workspace selection and smoke checks, managed-property override filtering, modal keyboard
+and overlay dismissal, bulk-update controls, and build-order project focus. Fixture mutations are deliberately
+avoided so every journey can be repeated locally and in CI.
