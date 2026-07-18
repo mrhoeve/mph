@@ -1,0 +1,177 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: Release version (leave empty to remove -SNAPSHOT from the develop version)
+        required: false
+        type: string
+      next_development_version:
+        description: Next version ending in -SNAPSHOT (leave empty to increment the final number)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  validate-develop:
+    name: Validate develop branch
+    runs-on: ubuntu-latest
+    steps:
+    - name: Require develop branch
+      env:
+        SELECTED_REF: ${{ github.ref }}
+      run: |
+        if [[ "$SELECTED_REF" != "refs/heads/develop" ]]; then
+          echo "::error::Releases may only be started from the develop branch. Selected ref: $SELECTED_REF"
+          exit 1
+        fi
+
+  build:
+    name: Run release verification
+    needs: validate-develop
+    uses: ./.github/workflows/build-and-publish.yml
+    with:
+      release_version: ${{ inputs.release_version }}
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+    steps:
+    - name: Create release GitHub App token
+      id: app-token
+      uses: actions/create-github-app-token@v3
+      with:
+        client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+        private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+        permission-contents: write
+
+    - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.sha }}
+        fetch-depth: 0
+        token: ${{ steps.app-token.outputs.token }}
+
+    - name: Set up JDK 21
+      uses: actions/setup-java@v5
+      with:
+        java-version: '21'
+        distribution: 'temurin'
+        cache: maven
+
+    - name: Download verified release artifact
+      uses: actions/download-artifact@v7
+      with:
+        name: mph-jar
+        path: .
+        merge-multiple: true
+
+    - name: Get GitHub App user ID
+      id: app-user
+      env:
+        GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+      run: echo "user-id=$(gh api "/users/$APP_SLUG[bot]" --jq .id)" >> "$GITHUB_OUTPUT"
+
+    - name: Create and atomically publish release
+      env:
+        APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+        APP_USER_ID: ${{ steps.app-user.outputs.user-id }}
+        RELEASE_VERSION: ${{ needs.build.outputs.version }}
+        REQUESTED_NEXT_VERSION: ${{ inputs.next_development_version }}
+        VERIFIED_DEVELOP_SHA: ${{ github.sha }}
+      run: |
+        set -euo pipefail
+
+        git fetch --force origin \
+          +refs/heads/main:refs/remotes/origin/main \
+          +refs/heads/develop:refs/remotes/origin/develop \
+          --tags
+
+        if [[ "$(git rev-parse origin/develop)" != "$VERIFIED_DEVELOP_SHA" ]]; then
+          echo "::error::develop changed while release verification was running. Start a new release to verify the latest commit."
+          exit 1
+        fi
+
+        if ! git merge-base --is-ancestor origin/main "$VERIFIED_DEVELOP_SHA"; then
+          echo "::error::main is not an ancestor of develop. Synchronize the branches before releasing."
+          exit 1
+        fi
+
+        if [[ ! "$RELEASE_VERSION" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+          echo "::error::Release version must contain dot-separated numeric components without -SNAPSHOT: $RELEASE_VERSION"
+          exit 1
+        fi
+
+        TAG_NAME="v$RELEASE_VERSION"
+        if git rev-parse --verify --quiet "refs/tags/$TAG_NAME" >/dev/null; then
+          echo "::error::Tag $TAG_NAME already exists."
+          exit 1
+        fi
+
+        if [[ -n "$REQUESTED_NEXT_VERSION" ]]; then
+          NEXT_VERSION=$REQUESTED_NEXT_VERSION
+        else
+          IFS='.' read -ra VERSION_PARTS <<< "$RELEASE_VERSION"
+          LAST_INDEX=$((${#VERSION_PARTS[@]} - 1))
+          VERSION_PARTS[$LAST_INDEX]=$((${VERSION_PARTS[$LAST_INDEX]} + 1))
+          NEXT_VERSION=$(IFS='.'; echo "${VERSION_PARTS[*]}")-SNAPSHOT
+        fi
+
+        if [[ ! "$NEXT_VERSION" =~ ^[0-9]+(\.[0-9]+)*-SNAPSHOT$ ]]; then
+          echo "::error::Next development version must contain dot-separated numeric components and end in -SNAPSHOT: $NEXT_VERSION"
+          exit 1
+        fi
+
+        git config user.name "$APP_SLUG[bot]"
+        git config user.email "$APP_USER_ID+$APP_SLUG[bot]@users.noreply.github.com"
+
+        git switch --detach "$VERIFIED_DEVELOP_SHA"
+        chmod +x mvnw
+        CURRENT_VERSION=$(./mvnw help:evaluate -Dexpression=project.version -q -DforceStdout)
+        if [[ "$CURRENT_VERSION" != *-SNAPSHOT ]]; then
+          echo "::error::develop must contain a -SNAPSHOT version before releasing: $CURRENT_VERSION"
+          exit 1
+        fi
+
+        ./mvnw versions:set -DnewVersion="$RELEASE_VERSION" -DgenerateBackupPoms=false
+        git add pom.xml
+        git commit -m "Release $RELEASE_VERSION"
+        RELEASE_COMMIT=$(git rev-parse HEAD)
+        git tag -a "$TAG_NAME" -m "Release $RELEASE_VERSION"
+
+        ./mvnw versions:set -DnewVersion="$NEXT_VERSION" -DgenerateBackupPoms=false
+        git add pom.xml
+        git commit -m "Prepare for next development iteration: $NEXT_VERSION"
+        DEVELOPMENT_COMMIT=$(git rev-parse HEAD)
+
+        git push --atomic origin \
+          "$RELEASE_COMMIT:refs/heads/main" \
+          "$DEVELOPMENT_COMMIT:refs/heads/develop" \
+          "refs/tags/$TAG_NAME:refs/tags/$TAG_NAME"
+
+        echo "Released $RELEASE_VERSION on main and advanced develop to $NEXT_VERSION."
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v3
+      with:
+        token: ${{ steps.app-token.outputs.token }}
+        tag_name: v${{ needs.build.outputs.version }}
+        name: Release v${{ needs.build.outputs.version }}
+        body: "Manual release of version ${{ needs.build.outputs.version }} from the verified develop branch."
+        files: mph.jar
+        prerelease: false
+        make_latest: "true"
+        generate_release_notes: true

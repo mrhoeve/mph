@@ -52,9 +52,19 @@ This project is also developed and maintained with the assistance of **OpenAI Co
 
 ## Continuous Integration
 
-GitHub Actions runs the frontend and backend unit tests on every push and pull request. Frontend coverage is written as LCOV and backend coverage as JaCoCo XML.
+GitHub Actions runs the frontend and backend unit tests on every push and pull request. Frontend coverage is written as LCOV and backend coverage as JaCoCo XML. The SonarQube scanner waits for the quality-gate result, so the **Build, test, and analyze** check fails when either the build or quality gate fails.
 
-Every push also builds the application and runs SonarQube Cloud analysis when its repository settings are available. Releases are created only when the workflow is started manually from the `main` branch using GitHub Actions' **Run workflow** button.
+Every push also builds the application and runs SonarQube Cloud analysis. Releases use a separate **Release** workflow that must be started manually with `develop` selected in GitHub Actions. Selecting another branch fails before verification or publication. The workflow verifies the exact `develop` commit with the complete CI workflow, including its tests and SonarQube quality gate, and aborts if `develop` changes while verification is running.
+
+After successful verification, the release workflow:
+
+1. Confirms that `main` is an ancestor of the verified `develop` commit.
+2. Removes `-SNAPSHOT` (or applies the manually supplied release version), creates the release commit, and tags it.
+3. Creates a second commit containing the next development `-SNAPSHOT` version.
+4. Atomically advances `main` to the tagged release commit, advances `develop` to the next development commit, and pushes the tag.
+5. Creates the GitHub release from the already verified JAR.
+
+For example, releasing `0.23-SNAPSHOT` creates `v0.23` on `main` and leaves `develop` at `0.24-SNAPSHOT`. Both versions can be overridden in the manual workflow form.
 
 The CI-based scan analyzes both `src/main/kotlin` and `frontend/mph/src`. It imports backend coverage from JaCoCo XML and frontend coverage from LCOV. Before enabling it, open the SonarQube Cloud project and turn off **Administration → Analysis Method → Automatic Analysis**; automatic and CI-based analysis cannot be enabled together.
 
@@ -64,7 +74,33 @@ Configure the following under **GitHub repository → Settings → Secrets and v
 - On the **Variables** tab, create `SONAR_ORGANIZATION` with the organization key shown on the SonarQube Cloud organization page.
 - On the **Variables** tab, create `SONAR_PROJECT_KEY` with the project key shown under **SonarQube Cloud project → Project Information**.
 
-Do not store the token as a variable: GitHub variables are not masked and are intended for non-sensitive values. The scan is skipped when any required setting is unavailable, such as for pull requests from forks.
+Do not store the token as a variable: GitHub variables are not masked and are intended for non-sensitive values. CI deliberately fails instead of silently skipping analysis when a required setting is unavailable. Consequently, pull requests from forks cannot pass this workflow unless you introduce a separate, securely configured fork-contribution workflow; GitHub does not expose repository secrets to untrusted fork workflows.
+
+### Release GitHub App
+
+The workflow uses a dedicated GitHub App rather than a personal access token. Create it as follows:
+
+1. Open your GitHub account or organization settings, go to **Developer settings -> GitHub Apps**, and choose **New GitHub App**.
+2. Give it a unique name such as `mph-release`, set the repository URL as its homepage, and disable webhooks; this app does not receive events.
+3. Under **Repository permissions**, grant only **Contents: Read and write**. Metadata read access is added automatically. Do not grant organization permissions.
+4. Create the app, record its **Client ID**, and generate one private key. GitHub downloads the key as a `.pem` file.
+5. Install the app on the account that owns this repository and choose **Only select repositories**, selecting only `mph`.
+6. Under **GitHub repository -> Settings -> Environments**, create an environment named `release`. Restrict its deployment branches to `develop`; optionally add a required reviewer for a second confirmation before publishing.
+7. In that environment, create variable `RELEASE_APP_CLIENT_ID` containing the Client ID and secret `RELEASE_APP_PRIVATE_KEY` containing the complete PEM file, including its `BEGIN` and `END` lines.
+
+Never commit the private key. If it is exposed, delete that key in the GitHub App settings immediately, generate a replacement, and update the environment secret.
+
+### Required pull-request checks
+
+To prevent merging until CI succeeds, create a repository ruleset under **GitHub repository -> Settings -> Rules -> Rulesets**:
+
+1. Create a branch ruleset targeting all branches (include pattern `~ALL`).
+2. Enable **Require a pull request before merging**.
+3. Enable **Require status checks to pass** and add `Build, test, and analyze` after that check has run at least once.
+4. Enable **Require branches to be up to date before merging** if every PR should be tested against the latest target branch.
+5. Add only the dedicated release GitHub App to the ruleset bypass list with **Always allow**. The release workflow needs this narrowly scoped exception to atomically update `main` and `develop`; human contributors remain subject to the PR and status-check requirements.
+
+The ruleset is the enforcement layer: a workflow reports the check result, while GitHub branch rules decide whether that result blocks a merge. The release app token is generated only after the reusable CI workflow has passed and is restricted to the `release` environment.
 
 ## Local verification build
 
