@@ -13,10 +13,16 @@ class SettingsServiceTest {
     lateinit var tempDir: Path
 
     private val originalUserHome = System.getProperty("user.home")
+    private val originalSettingsDirectory = System.getProperty("mph.settings.directory")
 
     @AfterEach
     fun restoreUserHome() {
         System.setProperty("user.home", originalUserHome)
+        if (originalSettingsDirectory == null) {
+            System.clearProperty("mph.settings.directory")
+        } else {
+            System.setProperty("mph.settings.directory", originalSettingsDirectory)
+        }
     }
 
     @Test
@@ -102,5 +108,20 @@ class SettingsServiceTest {
 
         assertEquals("test-secret", service.loadSettings().nexusIqPass)
         assertEquals(4, service.loadSettings().maxScanDepth)
+    }
+
+    @Test
+    fun `should use an explicitly configured settings directory`() {
+        val settingsDirectory = Files.createDirectories(tempDir.resolve("isolated-settings"))
+        val basePath = Files.createDirectories(tempDir.resolve("projects"))
+        System.setProperty("mph.settings.directory", settingsDirectory.toString())
+
+        val service = SettingsService()
+        service.saveSettings(basePath, 6)
+
+        assertEquals(basePath.toAbsolutePath().normalize(), service.loadSettings().basePath)
+        assertEquals(6, service.loadSettings().maxScanDepth)
+        assertEquals(true, Files.exists(settingsDirectory.resolve("settings.properties")))
+        assertEquals(false, Files.exists(tempDir.resolve(".mph/settings.properties")))
     }
 }

@@ -48,7 +48,7 @@ describe('ManagedPropertiesModalComponent', () => {
     expect(fixture.componentInstance.filteredProperties()).toEqual([properties[1]]);
   });
 
-  it('filters the rendered table when show only overrides is clicked', () => {
+  it('filters the rendered table when show only overrides is clicked', async () => {
     const element: HTMLElement = fixture.nativeElement;
     const overrideToggle = element.querySelector<HTMLInputElement>('.filter-checkbox input');
 
@@ -56,6 +56,7 @@ describe('ManagedPropertiesModalComponent', () => {
     expect(element.querySelectorAll('tbody tr')).toHaveLength(2);
 
     overrideToggle!.click();
+    await fixture.whenStable();
     fixture.detectChanges();
 
     const rows = element.querySelectorAll('tbody tr');

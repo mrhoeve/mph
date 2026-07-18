@@ -37,11 +37,12 @@ describe('BulkUpdateModalComponent', () => {
     }]);
   });
 
-  it('updates the dependent-project option when its checkbox is clicked', () => {
+  it('updates the dependent-project option when its checkbox is clicked', async () => {
     const checkbox = fixture.nativeElement.querySelector('#updateDependents') as HTMLInputElement;
 
     expect(fixture.componentInstance.bulkUpdateDependents()).toBe(true);
     checkbox.click();
+    await fixture.whenStable();
     fixture.detectChanges();
 
     expect(fixture.componentInstance.bulkUpdateDependents()).toBe(false);

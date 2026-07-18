@@ -1,4 +1,4 @@
-<div class="modal-overlay" tabindex="-1" (click)="$event.target === $event.currentTarget && dismissed.emit()" (keydown.escape)="dismissed.emit()">
+<div class="modal-overlay" tabindex="-1" (click)="$event.target === $event.currentTarget ? dismissed.emit() : undefined" (document:keydown.escape)="dismissed.emit()">
   <div class="modal-content maven-build-modal" role="dialog" aria-modal="true">
     <div class="modal-header">
       <h2>Maven Build</h2>

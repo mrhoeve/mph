@@ -31,3 +31,8 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Playwright ###
+frontend/mph/e2e/.runtime/
+frontend/mph/playwright-report/
+frontend/mph/test-results/

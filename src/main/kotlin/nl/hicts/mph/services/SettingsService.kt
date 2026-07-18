@@ -12,7 +12,14 @@ import kotlin.io.path.isDirectory
 
 @Service
 class SettingsService {
-    private val settingsDirectory: Path = Paths.get(System.getProperty("user.home"), ".mph")
+    private companion object {
+        const val SETTINGS_DIRECTORY_PROPERTY = "mph.settings.directory"
+    }
+
+    private val settingsDirectory: Path = System.getProperty(SETTINGS_DIRECTORY_PROPERTY)
+        ?.takeIf(String::isNotBlank)
+        ?.let(Paths::get)
+        ?: Paths.get(System.getProperty("user.home"), ".mph")
     private val settingsFile: Path = settingsDirectory.resolve("settings.properties")
 
     fun loadSettings(): Settings {
