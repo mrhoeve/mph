@@ -7,6 +7,7 @@ import { FileSystemService, FolderResponse } from './services/file-system-servic
 import { ManagedProperty, MavenProjectService, ProjectAnalysis } from './services/maven-project-service';
 import { ProjectStateService } from './services/project-state-service';
 import { SystemService } from './services/system-service';
+import { RebaseProgressStatus } from './services/rebase-workflow.service';
 
 describe('App', () => {
   const folder: FolderResponse = {
@@ -206,6 +207,22 @@ describe('App orchestration', () => {
     maven.syncDevelop.mockReturnValueOnce(throwError(() => ({ error: { message: 'merge conflict' } })));
     app.executeSyncDevelop();
     expect(state.setError).toHaveBeenCalledWith('Sync develop failed: merge conflict');
+  });
+
+  it('refreshes and clears selection only after a fully completed rebase', () => {
+    const { app } = createApp();
+    state.selectedRootProjects.set(new Set(['/one']));
+
+    app.handleRebaseFinished(RebaseProgressStatus.PARTIAL);
+    expect(state.scan).not.toHaveBeenCalled();
+    expect(state.selectedRootProjects().size).toBe(1);
+
+    app.handleRebaseFinished(RebaseProgressStatus.COMPLETED);
+    expect(state.scan).toHaveBeenCalledOnce();
+    expect(state.selectedRootProjects().size).toBe(0);
+    expect(state.setInfo).toHaveBeenCalledWith(
+      'Repositories rebased and versions realigned. Changes remain uncommitted.'
+    );
   });
 
   it('updates current versions and manually selected module versions', () => {

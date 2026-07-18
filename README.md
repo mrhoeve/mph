@@ -14,7 +14,7 @@ Managing dozens of microservices and shared libraries can be a daunting task. MP
 - **Determine Build Order**: Automatically calculate the correct topological build order for your projects, identifying which can be built concurrently.
 - **Bulk Version Updates**: Effortlessly update version properties across multiple projects and their dependent usages. Support for manual version selection and automatic discovery of the latest Git tags ensures your ecosystem stays synchronized.
 - **Maven Build Execution**: Run Maven builds directly from the app with support for parallel execution, real-time log streaming, and status tracking.
-- **Git Integration**: Automatically handle branch creation and management during bulk updates. Visualize how many commits your branch is ahead or behind `develop` and easily merge `develop` into your work branch.
+- **Git Integration**: Automatically handle branch creation and management during bulk updates. Visualize how many commits your branch is ahead or behind `develop`, merge it, or safely rebase prefixed upgrade branches across multiple repositories.
 - **Spring Boot Upgrades**: Discover and apply newer Spring Boot versions across your projects.
 
 ## Key Features
@@ -29,6 +29,12 @@ Managing dozens of microservices and shared libraries can be a daunting task. MP
 - **Expandable Project Tree**: A compact, hierarchical view of your project roots and modules for easy navigation.
 - **Interactive Graphs**: Focus on specific projects to see their immediate dependencies and dependents, reducing noise in large ecosystems.
 - **Elegant Toast Notifications**: Real-time feedback for system operations, errors, and informational updates.
+
+## Rebase prefixed upgrade branches
+
+Select the affected root projects and choose **Rebase on develop**. After confirmation, MPH validates that every selected module has the same version prefix, groups projects by Git repository, stashes tracked and untracked work, fetches `origin/develop`, and rebases each current feature branch. Version-only `pom.xml` conflict hunks are resolved from the current develop version; source-code and structural POM conflicts are deliberately left for manual resolution.
+
+Processing continues when one repository needs attention. In that situation the repository remains in its Git conflict state, its MPH stash is preserved when necessary, and global version alignment is skipped. Follow the recovery instructions shown for that repository. After resolving all repositories, use **Version Update** to perform the deferred alignment manually. If every repository succeeds, MPH reapplies the original prefix to the new versions and updates all dependent modules automatically. It never pushes or creates an additional application commit, and version changes remain uncommitted.
 
 ## Created with Junie
 

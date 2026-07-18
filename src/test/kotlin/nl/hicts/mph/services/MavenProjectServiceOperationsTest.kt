@@ -395,6 +395,83 @@ class MavenProjectServiceOperationsTest {
     }
 
     @Test
+    fun `should preflight a common prefix and deduplicate projects by Git root`() {
+        val first = writePom("first/pom.xml", simplePom("first-project", "PREFIX-1234-4.1-SNAPSHOT"))
+        val second = writePom("second/pom.xml", simplePom("second-project", "PREFIX-1234-4.2-SNAPSHOT"))
+        every { gitService.findGitRoot(any()) } returns tempDir.toFile()
+
+        val plan = service.prepareRebaseSelection(
+            tempDir,
+            3,
+            listOf(first.toFile().absolutePath, second.toFile().absolutePath)
+        )
+
+        assertEquals("PREFIX-1234-", plan.prefix)
+        assertEquals(2, plan.rootProjectPaths.size)
+        assertEquals(1, plan.repositories.size)
+        assertEquals("first-project", plan.repositories.single().artifactId)
+    }
+
+    @Test
+    fun `should reject unprefixed and mismatched rebase selections before Git changes`() {
+        val prefixed = writePom("prefixed/pom.xml", simplePom("prefixed", "TEST-4.1-SNAPSHOT"))
+        val otherPrefix = writePom("other/pom.xml", simplePom("other", "OTHER-4.1-SNAPSHOT"))
+        val unprefixed = writePom("plain/pom.xml", simplePom("plain", "4.1-SNAPSHOT"))
+
+        val mismatch = assertThrows(IllegalArgumentException::class.java) {
+            service.prepareRebaseSelection(
+                tempDir,
+                3,
+                listOf(prefixed.toFile().absolutePath, otherPrefix.toFile().absolutePath)
+            )
+        }
+        val missingPrefix = assertThrows(IllegalArgumentException::class.java) {
+            service.prepareRebaseSelection(tempDir, 3, listOf(unprefixed.toFile().absolutePath))
+        }
+
+        assertTrue(mismatch.message.orEmpty().contains("same version prefix"))
+        assertTrue(missingPrefix.message.orEmpty().contains("without a prefix"))
+        verify(exactly = 0) { gitService.findGitRoot(any()) }
+    }
+
+    @Test
+    fun `should reapply one prefix to current versions and align dependent projects`() {
+        val provider = writePom("provider/pom.xml", simplePom("provider", "4.1-SNAPSHOT"))
+        val consumer = writePom(
+            "consumer/pom.xml",
+            """
+                <project xmlns="http://maven.apache.org/POM/4.0.0">
+                  <modelVersion>4.0.0</modelVersion>
+                  <groupId>org.example</groupId>
+                  <artifactId>consumer</artifactId>
+                  <version>PREFIX-1234-4.0-SNAPSHOT</version>
+                  <dependencies>
+                    <dependency>
+                      <groupId>org.example</groupId>
+                      <artifactId>provider</artifactId>
+                      <version>PREFIX-1234-4.0-SNAPSHOT</version>
+                    </dependency>
+                  </dependencies>
+                </project>
+            """
+        )
+        justRun { gitService.clearCache() }
+
+        service.realignPrefixedVersions(
+            tempDir,
+            3,
+            listOf(provider.toFile().absolutePath, consumer.toFile().absolutePath),
+            "PREFIX-1234-"
+        )
+
+        assertTrue(Files.readString(provider).contains("<version>PREFIX-1234-4.1-SNAPSHOT</version>"))
+        val consumerText = Files.readString(consumer)
+        assertTrue(consumerText.contains("<version>PREFIX-1234-4.0-SNAPSHOT</version>"))
+        assertTrue(consumerText.contains("<artifactId>provider</artifactId>\n      <version>PREFIX-1234-4.1-SNAPSHOT</version>"))
+        assertFalse(consumerText.contains("PREFIX-1234-PREFIX-1234-"))
+    }
+
+    @Test
     fun `should export only root projects to a readable workbook`() {
         val root = analysis("root-project", isRoot = true, buildStep = 2, dependsOn = listOf("dependency-a", "dependency-b"))
         val module = analysis("module-project", isRoot = false)

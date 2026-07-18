@@ -3,6 +3,7 @@ package nl.hicts.mph.services
 import org.eclipse.jgit.api.Git
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -31,6 +32,116 @@ class GitServiceTest {
             assertTrue(message.orEmpty().contains("Branch 'develop' not found"))
             assertEquals(git.repository.branch, "master")
         }
+    }
+
+    @Test
+    fun `should never rebase a protected branch`() {
+        val repoDir = tempDir.resolve("protected-branch").toFile().apply { mkdirs() }
+        Git.init().setDirectory(repoDir).call().use { git ->
+            File(repoDir, "test.txt").writeText("test")
+            git.add().addFilepattern("test.txt").call()
+            git.commit().setMessage("initial commit").setSign(false).call()
+
+            val result = gitService.rebaseOnDevelop(repoDir)
+
+            assertEquals(DevelopRebaseStatus.SKIPPED, result.status)
+            assertTrue(result.message.contains("protected"))
+            assertEquals("master", git.repository.branch)
+        }
+    }
+
+    @Test
+    fun `should report missing repositories and remotes without changing files`() {
+        val plainDirectory = tempDir.resolve("plain-directory").toFile().apply { mkdirs() }
+        val missingRepository = gitService.rebaseOnDevelop(plainDirectory)
+        assertEquals(DevelopRebaseStatus.SKIPPED, missingRepository.status)
+
+        val repoDir = tempDir.resolve("missing-origin").toFile().apply { mkdirs() }
+        Git.init().setDirectory(repoDir).call().use { git ->
+            File(repoDir, "test.txt").writeText("test")
+            git.add().addFilepattern("test.txt").call()
+            git.commit().setMessage("initial commit").setSign(false).call()
+            git.checkout().setCreateBranch(true).setName("feature/test").call()
+
+            val missingRemote = gitService.rebaseOnDevelop(repoDir)
+
+            assertEquals(DevelopRebaseStatus.FAILED, missingRemote.status)
+            assertTrue(missingRemote.message.contains("Rebase failed"))
+            assertEquals("test", File(repoDir, "test.txt").readText())
+        }
+    }
+
+    @Test
+    fun `should skip detached heads and remotes without develop`() {
+        val detachedDir = tempDir.resolve("detached").toFile().apply { mkdirs() }
+        Git.init().setDirectory(detachedDir).call().use { git ->
+            File(detachedDir, "test.txt").writeText("test")
+            git.add().addFilepattern("test.txt").call()
+            val commit = git.commit().setMessage("initial").setSign(false).call()
+            git.checkout().setName(commit.name).call()
+
+            val detached = gitService.rebaseOnDevelop(detachedDir)
+
+            assertEquals(DevelopRebaseStatus.SKIPPED, detached.status)
+            assertTrue(detached.message.contains("detached HEAD"))
+        }
+
+        val remoteDir = tempDir.resolve("empty-remote.git").toFile().apply { mkdirs() }
+        Git.init().setBare(true).setDirectory(remoteDir).call().use { remote ->
+            val localDir = tempDir.resolve("remote-without-develop").toFile().apply { mkdirs() }
+            Git.init().setDirectory(localDir).call().use { git ->
+                git.repository.config.apply {
+                    setString("remote", "origin", "url", remote.repository.directory.toURI().toString())
+                    setString("remote", "origin", "fetch", "+refs/heads/*:refs/remotes/origin/*")
+                    save()
+                }
+                File(localDir, "test.txt").writeText("test")
+                git.add().addFilepattern("test.txt").call()
+                git.commit().setMessage("initial").setSign(false).call()
+                git.checkout().setCreateBranch(true).setName("feature/test").call()
+
+                val noDevelop = gitService.rebaseOnDevelop(localDir)
+
+                assertEquals(DevelopRebaseStatus.SKIPPED, noDevelop.status)
+                assertTrue(noDevelop.message.contains("origin/develop was not found"))
+            }
+        }
+    }
+
+    @Test
+    fun `should initialize a missing local develop and reject a diverged one`() {
+        val missingLocal = createRemoteFixture("missing-local-develop")
+        missingLocal.local.use { git ->
+            val repoDir = git.repository.workTree
+            git.checkout().setCreateBranch(true).setName("feature/test").call()
+            git.branchDelete().setBranchNames("develop").setForce(true).call()
+
+            val result = gitService.rebaseOnDevelop(repoDir)
+
+            assertEquals(DevelopRebaseStatus.SUCCESS, result.status)
+            assertEquals(
+                git.repository.resolve("refs/remotes/origin/develop"),
+                git.repository.resolve("refs/heads/develop")
+            )
+        }
+        missingLocal.remote.close()
+
+        val diverged = createRemoteFixture("diverged-local-develop")
+        diverged.local.use { git ->
+            val repoDir = git.repository.workTree
+            git.checkout().setCreateBranch(true).setName("feature/test").call()
+            git.checkout().setName("develop").call()
+            File(repoDir, "local-develop.txt").writeText("local only")
+            git.add().addFilepattern("local-develop.txt").call()
+            git.commit().setMessage("local develop commit").setSign(false).call()
+            git.checkout().setName("feature/test").call()
+
+            val result = gitService.rebaseOnDevelop(repoDir)
+
+            assertEquals(DevelopRebaseStatus.SKIPPED, result.status)
+            assertTrue(result.message.contains("Local develop has commits"))
+        }
+        diverged.remote.close()
     }
 
     @Test
@@ -265,4 +376,170 @@ class GitServiceTest {
             }
         }
     }
+
+    @Test
+    fun `should resolve only version conflict hunks using the current version`() {
+        val versionPom = tempDir.resolve("version-pom.xml")
+        versionPom.toFile().writeText(
+            """
+            <project>
+            <<<<<<< HEAD
+              <version>4.1-SNAPSHOT</version>
+            =======
+              <version>PREFIX-1234-4.0-SNAPSHOT</version>
+            >>>>>>> stash
+            </project>
+            """.trimIndent()
+        )
+
+        assertTrue(gitService.resolveVersionConflictFile(versionPom))
+        assertTrue(versionPom.toFile().readText().contains("<version>4.1-SNAPSHOT</version>"))
+        assertFalse(versionPom.toFile().readText().contains("PREFIX-1234"))
+
+        val structuralPom = tempDir.resolve("structural-pom.xml")
+        val original = """
+            <project>
+            <<<<<<< HEAD
+              <artifactId>develop-name</artifactId>
+            =======
+              <artifactId>feature-name</artifactId>
+            >>>>>>> feature
+            </project>
+        """.trimIndent()
+        structuralPom.toFile().writeText(original)
+
+        assertFalse(gitService.resolveVersionConflictFile(structuralPom))
+        assertEquals(original, structuralPom.toFile().readText())
+    }
+
+    @Test
+    fun `should rebase version conflicts and restore tracked and untracked work`() {
+        val fixture = createRemoteFixture("successful-rebase")
+        fixture.local.use { git ->
+            val repoDir = git.repository.workTree
+            val pom = File(repoDir, "pom.xml")
+            val source = File(repoDir, "source.txt")
+
+            git.branchCreate().setName("feature/upgrade").call()
+            git.checkout().setName("develop").call()
+            pom.writeText(simplePom("4.1-SNAPSHOT"))
+            git.add().addFilepattern("pom.xml").call()
+            git.commit().setMessage("develop version").setSign(false).call()
+            git.push().setRemote("origin").add("develop").call()
+
+            git.checkout().setName("feature/upgrade").call()
+            pom.writeText(simplePom("PREFIX-1234-4.0-SNAPSHOT"))
+            git.add().addFilepattern("pom.xml").call()
+            git.commit().setMessage("prefix feature version").setSign(false).call()
+            source.writeText("uncommitted source work")
+            File(repoDir, "untracked.txt").writeText("untracked work")
+
+            val result = gitService.rebaseOnDevelop(pom)
+
+            assertEquals(DevelopRebaseStatus.SUCCESS, result.status)
+            assertEquals("feature/upgrade", git.repository.branch)
+            assertTrue(pom.readText().contains("<version>4.1-SNAPSHOT</version>"))
+            assertEquals("uncommitted source work", source.readText())
+            assertEquals("untracked work", File(repoDir, "untracked.txt").readText())
+            assertTrue(git.stashList().call().isEmpty())
+            assertFalse(git.status().call().isClean)
+            assertFalse(git.repository.config.getNames("commit", null, false).contains("gpgSign"))
+            assertEquals(
+                git.repository.resolve("refs/remotes/origin/develop"),
+                git.repository.resolve("refs/heads/develop")
+            )
+        }
+        fixture.remote.close()
+    }
+
+    @Test
+    fun `should leave source conflicts in rebase state and preserve the stash`() {
+        val fixture = createRemoteFixture("conflicted-rebase")
+        fixture.local.use { git ->
+            val repoDir = git.repository.workTree
+            val source = File(repoDir, "source.txt")
+
+            git.branchCreate().setName("feature/upgrade").call()
+            git.checkout().setName("develop").call()
+            source.writeText("develop source")
+            git.add().addFilepattern("source.txt").call()
+            git.commit().setMessage("develop source change").setSign(false).call()
+            git.push().setRemote("origin").add("develop").call()
+
+            git.checkout().setName("feature/upgrade").call()
+            source.writeText("feature source")
+            git.add().addFilepattern("source.txt").call()
+            git.commit().setMessage("feature source change").setSign(false).call()
+            File(repoDir, "untracked.txt").writeText("preserve me")
+
+            val result = gitService.rebaseOnDevelop(File(repoDir, "pom.xml"))
+
+            assertEquals(DevelopRebaseStatus.CONFLICT, result.status)
+            assertTrue(result.stashPreserved)
+            assertTrue(git.repository.repositoryState.isRebasing)
+            assertTrue(git.status().call().conflicting.contains("source.txt"))
+            assertEquals(1, git.stashList().call().size)
+        }
+        fixture.remote.close()
+    }
+
+    @Test
+    fun `should preserve stash when uncommitted source work conflicts after a successful rebase`() {
+        val fixture = createRemoteFixture("stash-conflicted-rebase")
+        fixture.local.use { git ->
+            val repoDir = git.repository.workTree
+            val source = File(repoDir, "source.txt")
+
+            git.branchCreate().setName("feature/upgrade").call()
+            git.checkout().setName("develop").call()
+            source.writeText("develop source")
+            git.add().addFilepattern("source.txt").call()
+            git.commit().setMessage("develop source change").setSign(false).call()
+            git.push().setRemote("origin").add("develop").call()
+
+            git.checkout().setName("feature/upgrade").call()
+            source.writeText("uncommitted feature source")
+
+            val result = gitService.rebaseOnDevelop(File(repoDir, "pom.xml"))
+
+            assertEquals(DevelopRebaseStatus.CONFLICT, result.status)
+            assertTrue(result.stashPreserved)
+            assertFalse(git.repository.repositoryState.isRebasing)
+            assertTrue(git.status().call().conflicting.contains("source.txt"))
+            assertEquals(1, git.stashList().call().size)
+        }
+        fixture.remote.close()
+    }
+
+    private fun createRemoteFixture(name: String): GitFixture {
+        val remoteDir = tempDir.resolve("$name-remote.git").toFile().apply { mkdirs() }
+        val remote = Git.init().setBare(true).setDirectory(remoteDir).call()
+        val localDir = tempDir.resolve("$name-local").toFile().apply { mkdirs() }
+        val local = Git.init().setDirectory(localDir).call()
+        local.repository.config.apply {
+            setString("user", null, "name", "Test User")
+            setString("user", null, "email", "test.user@example.org")
+            setString("remote", "origin", "url", remoteDir.toURI().toString())
+            setString("remote", "origin", "fetch", "+refs/heads/*:refs/remotes/origin/*")
+            save()
+        }
+        File(localDir, "pom.xml").writeText(simplePom("4.0-SNAPSHOT"))
+        File(localDir, "source.txt").writeText("base source")
+        local.add().addFilepattern(".").call()
+        local.commit().setMessage("initial").setSign(false).call()
+        local.branchCreate().setName("develop").call()
+        local.push().setRemote("origin").add("develop").call()
+        return GitFixture(local, remote)
+    }
+
+    private fun simplePom(version: String) = """
+        <project>
+          <modelVersion>4.0.0</modelVersion>
+          <groupId>org.example</groupId>
+          <artifactId>test-project</artifactId>
+          <version>$version</version>
+        </project>
+    """.trimIndent()
+
+    private data class GitFixture(val local: Git, val remote: Git)
 }
