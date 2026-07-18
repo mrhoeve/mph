@@ -84,6 +84,30 @@ function Read-SonarToken {
     throw "No Sonar token was found. Set SONAR_TOKEN or create the git-ignored file '$tokenPath'."
 }
 
+function Normalize-FrontendCoverage {
+    $lcovPath = Join-Path $frontendRoot 'coverage\mph\lcov.info'
+    if (-not (Test-Path -LiteralPath $lcovPath -PathType Leaf)) {
+        throw "Frontend coverage report was not generated: $lcovPath"
+    }
+
+    $normalizedLines = Get-Content -LiteralPath $lcovPath | ForEach-Object {
+        if ($_.StartsWith('SF:')) {
+            $path = $_.Substring(3).Replace('\', '/')
+            if ($path.StartsWith('src/')) {
+                $path = "frontend/mph/$path"
+            }
+            "SF:$path"
+        } else {
+            $_
+        }
+    }
+    [System.IO.File]::WriteAllLines(
+        $lcovPath,
+        [string[]]$normalizedLines,
+        [System.Text.UTF8Encoding]::new($false)
+    )
+}
+
 $npmCommand = Resolve-NpmCommand
 $mavenCommand = Join-Path $repositoryRoot $(if ($isWindows) { 'mvnw.cmd' } else { 'mvnw' })
 $originalPath = $env:PATH
@@ -114,6 +138,7 @@ try {
         -Command $npmCommand `
         -Arguments @('run', 'test:coverage') `
         -WorkingDirectory $frontendRoot
+    Normalize-FrontendCoverage
 
     $env:PATH = "$frontendBin$([System.IO.Path]::PathSeparator)$originalPath"
     $mavenArguments = @('-B', 'clean', 'verify')

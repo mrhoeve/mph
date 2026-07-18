@@ -2,6 +2,7 @@ package nl.hicts.mph.services
 
 import org.eclipse.jgit.api.Git
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -16,6 +17,39 @@ class GitServiceTest {
     lateinit var tempDir: Path
 
     private val gitService = GitService()
+
+    @Test
+    fun `should skip develop synchronization when the branch does not exist`() {
+        val repoDir = tempDir.resolve("without-develop").toFile().apply { mkdirs() }
+        Git.init().setDirectory(repoDir).call().use { git ->
+            File(repoDir, "test.txt").writeText("test")
+            git.add().addFilepattern("test.txt").call()
+            git.commit().setMessage("initial commit").setSign(false).call()
+
+            val message = gitService.syncDevelop(repoDir)
+
+            assertTrue(message.orEmpty().contains("Branch 'develop' not found"))
+            assertEquals(git.repository.branch, "master")
+        }
+    }
+
+    @Test
+    fun `should restore the original branch when develop synchronization fails`() {
+        val repoDir = tempDir.resolve("failing-develop").toFile().apply { mkdirs() }
+        Git.init().setDirectory(repoDir).call().use { git ->
+            File(repoDir, "test.txt").writeText("test")
+            git.add().addFilepattern("test.txt").call()
+            git.commit().setMessage("initial commit").setSign(false).call()
+            git.branchCreate().setName("develop").call()
+
+            val error = assertThrows(RuntimeException::class.java) {
+                gitService.syncDevelop(repoDir, mergeIntoCurrent = true)
+            }
+
+            assertTrue(error.message.orEmpty().contains("Sync develop failed"))
+            assertEquals("master", git.repository.branch)
+        }
+    }
 
     @Test
     fun `should prepare branch correctly`() {

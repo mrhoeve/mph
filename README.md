@@ -68,7 +68,7 @@ Run the complete local build from PowerShell:
 .\build-local.cmd
 ```
 
-The script performs a locked `npm ci`, installs the Playwright Chromium runtime when needed, runs the frontend unit tests with coverage, runs `mvnw clean verify`, and finally runs the full-stack Playwright tests against the packaged application. Use `-SkipPlaywright` on a machine that cannot launch a browser, or `-SkipPlaywrightBrowserInstall` when Chromium is already managed separately.
+The script performs a locked `npm ci`, installs the Playwright Chromium runtime when needed, runs the frontend unit tests with coverage, normalizes LCOV paths for SonarQube, runs `mvnw clean verify`, and finally runs the full-stack Playwright tests against the packaged application. Use `-SkipPlaywright` on a machine that cannot launch a browser, or `-SkipPlaywrightBrowserInstall` when Chromium is already managed separately.
 
 To include analysis against the internal SonarQube instance, create a `.sonar-token` file in the repository root containing only your token. This filename is ignored by Git. Alternatively, set `SONAR_TOKEN` in the current process environment. Then run:
 

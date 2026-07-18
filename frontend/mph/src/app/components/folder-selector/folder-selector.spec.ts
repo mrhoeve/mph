@@ -82,6 +82,14 @@ describe('FolderSelector', () => {
     );
   });
 
+  it('does not save when no folder is selected', () => {
+    (fixture.componentInstance as any).currentPath.set('');
+
+    (fixture.componentInstance as any).useCurrentFolder();
+
+    expect(saveBase).not.toHaveBeenCalled();
+  });
+
   it('reports current-folder loading failure', async () => {
     currentRequest.mockReturnValue(throwError(() => new Error('failed')));
     const failedFixture = TestBed.createComponent(FolderSelector);

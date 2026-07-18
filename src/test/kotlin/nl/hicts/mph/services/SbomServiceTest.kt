@@ -1,5 +1,12 @@
 package nl.hicts.mph.services
 
+import io.mockk.every
+import io.mockk.mockk
+import org.apache.maven.model.License
+import org.apache.maven.model.Model
+import org.apache.maven.model.Organization
+import org.eclipse.aether.artifact.DefaultArtifact
+import org.eclipse.aether.graph.Dependency
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -104,6 +111,52 @@ class SbomServiceTest {
         val componentNames = sbomDetails.components.map { it.artifactId }
         assertTrue(componentNames.contains("d-project-api"), "Should contain d-project-api. Found: $componentNames")
         assertTrue(componentNames.contains("c-project-client"), "Should contain c-project-client. Found: $componentNames")
+    }
+
+    @Test
+    fun `should fall back to flat dependencies and retain useful metadata`() {
+        val rootPom = tempDir.resolve("pom.xml").toFile().apply { writeText("<project/>") }
+        val modulePom = tempDir.resolve("module/pom.xml").toFile().apply {
+            parentFile.mkdirs()
+            writeText("<project/>")
+        }
+        val model = Model().apply {
+            groupId = "org.example"
+            artifactId = "test-application"
+            version = "1.0.0"
+            description = "Test application"
+            organization = Organization().apply { name = "Example Organization" }
+            licenses = listOf(
+                License().apply { name = "MIT License" },
+                License().apply { name = "Example Test License" }
+            )
+        }
+        val resolver = mockk<MavenModelResolver>()
+        every { resolver.resolveEffectiveModel(rootPom.absoluteFile) } returns model
+        every { resolver.resolveEffectiveModel(modulePom.absoluteFile) } throws IllegalStateException("module unavailable")
+        every { resolver.resolveDependencyTree(any(), any(), any()) } throws IllegalStateException("tree unavailable")
+        every { resolver.resolveAllDependencies("org.example", "test-application", "1.0.0") } returns listOf(
+            Dependency(DefaultArtifact("org.example", "compile-library", "", "jar", "2.0.0"), "compile"),
+            Dependency(DefaultArtifact("org.example", "test-library", "", "jar", "3.0.0"), "test")
+        )
+        val resolverField = SbomService::class.java.getDeclaredField("modelResolver").apply { isAccessible = true }
+        resolverField.set(sbomService, resolver)
+        val workspaceField = SbomService::class.java.getDeclaredField("workspaceProjects").apply { isAccessible = true }
+        workspaceField.set(
+            sbomService,
+            mapOf(
+                "org.example:test-application:1.0.0" to rootPom,
+                "org.example:test-module:1.0.0" to modulePom
+            )
+        )
+
+        val rawJson = sbomService.generateSbom(rootPom.absolutePath, "json")
+
+        assertTrue(rawJson.contains("compile-library"))
+        assertTrue(rawJson.contains("test-library"))
+        assertTrue(rawJson.contains("Example Organization"))
+        assertTrue(rawJson.contains("MIT"))
+        assertTrue(rawJson.contains("Example Test License"))
     }
 
     private fun copyPomFixturesWithoutBuildOutputs(): Path {

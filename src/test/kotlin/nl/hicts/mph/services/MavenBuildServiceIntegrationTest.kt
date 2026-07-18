@@ -3,6 +3,7 @@ package nl.hicts.mph.services
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
@@ -77,13 +78,82 @@ class MavenBuildServiceIntegrationTest {
         service.stopBuild()
     }
 
-    private fun analysis(artifactId: String, pom: Path) = ProjectAnalysis(
+    @Test
+    fun `should fail every project blocked by a dependency cycle`() {
+        val firstPom = Files.createDirectories(tempDir.resolve("first")).resolve("pom.xml")
+        val secondPom = Files.createDirectories(tempDir.resolve("second")).resolve("pom.xml")
+        Files.writeString(firstPom, "<project/>")
+        Files.writeString(secondPom, "<project/>")
+        val first = analysis(
+            "first",
+            firstPom,
+            listOf(ProjectUsage("org.example", "second", "1.0.0", secondPom.toString()))
+        )
+        val second = analysis(
+            "second",
+            secondPom,
+            listOf(ProjectUsage("org.example", "first", "1.0.0", firstPom.toString()))
+        )
+        every { projectService.scanAndAnalyze(tempDir, 3) } returns listOf(first, second)
+        val service = MavenBuildService(projectService)
+        val failures = CopyOnWriteArrayList<ProjectProgress>()
+        val completed = CountDownLatch(2)
+        val subscription = service.getBuildEvents().subscribe { event ->
+            if (event.status == BuildStatus.FAILED) {
+                failures.add(event)
+                completed.countDown()
+            }
+        }
+
+        service.startBuild(tempDir.toString(), 3, listOf(firstPom.toString(), secondPom.toString()), BuildOptions())
+
+        assertTrue(completed.await(5, TimeUnit.SECONDS), "Cyclic build did not finish within timeout")
+        assertEquals(setOf("first", "second"), failures.map { it.artifactId }.toSet())
+        assertTrue(failures.all { it.logLine == "Dependency cycle or error" })
+        subscription.dispose()
+        service.stopBuild()
+    }
+
+    @Test
+    fun `should respect parallel capacity while building independent projects`() {
+        val firstPom = Files.createDirectories(tempDir.resolve("first")).resolve("pom.xml")
+        val secondPom = Files.createDirectories(tempDir.resolve("second")).resolve("pom.xml")
+        Files.writeString(firstPom, "<project/>")
+        Files.writeString(secondPom, "<project/>")
+        createWrapper(tempDir, 0)
+        val first = analysis("first", firstPom)
+        val second = analysis("second", secondPom)
+        every { projectService.scanAndAnalyze(tempDir, 3) } returns listOf(first, second)
+        val service = MavenBuildService(projectService)
+        val successes = CopyOnWriteArrayList<ProjectProgress>()
+        val completed = CountDownLatch(2)
+        val subscription = service.getBuildEvents().subscribe { event ->
+            if (event.status == BuildStatus.SUCCESS) {
+                successes.add(event)
+                completed.countDown()
+            }
+        }
+
+        service.startBuild(
+            tempDir.toString(),
+            3,
+            listOf(firstPom.toString(), secondPom.toString()),
+            BuildOptions(parallel = true, maxParallel = 1)
+        )
+
+        assertTrue(completed.await(10, TimeUnit.SECONDS), "Parallel build did not finish within timeout")
+        assertEquals(setOf("first", "second"), successes.map { it.artifactId }.toSet())
+        subscription.dispose()
+        service.stopBuild()
+    }
+
+    private fun analysis(artifactId: String, pom: Path, usages: List<ProjectUsage> = emptyList()) = ProjectAnalysis(
         groupId = "org.example",
         artifactId = artifactId,
         version = "1.0.0",
         path = pom.toString(),
         modules = emptyList(),
-        usages = emptyList(),
+        usages = usages,
         isRoot = true
     )
 

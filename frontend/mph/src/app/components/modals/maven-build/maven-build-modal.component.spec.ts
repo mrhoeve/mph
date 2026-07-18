@@ -72,4 +72,102 @@ describe('MavenBuildModalComponent', () => {
     expect(fixture.componentInstance.errorMessage()).toBe('Failed to start build.');
     expect(fixture.componentInstance.isBuilding()).toBe(false);
   });
+
+  it('handles loading failures and selection controls', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    projectService.getBuildOrder.mockReturnValueOnce(throwError(() => new Error('unavailable')));
+    fixture.componentInstance.loadProjects();
+    expect(fixture.componentInstance.errorMessage()).toBe('Failed to load projects.');
+    expect(fixture.componentInstance.isLoading()).toBe(false);
+
+    fixture.componentInstance.toggleSelectAll({ target: { checked: false } } as unknown as Event);
+    expect(fixture.componentInstance.isAllSelected()).toBe(false);
+    fixture.componentInstance.startBuild();
+    expect(buildService.startBuild).not.toHaveBeenCalled();
+    fixture.componentInstance.toggleSelectAll({ target: { checked: true } } as unknown as Event);
+    expect(fixture.componentInstance.isAllSelected()).toBe(true);
+  });
+
+  it('groups running pending failed completed and skipped builds', () => {
+    fixture.componentInstance.projects.update(items => [
+      { ...items[0], status: BuildStatus.RUNNING },
+      { ...items[1], status: BuildStatus.PENDING },
+      { ...items[0], project: project('failed', '/failed'), status: BuildStatus.FAILED, originalIndex: 2 },
+      { ...items[0], project: project('completed', '/completed'), status: BuildStatus.SUCCESS, originalIndex: 3 },
+      { ...items[0], project: project('skipped', '/skipped'), status: BuildStatus.SKIPPED, originalIndex: 4 }
+    ]);
+    fixture.componentInstance.isBuilding.set(true);
+
+    expect(fixture.componentInstance.groupedProjects().map(group => group.name))
+      .toEqual(['Failed', 'Running', 'Pending', 'Completed']);
+  });
+
+  it('records bounded logs and handles event stream failures', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    fixture.componentInstance.startBuild();
+    for (let index = 0; index < 1002; index++) {
+      fixture.componentInstance.handleBuildEvent({
+        projectPath: '/alpha', artifactId: 'alpha', status: BuildStatus.RUNNING, logLine: `line-${index}`
+      });
+    }
+    expect(fixture.componentInstance.projectLogs()['/alpha']).toHaveLength(1000);
+    expect(fixture.componentInstance.projectLogs()['/alpha'][0].text).toBe('line-2');
+
+    events.error(new Error('stream failed'));
+    expect(console.error).toHaveBeenCalledWith('SSE Error:', expect.any(Error));
+  });
+
+  it('updates options and log-following state from native controls', () => {
+    const component = fixture.componentInstance as any;
+    component.setSkipUTs({ target: { checked: false } } as unknown as Event);
+    component.setSkipITs({ target: { checked: false } } as unknown as Event);
+    component.setParallel({ target: { checked: false } } as unknown as Event);
+    component.setMaxParallel({ target: { value: '3' } } as unknown as Event);
+    component.setMaxParallel({ target: { value: 'invalid' } } as unknown as Event);
+    component.toggleOptions();
+
+    expect(component.skipUTs()).toBe(false);
+    expect(component.skipITs()).toBe(false);
+    expect(component.parallel()).toBe(false);
+    expect(component.maxParallel()).toBe(3);
+    expect(component.showOptions()).toBe(false);
+    expect(component.getSelectedProjectLogs()).toEqual([]);
+
+    const element = { scrollTop: 60, scrollHeight: 100, clientHeight: 20 };
+    component.logContainer = { nativeElement: element };
+    component.lastScrollTop = 60;
+    component.isAutoScrolling = false;
+    element.scrollTop = 20;
+    component.onLogScroll();
+    expect(component.followLog()).toBe(false);
+    element.scrollTop = 80;
+    component.onLogScroll();
+    expect(component.followLog()).toBe(true);
+
+    component.setFollowLog({ target: { checked: false } } as unknown as Event);
+    expect(component.followLog()).toBe(false);
+    component.setFollowLog({ target: { checked: true } } as unknown as Event);
+    expect(component.followLog()).toBe(true);
+    expect(element.scrollTop).toBe(100);
+  });
+
+  it('selects logs, stops builds and cleans up subscriptions', () => {
+    vi.useFakeTimers();
+    const component = fixture.componentInstance as any;
+    const element = { scrollTop: 0, scrollHeight: 120, clientHeight: 20 };
+    component.logContainer = { nativeElement: element };
+    component.selectProject(component.projects()[0]);
+    expect(component.selectedProjectPath()).toBe('/alpha');
+    expect(element.scrollTop).toBe(120);
+    vi.runAllTimers();
+    expect(component.isAutoScrolling).toBe(false);
+
+    component.stopBuild();
+    expect(buildService.stopBuild).toHaveBeenCalled();
+    expect(component.isBuilding()).toBe(false);
+    expect(component.showOptions()).toBe(true);
+    component.ngOnDestroy();
+    expect(buildService.stopBuild).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
 });

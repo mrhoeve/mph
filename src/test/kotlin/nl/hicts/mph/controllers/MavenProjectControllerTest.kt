@@ -58,6 +58,33 @@ class MavenProjectControllerTest {
     }
 
     @Test
+    fun `project endpoints should consistently reject a missing base path`() {
+        every { settingsService.loadSettings() } returns Settings(null, 3)
+        every { sbomService.generateSbom("/sample/pom.xml", "json") } returns "{}"
+        val calls: List<() -> Any?> = listOf(
+            { controller.updateVersion(UpdateVersionRequest("org.example", "sample", "2.0.0")) },
+            { controller.bulkUpdateVersion(BulkUpdateVersionRequest(listOf("/sample/pom.xml"), "", false)) },
+            { controller.upgradeSpringBoot(UpgradeSpringBootRequest("/sample/pom.xml", "4.1.1")) },
+            { controller.overrideProperty(OverridePropertyRequest("/sample/pom.xml", "library.version", "2.0", null)) },
+            { controller.removePropertyOverride(RemovePropertyOverrideRequest("/sample/pom.xml", "library.version")) },
+            { controller.getManagedProperties("/sample/pom.xml") },
+            { controller.getLatestTag("/sample/pom.xml") },
+            { controller.getBuildOrder() },
+            { controller.syncDevelop(SyncDevelopRequest(listOf("/sample/pom.xml"))) },
+            { controller.exportExcel() }
+        )
+
+        calls.forEach { call ->
+            val exception = assertThrows(RuntimeException::class.java) { call() }
+            assertEquals("Base path not set", exception.message)
+        }
+
+        val sbomResponse = controller.exportSbom("/sample/pom.xml", "json")
+        assertEquals(MediaType.APPLICATION_JSON, sbomResponse.headers.contentType)
+        assertEquals(true, sbomResponse.headers.getFirst(HttpHeaders.CONTENT_DISPOSITION)?.startsWith("attachment; filename=sample-"))
+    }
+
+    @Test
     fun `version endpoints should delegate mutations and return refreshed analysis`() {
         justRun { projectService.updateVersions(tempDir, 5, "org.example", "sample", "2.0.0") }
         justRun { projectService.bulkUpdateVersions(tempDir, 5, any()) }
