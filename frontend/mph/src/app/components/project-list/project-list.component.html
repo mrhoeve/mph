@@ -42,7 +42,7 @@
   <ul>
     @for (item of items; track item.path) {
       <li class="project-item" [class.root-project]="isRoot">
-        <div class="project-item-header" tabindex="0" [class.selected]="projectState.selectedProject()?.path === item.path" (click)="selectProject(item)" (keydown.enter)="selectProject(item)" (keydown.space)="selectProject(item); $event.preventDefault()">
+        <div class="project-item-header" [class.selected]="projectState.selectedProject()?.path === item.path">
           <div class="header-left">
             @if (item.modules.length > 0) {
               <button type="button" class="expand-icon" [attr.aria-label]="(isExpanded(item) ? 'Collapse ' : 'Expand ') + item.artifactId" [class.expanded]="isExpanded(item)" (click)="toggleExpand(item, $event)">
@@ -60,23 +60,25 @@
             }
           </div>
 
-          <span class="project-icon">{{ isRoot ? '📂' : '📦' }}</span>
-          <span class="project-name">
-            {{ item.artifactId }}
-            @if (item.hasSpringBootParent) {
-              <span class="spring-boot-icon" title="Spring Boot Project">🍃</span>
-            }
-            @if (item.gitStatus) {
-              <span class="git-info" [title]="'Branch: ' + item.gitStatus.branchName">
-                @if (item.gitStatus.behindCount > 0) {
-                  <span class="git-status-icon behind" [title]="item.gitStatus.behindCount + ' commits behind develop'">⬇️{{item.gitStatus.behindCount}}</span>
-                }
-                @if (item.gitStatus.aheadCount > 0) {
-                  <span class="git-status-icon ahead" [title]="item.gitStatus.aheadCount + ' commits ahead of develop'">⬆️{{item.gitStatus.aheadCount}}</span>
-                }
-              </span>
-            }
-          </span>
+          <button type="button" class="project-select-button" (click)="selectProject(item)">
+            <span class="project-icon">{{ isRoot ? '📂' : '📦' }}</span>
+            <span class="project-name">
+              {{ item.artifactId }}
+              @if (item.hasSpringBootParent) {
+                <span class="spring-boot-icon" title="Spring Boot Project">🍃</span>
+              }
+              @if (item.gitStatus) {
+                <span class="git-info" [title]="'Branch: ' + item.gitStatus.branchName">
+                  @if (item.gitStatus.behindCount > 0) {
+                    <span class="git-status-icon behind" [title]="item.gitStatus.behindCount + ' commits behind develop'">⬇️{{item.gitStatus.behindCount}}</span>
+                  }
+                  @if (item.gitStatus.aheadCount > 0) {
+                    <span class="git-status-icon ahead" [title]="item.gitStatus.aheadCount + ' commits ahead of develop'">⬆️{{item.gitStatus.aheadCount}}</span>
+                  }
+                </span>
+              }
+            </span>
+          </button>
         </div>
         @if (item.modules.length > 0 && isExpanded(item)) {
           <div class="project-modules">

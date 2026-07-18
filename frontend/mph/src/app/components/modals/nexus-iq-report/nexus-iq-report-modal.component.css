@@ -173,12 +173,9 @@
 }
 
 .finding p {
-  margin: 0;
-}
-
-.finding p {
   color: #64748b;
   font-size: 0.85rem;
+  margin: 0;
   margin-top: 0.25rem;
 }
 

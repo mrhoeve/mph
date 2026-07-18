@@ -197,9 +197,9 @@ p {
 }
 
 .toast-close {
-  background: rgba(0, 0, 0, 0.05);
+  background: #f1f5f9;
   border: none;
-  color: #475569;
+  color: #334155;
   font-size: 1.25rem;
   width: 24px;
   height: 24px;
@@ -214,7 +214,7 @@ p {
 }
 
 .toast-close:hover {
-  background: rgba(0, 0, 0, 0.1);
+  background: #e2e8f0;
   color: #0f172a;
 }
 

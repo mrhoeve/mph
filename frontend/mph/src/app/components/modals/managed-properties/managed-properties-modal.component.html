@@ -1,5 +1,5 @@
 <div class="modal-overlay" tabindex="-1" (click)="$event.target === $event.currentTarget ? dismissed.emit() : undefined" (document:keydown.escape)="dismissed.emit()">
-  <div class="modal-content wide" role="dialog" aria-modal="true">
+  <dialog class="modal-content wide" open aria-modal="true">
     <div class="modal-header">
       <h3>Managed Component Versions</h3>
       <button class="close-icon" aria-label="Close" (click)="dismissed.emit()">×</button>
@@ -100,5 +100,5 @@
     <div class="modal-actions">
       <button class="secondary-button" (click)="dismissed.emit()">Close</button>
     </div>
-  </div>
+  </dialog>
 </div>

@@ -373,7 +373,6 @@ class MavenProjectService(
 
     private fun resolveManagedPropertiesFromResult(project: MavenProject, result: ModelBuildingResult): List<ManagedProperty> {
         val effectiveModel = result.effectiveModel
-        val rawProps = project.model.properties
         val bomModels = resolveImportedBoms(result, effectiveModel.properties)
         val properties = effectiveVersionProperties(project, result, bomModels).toMutableMap()
         addMissingRawProperties(project, properties)

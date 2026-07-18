@@ -1,5 +1,5 @@
 <div class="modal-overlay" tabindex="-1" (click)="$event.target === $event.currentTarget ? dismissed.emit() : undefined" (document:keydown.escape)="dismissed.emit()">
-  <div class="modal-content wide nexus-report-modal" role="dialog" aria-modal="true">
+  <dialog class="modal-content wide nexus-report-modal" open aria-modal="true">
     <div class="modal-header">
       <div>
         <h2>Nexus IQ scan report</h2>
@@ -86,5 +86,5 @@
         </div>
       }
     </div>
-  </div>
+  </dialog>
 </div>

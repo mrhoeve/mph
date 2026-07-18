@@ -1,5 +1,5 @@
 <div class="modal-overlay" tabindex="-1" (click)="$event.target === $event.currentTarget ? dismissed.emit() : undefined" (document:keydown.escape)="dismissed.emit()">
-  <div class="modal-content" role="dialog" aria-modal="true">
+  <dialog class="modal-content" open aria-modal="true">
     <div class="modal-header">
       <h3>Update all modules & usages</h3>
       <button class="close-icon" aria-label="Close" (click)="dismissed.emit()">&times;</button>
@@ -52,5 +52,5 @@
       <button class="secondary-button" (click)="dismissed.emit()">Cancel</button>
       <button class="primary-button" (click)="onExecute()" [disabled]="selectedOption() === 'specified' && !specifiedVersion()">Update</button>
     </div>
-  </div>
+  </dialog>
 </div>

@@ -1,5 +1,5 @@
 <div class="modal-overlay" tabindex="-1" (click)="$event.target === $event.currentTarget ? dismissed.emit() : undefined" (document:keydown.escape)="dismissed.emit()">
-  <div class="modal-content maven-build-modal" role="dialog" aria-modal="true">
+  <dialog class="modal-content maven-build-modal" open aria-modal="true">
     <div class="modal-header">
       <h2>Maven Build</h2>
       <button class="close-button" aria-label="Close" (click)="dismissed.emit()">&times;</button>
@@ -31,19 +31,21 @@
                     <li class="build-group-header">{{ group.name }}</li>
                   }
                   @for (p of group.projects; track p.project.path) {
-                    <li class="build-project-item" tabindex="0" [class.selected]="selectedProjectPath() === p.project.path" (click)="selectProject(p)" (keydown.enter)="selectProject(p)" (keydown.space)="selectProject(p); $event.preventDefault()">
+                    <li class="build-project-item" [class.selected]="selectedProjectPath() === p.project.path">
                       <label class="visually-hidden-label">
-                        <input type="checkbox" [checked]="p.selected" [disabled]="isBuilding()" (change)="p.selected = !p.selected; $event.stopPropagation()">
+                        <input type="checkbox" [checked]="p.selected" [disabled]="isBuilding()" (change)="p.selected = !p.selected">
                         <span class="visually-hidden">Select {{ p.project.artifactId }}</span>
                       </label>
-                      <span class="status-icon" [title]="p.status">
-                        @if (p.status === 'PENDING') { ⏳ }
-                        @else if (p.status === 'RUNNING') { 🔄 }
-                        @else if (p.status === 'SUCCESS') { ✅ }
-                        @else if (p.status === 'FAILED') { ❌ }
-                        @else if (p.status === 'SKIPPED') { ⏭️ }
-                      </span>
-                      <span class="project-name">{{ p.project.artifactId }}</span>
+                      <button type="button" class="build-project-selector" (click)="selectProject(p)">
+                        <span class="status-icon" [title]="p.status">
+                          @if (p.status === 'PENDING') { ⏳ }
+                          @else if (p.status === 'RUNNING') { 🔄 }
+                          @else if (p.status === 'SUCCESS') { ✅ }
+                          @else if (p.status === 'FAILED') { ❌ }
+                          @else if (p.status === 'SKIPPED') { ⏭️ }
+                        </span>
+                        <span class="project-name">{{ p.project.artifactId }}</span>
+                      </button>
                     </li>
                   }
                 }
@@ -128,5 +130,5 @@
         </div>
       }
     </div>
-  </div>
+  </dialog>
 </div>
