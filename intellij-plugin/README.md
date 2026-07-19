@@ -29,4 +29,10 @@ Open or import a multi-module Maven workspace in the development IDE, then open 
 ./gradlew test verifyPlugin buildPlugin
 ```
 
+Generate the JaCoCo-compatible Kover XML report used by the combined project SonarQube analysis with:
+
+```shell
+./gradlew koverXmlReport
+```
+
 The prototype currently targets IntelliJ IDEA 2026.1.

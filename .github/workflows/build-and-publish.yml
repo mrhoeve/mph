@@ -48,10 +48,19 @@ jobs:
       working-directory: intellij-plugin
       run: |
         chmod +x gradlew
-        ./gradlew test buildPlugin verifyPlugin --console=plain
+        ./gradlew koverXmlReport buildPlugin verifyPlugin --console=plain
+
+    - name: Upload IntelliJ Plugin Coverage
+      uses: actions/upload-artifact@v7
+      with:
+        name: intellij-plugin-coverage
+        path: intellij-plugin/build/reports/kover/report.xml
+        if-no-files-found: error
+        retention-days: 1
 
   build:
     name: Build, test, and analyze
+    needs: intellij-plugin
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.get_version.outputs.version }}
@@ -104,6 +113,12 @@ jobs:
     - name: Normalize Frontend Coverage Paths
       run: |
         node -e "const fs=require('fs');const file='frontend/mph/coverage/mph/lcov.info';const lcov=fs.readFileSync(file,'utf8').replace(/^SF:src\//gm,'SF:frontend/mph/src/');fs.writeFileSync(file,lcov);"
+
+    - name: Download IntelliJ Plugin Coverage
+      uses: actions/download-artifact@v8
+      with:
+        name: intellij-plugin-coverage
+        path: intellij-plugin/build/reports/kover
 
     - name: Run Backend Unit Tests
       run: |

@@ -36,6 +36,15 @@ import javax.swing.tree.DefaultTreeModel
 
 class MphToolWindowPanel(
     private val project: Project,
+    private val discoverProjects: () -> ProjectSnapshot = {
+        project.service<IdeaProjectDiscoveryService>().discover()
+    },
+    private val openPom: (String) -> Unit = { pomPath ->
+        LocalFileSystem.getInstance().refreshAndFindFileByPath(pomPath)?.let { virtualFile ->
+            OpenFileDescriptor(project, virtualFile).navigate(true)
+        }
+    },
+    refreshOnCreate: Boolean = true,
 ) : SimpleToolWindowPanel(true, true), Disposable {
     private val summary = JBLabel("Discovering Maven projects…", SwingConstants.LEFT)
     private val rootNode = DefaultMutableTreeNode("Maven Projects")
@@ -74,25 +83,38 @@ class MphToolWindowPanel(
             VirtualFileManager.VFS_CHANGES,
             object : BulkFileListener {
                 override fun after(events: List<VFileEvent>) {
-                    if (events.any { it.path.endsWith("/pom.xml") || it.path.endsWith("\\pom.xml") }) {
+                    if (containsPomChange(events.map(VFileEvent::getPath))) {
                         ApplicationManager.getApplication().invokeLater(::refresh)
                     }
                 }
             },
         )
 
-        refresh()
+        if (refreshOnCreate) refresh()
     }
 
-    private fun refresh() {
+    internal val summaryText: String
+        get() = summary.text
+
+    internal val projectTree: Tree
+        get() = tree
+
+    internal fun containsPomChange(paths: List<String>): Boolean =
+        paths.any { it.endsWith("/pom.xml") || it.endsWith("\\pom.xml") }
+
+    internal fun refresh() {
         if (project.isDisposed) return
         summary.text = "Refreshing Maven projects…"
 
+        createRefreshTask().queue()
+    }
+
+    internal fun createRefreshTask(): Task.Backgroundable =
         object : Task.Backgroundable(project, "Refreshing Maven Project Helper", false) {
             private lateinit var snapshot: ProjectSnapshot
 
             override fun run(indicator: ProgressIndicator) {
-                snapshot = project.service<IdeaProjectDiscoveryService>().discover()
+                snapshot = discoverProjects()
             }
 
             override fun onSuccess() {
@@ -102,10 +124,9 @@ class MphToolWindowPanel(
             override fun onThrowable(error: Throwable) {
                 summary.text = "Unable to discover Maven projects: ${error.message ?: error.javaClass.simpleName}"
             }
-        }.queue()
-    }
+        }
 
-    private fun render(snapshot: ProjectSnapshot) {
+    internal fun render(snapshot: ProjectSnapshot) {
         rootNode.removeAllChildren()
         snapshot.groups.forEach { group -> rootNode.add(groupNode(group)) }
         treeModel.reload()
@@ -127,17 +148,16 @@ class MphToolWindowPanel(
         }
     }
 
-    private fun openSelectedPom() {
+    internal fun openSelectedPom() {
         val node = tree.lastSelectedPathComponent as? DefaultMutableTreeNode ?: return
         val projectInfo = (node.userObject as? ProjectTreeEntry)?.project ?: return
-        val virtualFile = LocalFileSystem.getInstance().refreshAndFindFileByPath(projectInfo.pomPath) ?: return
-        OpenFileDescriptor(project, virtualFile).navigate(true)
+        openPom(projectInfo.pomPath)
     }
 
     override fun dispose() = Unit
 }
 
-private data class ProjectTreeEntry(
+internal data class ProjectTreeEntry(
     val project: MavenProjectInfo,
 ) {
     override fun toString(): String = buildString {
