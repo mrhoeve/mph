@@ -1,0 +1,21 @@
+<idea-plugin>
+    <id>nl.hicts.mph.plugin</id>
+    <name>Maven Project Helper</name>
+    <vendor>MPH</vendor>
+
+    <description><![CDATA[
+        A native IntelliJ IDEA prototype for exploring Maven projects across a multi-repository workspace.
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.java</depends>
+    <depends>org.jetbrains.idea.maven</depends>
+    <depends>Git4Idea</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow
+                id="MPH"
+                anchor="right"
+                factoryClass="nl.hicts.mph.intellij.ui.MphToolWindowFactory"/>
+    </extensions>
+</idea-plugin>

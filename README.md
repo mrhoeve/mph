@@ -103,6 +103,12 @@ To prevent merging until CI succeeds, create a repository ruleset under **GitHub
 
 The ruleset is the enforcement layer: a workflow reports the check result, while GitHub branch rules decide whether that result blocks a merge. The release app token is generated only after the reusable CI workflow has passed and is restricted to the `release` environment.
 
+## IntelliJ IDEA plugin prototype
+
+The [`intellij-plugin`](intellij-plugin) module is the first read-only prototype of MPH as a native IntelliJ IDEA plugin. Its **MPH** tool window uses IDEA's linked Maven projects and registered Git roots directly, shows project coordinates and versions grouped by repository, and opens a project's `pom.xml` on double-click.
+
+The prototype deliberately keeps all write, build, and Git operations disabled while the project-model integration is validated. See the [plugin README](intellij-plugin/README.md) for development, installation, and verification commands.
+
 ## Local verification build
 
 Run the complete local build from PowerShell:
