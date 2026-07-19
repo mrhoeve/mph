@@ -57,11 +57,11 @@
 		<jgit.version>7.7.0.202606012155-r</jgit.version>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 		<project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
-		<sonar.sources>src/main/kotlin,frontend/mph/src</sonar.sources>
-		<sonar.tests>src/test/kotlin,frontend/mph/src</sonar.tests>
+		<sonar.sources>src/main/kotlin,frontend/mph/src,intellij-plugin/src/main/kotlin</sonar.sources>
+		<sonar.tests>src/test/kotlin,frontend/mph/src,intellij-plugin/src/test/kotlin</sonar.tests>
 		<sonar.exclusions>frontend/mph/src/**/*.spec.ts</sonar.exclusions>
-		<sonar.test.inclusions>src/test/kotlin/**/*,frontend/mph/src/**/*.spec.ts</sonar.test.inclusions>
-		<sonar.coverage.jacoco.xmlReportPaths>target/site/jacoco/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
+		<sonar.test.inclusions>src/test/kotlin/**/*,frontend/mph/src/**/*.spec.ts,intellij-plugin/src/test/kotlin/**/*</sonar.test.inclusions>
+		<sonar.coverage.jacoco.xmlReportPaths>target/site/jacoco/jacoco.xml,intellij-plugin/build/reports/kover/report.xml</sonar.coverage.jacoco.xmlReportPaths>
 		<sonar.javascript.lcov.reportPaths>frontend/mph/coverage/mph/lcov.info</sonar.javascript.lcov.reportPaths>
 	</properties>
 	<dependencies>

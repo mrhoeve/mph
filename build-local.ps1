@@ -14,6 +14,7 @@ $ErrorActionPreference = 'Stop'
 
 $repositoryRoot = $PSScriptRoot
 $frontendRoot = Join-Path $repositoryRoot 'frontend\mph'
+$pluginRoot = Join-Path $repositoryRoot 'intellij-plugin'
 $frontendBin = Join-Path $frontendRoot 'node_modules\.bin'
 $isWindows = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
     [System.Runtime.InteropServices.OSPlatform]::Windows
@@ -110,6 +111,12 @@ function Normalize-FrontendCoverage {
 
 $npmCommand = Resolve-NpmCommand
 $mavenCommand = Join-Path $repositoryRoot $(if ($isWindows) { 'mvnw.cmd' } else { 'mvnw' })
+$gradleCommand = if ($isWindows) { Join-Path $pluginRoot 'gradlew.bat' } else { 'bash' }
+$gradleArguments = if ($isWindows) {
+    @('clean', 'koverXmlReport', 'buildPlugin', 'verifyPlugin', '--console=plain')
+} else {
+    @('./gradlew', 'clean', 'koverXmlReport', 'buildPlugin', 'verifyPlugin', '--console=plain')
+}
 $originalPath = $env:PATH
 $originalSonarToken = [Environment]::GetEnvironmentVariable('SONAR_TOKEN', 'Process')
 $sonarToken = $null
@@ -139,6 +146,12 @@ try {
         -Arguments @('run', 'test:coverage') `
         -WorkingDirectory $frontendRoot
     Normalize-FrontendCoverage
+
+    Invoke-CheckedCommand `
+        -Description 'Testing, packaging, and verifying the IntelliJ plugin' `
+        -Command $gradleCommand `
+        -Arguments $gradleArguments `
+        -WorkingDirectory $pluginRoot
 
     $env:PATH = "$frontendBin$([System.IO.Path]::PathSeparator)$originalPath"
     $mavenArguments = @('-B', 'clean', 'verify')

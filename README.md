@@ -117,7 +117,7 @@ Run the complete local build from PowerShell:
 .\build-local.cmd
 ```
 
-The script performs a locked `npm ci`, installs the Playwright Chromium runtime when needed, runs the frontend unit tests with coverage, normalizes LCOV paths for SonarQube, runs `mvnw clean verify`, and finally runs the full-stack Playwright tests against the packaged application. Use `-SkipPlaywright` on a machine that cannot launch a browser, or `-SkipPlaywrightBrowserInstall` when Chromium is already managed separately.
+The script performs a locked `npm ci`, installs the Playwright Chromium runtime when needed, runs the frontend unit tests with coverage, tests and packages the IntelliJ plugin with Kotlin coverage and JetBrains compatibility verification, runs `mvnw clean verify`, and finally runs the full-stack Playwright tests against the packaged application. Use `-SkipPlaywright` on a machine that cannot launch a browser, or `-SkipPlaywrightBrowserInstall` when Chromium is already managed separately.
 
 To include analysis against the internal SonarQube instance, create a `.sonar-token` file in the repository root containing only your token. This filename is ignored by Git. Alternatively, set `SONAR_TOKEN` in the current process environment. Then run:
 
@@ -125,7 +125,7 @@ To include analysis against the internal SonarQube instance, create a `.sonar-to
 .\build-local.cmd -Sonar
 ```
 
-The token is passed to the scanner through the `SONAR_TOKEN` environment variable and is therefore not included in Maven's command-line arguments. The defaults are project key `mrhoeve_mph`, project name `Maven Project Helper`, and server `https://sonarqube.hictsapps.nl`. Override them when necessary:
+The token is passed to the scanner through the `SONAR_TOKEN` environment variable and is therefore not included in Maven's command-line arguments. The combined analysis includes the Spring Boot backend, Angular frontend, and IntelliJ plugin, using their JaCoCo, LCOV, and Kover reports respectively. The defaults are project key `mrhoeve_mph`, project name `Maven Project Helper`, and server `https://sonarqube.hictsapps.nl`. Override them when necessary:
 
 ```powershell
 .\build-local.cmd -Sonar `

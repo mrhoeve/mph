@@ -4,6 +4,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins {
     java
     kotlin("jvm") version "2.3.20"
+    id("org.jetbrains.kotlinx.kover") version "0.9.8"
     id("org.jetbrains.intellij.platform") version "2.18.1"
 }
 
