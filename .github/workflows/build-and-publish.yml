@@ -26,6 +26,30 @@ permissions:
   contents: read
 
 jobs:
+  intellij-plugin:
+    name: Test and verify IntelliJ plugin
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Set up JDK 21
+      uses: actions/setup-java@v5
+      with:
+        java-version: '21'
+        distribution: 'temurin'
+        cache: gradle
+        cache-dependency-path: |
+          intellij-plugin/*.gradle.kts
+          intellij-plugin/gradle.properties
+          intellij-plugin/gradle/wrapper/gradle-wrapper.properties
+
+    - name: Test, package, and verify IntelliJ plugin
+      working-directory: intellij-plugin
+      run: |
+        chmod +x gradlew
+        ./gradlew test buildPlugin verifyPlugin --console=plain
+
   build:
     name: Build, test, and analyze
     runs-on: ubuntu-latest
