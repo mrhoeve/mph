@@ -106,6 +106,35 @@ class PomReferenceVersionEditorTest {
     }
 
     @Test
+    fun `updates literal and property based project versions`() {
+        val literal = PomReferenceVersionEditor.updateProjectVersion(pom(projectVersion = "1.0"), "2.0")
+        val property = PomReferenceVersionEditor.updateProjectVersion(
+            pom(
+                projectVersion = "${'$'}{revision}",
+                body = "<properties><revision>1.0</revision></properties>",
+            ),
+            "2.0",
+        )
+
+        assertTrue(literal.changed)
+        assertTrue(literal.content.contains("<version>2.0</version>"))
+        assertTrue(property.changed)
+        assertTrue(property.content.contains("<revision>2.0</revision>"))
+        assertEquals(null, property.unresolvedProperty)
+    }
+
+    @Test
+    fun `reports a missing project version property without changing the pom`() {
+        val source = pom(projectVersion = "${'$'}{revision}")
+
+        val result = PomReferenceVersionEditor.updateProjectVersion(source, "2.0")
+
+        assertFalse(result.changed)
+        assertEquals(source, result.content)
+        assertEquals("revision", result.unresolvedProperty)
+    }
+
+    @Test
     fun `rejects unsafe target versions`() {
         assertThrows(IllegalArgumentException::class.java) {
             PomReferenceVersionEditor.update(pom(), target, "2<&", setOf(MavenReferenceKind.DEPENDENCY))

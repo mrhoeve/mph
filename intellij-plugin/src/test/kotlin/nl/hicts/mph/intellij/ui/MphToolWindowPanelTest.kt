@@ -137,7 +137,14 @@ class MphToolWindowPanelTest : BasePlatformTestCase() {
     fun testRendersRepositoryProjectAndFallbackTreeRows() {
         val renderer = MphProjectTreeRenderer()
         val tree = JTree()
-        val repository = RepositoryTreeEntry("sample-repository", "/workspace/sample", 2)
+        val repository = RepositoryTreeEntry(
+            "sample-repository",
+            "/workspace/sample",
+            listOf(
+                projectInfo("sample-service", "/workspace/sample/pom.xml"),
+                projectInfo("sample-client", "/workspace/sample/client/pom.xml"),
+            ),
+        )
         val projectWithCoordinates = ProjectTreeEntry(
             MavenProjectInfo(
                 "org.example",
@@ -161,6 +168,23 @@ class MphToolWindowPanelTest : BasePlatformTestCase() {
         assertEquals("/workspace/client/pom.xml", renderer.toolTipText)
 
         renderer.getTreeCellRendererComponent(tree, DefaultMutableTreeNode("Other"), false, false, true, 3, false)
+    }
+
+    fun testSelectsIndividualProjectsAndCompleteRepositoriesWithoutDuplicates() {
+        val first = projectInfo("sample-service", "/workspace/sample/pom.xml")
+            .copy(gitRootPath = "/workspace/sample")
+        val second = projectInfo("sample-client", "/workspace/sample/client/pom.xml")
+            .copy(gitRootPath = "/workspace/sample")
+        val panel = MphToolWindowPanel(project, refreshOnCreate = false)
+        panel.render(ProjectSnapshot(listOf(GitProjectGroup("/workspace/sample", listOf(first, second)))))
+        val root = panel.projectTree.model.root as DefaultMutableTreeNode
+        val repository = root.getChildAt(0) as DefaultMutableTreeNode
+        val firstProject = repository.getChildAt(0) as DefaultMutableTreeNode
+
+        panel.projectTree.selectionPaths = arrayOf(TreePath(repository.path), TreePath(firstProject.path))
+
+        assertEquals(listOf(first, second), panel.selectedProjects())
+        assertEquals(listOf(first), panel.selectedBuildProjects())
     }
 
     private fun selectOnlyProject(panel: MphToolWindowPanel, projectInfo: MavenProjectInfo) {
