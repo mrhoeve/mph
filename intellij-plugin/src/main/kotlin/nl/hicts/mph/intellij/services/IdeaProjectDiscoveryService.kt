@@ -32,7 +32,7 @@ class IdeaProjectDiscoveryService(
         )
     }
 
-    fun findDependents(targetPomPath: String): DependentProjectsAnalysis? {
+    fun findDependents(targetPomPath: String, targetPomContent: String? = null): DependentProjectsAnalysis? {
         val mavenProjects = MavenProjectsManager.getInstance(project).projects
         val projectInfos = ProjectSnapshotBuilder().build(
             mavenProjects.map { mavenProject ->
@@ -60,7 +60,13 @@ class IdeaProjectDiscoveryService(
             )
         }
 
-        return DependentProjectsAnalyzer().analyze(targetPomPath, descriptors)
+        val analysis = DependentProjectsAnalyzer().analyze(targetPomPath, descriptors) ?: return null
+        val documentVersion = targetPomContent?.let(PomReferenceVersionEditor::findProjectVersion)
+        return if (documentVersion == null) {
+            analysis
+        } else {
+            analysis.copy(target = analysis.target.copy(version = documentVersion))
+        }
     }
 
     private fun gitRootPaths(): List<String> =
