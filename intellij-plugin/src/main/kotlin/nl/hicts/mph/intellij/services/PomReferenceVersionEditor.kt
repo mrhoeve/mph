@@ -139,69 +139,101 @@ object PomReferenceVersionEditor {
         val pluginBlocks = tagRanges(content, "plugin", comments)
         val replacements = mutableListOf<Replacement>()
         val referencedProperties = linkedMapOf<String, Int>()
-        var missingVersionCount = 0
+        val collector = VersionReplacementCollector(
+            target = UpdateTarget(content, target, newVersion, referenceKinds),
+            ranges = ReferenceRanges(comments, dependencyManagement, pluginBlocks),
+            collected = CollectedReplacements(replacements, referencedProperties),
+        )
+        val missingVersionCount = collectParentReplacement(collector) + collectDependencyReplacements(collector)
 
-        if (MavenReferenceKind.PARENT in referenceKinds) {
-            tagMatches(content, "parent", comments).firstOrNull { matchesCoordinates(it.value, target) }?.let { parent ->
-                val version = elementMatch(parent.value, "version")
-                if (version == null) {
-                    missingVersionCount++
-                } else {
-                    collectVersionReplacement(parent.range.first, version, newVersion, replacements, referencedProperties)
-                }
-            }
-        }
-
-        if (MavenReferenceKind.DEPENDENCY in referenceKinds ||
-            MavenReferenceKind.MANAGED_DEPENDENCY in referenceKinds
-        ) {
-            tagMatches(content, "dependency", comments).forEach { dependency ->
-                val inManagedSection = dependencyManagement.any { dependency.range.first in it }
-                val requested = if (inManagedSection) {
-                    MavenReferenceKind.MANAGED_DEPENDENCY in referenceKinds
-                } else {
-                    MavenReferenceKind.DEPENDENCY in referenceKinds &&
-                        pluginBlocks.none { dependency.range.first in it }
-                }
-                if (!requested || !matchesCoordinates(dependency.value, target)) return@forEach
-
-                val version = elementMatch(dependency.value, "version")
-                if (version == null) {
-                    if (inManagedSection || MavenReferenceKind.MANAGED_DEPENDENCY !in referenceKinds) {
-                        missingVersionCount++
-                    }
-                } else {
-                    collectVersionReplacement(
-                        dependency.range.first,
-                        version,
-                        newVersion,
-                        replacements,
-                        referencedProperties,
-                    )
-                }
-            }
-        }
-
-        var updatedContent = applyReplacements(content, replacements)
-        var updatedReferenceCount = replacements.size
-        val unresolvedProperties = linkedSetOf<String>()
-
-        referencedProperties.forEach { (propertyName, referenceCount) ->
-            val propertyUpdate = updateProperty(updatedContent, propertyName, newVersion)
-            updatedContent = propertyUpdate.content
-            if (propertyUpdate.found) {
-                if (propertyUpdate.changed) updatedReferenceCount += referenceCount
-            } else {
-                unresolvedProperties += propertyName
-            }
-        }
+        val propertyResult = updateReferencedProperties(
+            applyReplacements(content, replacements), newVersion, referencedProperties, replacements.size,
+        )
 
         return PomReferenceUpdate(
-            content = updatedContent,
-            updatedReferenceCount = updatedReferenceCount,
-            unresolvedProperties = unresolvedProperties,
+            content = propertyResult.content,
+            updatedReferenceCount = propertyResult.updatedReferenceCount,
+            unresolvedProperties = propertyResult.unresolvedProperties,
             missingVersionCount = missingVersionCount,
         )
+    }
+
+    private fun collectParentReplacement(collector: VersionReplacementCollector): Int {
+        if (MavenReferenceKind.PARENT !in collector.target.referenceKinds) return 0
+        val parent = tagMatches(collector.target.content, "parent", collector.ranges.comments)
+            .firstOrNull { matchesCoordinates(it.value, collector.target.coordinates) }
+            ?: return 0
+        val version = elementMatch(parent.value, "version") ?: return 1
+        collectVersionReplacement(
+            parent.range.first,
+            version,
+            collector.target.newVersion,
+            collector.collected.replacements,
+            collector.collected.referencedProperties,
+        )
+        return 0
+    }
+
+    private fun collectDependencyReplacements(collector: VersionReplacementCollector): Int {
+        if (MavenReferenceKind.DEPENDENCY !in collector.target.referenceKinds &&
+            MavenReferenceKind.MANAGED_DEPENDENCY !in collector.target.referenceKinds
+        ) return 0
+        var missingVersions = 0
+        tagMatches(collector.target.content, "dependency", collector.ranges.comments).forEach { dependency ->
+            val managed = collector.ranges.dependencyManagement.any { dependency.range.first in it }
+            if (!requestedDependency(
+                    dependency,
+                    managed,
+                    collector.target.referenceKinds,
+                    collector.ranges.pluginBlocks,
+                ) || !matchesCoordinates(dependency.value, collector.target.coordinates)
+            ) return@forEach
+            val version = elementMatch(dependency.value, "version")
+            if (version == null) {
+                if (managed || MavenReferenceKind.MANAGED_DEPENDENCY !in collector.target.referenceKinds) missingVersions++
+            } else {
+                collectVersionReplacement(
+                    dependency.range.first,
+                    version,
+                    collector.target.newVersion,
+                    collector.collected.replacements,
+                    collector.collected.referencedProperties,
+                )
+            }
+        }
+        return missingVersions
+    }
+
+    private fun requestedDependency(
+        dependency: MatchResult,
+        managed: Boolean,
+        referenceKinds: Set<MavenReferenceKind>,
+        pluginBlocks: List<IntRange>,
+    ): Boolean = if (managed) {
+        MavenReferenceKind.MANAGED_DEPENDENCY in referenceKinds
+    } else {
+        MavenReferenceKind.DEPENDENCY in referenceKinds && pluginBlocks.none { dependency.range.first in it }
+    }
+
+    private fun updateReferencedProperties(
+        initialContent: String,
+        newVersion: String,
+        referencedProperties: Map<String, Int>,
+        initialUpdateCount: Int,
+    ): ReferencedPropertyUpdate {
+        var content = initialContent
+        var updatedReferenceCount = initialUpdateCount
+        val unresolvedProperties = linkedSetOf<String>()
+        referencedProperties.forEach { (propertyName, referenceCount) ->
+            val propertyUpdate = updateProperty(content, propertyName, newVersion)
+            content = propertyUpdate.content
+            if (!propertyUpdate.found) {
+                unresolvedProperties += propertyName
+            } else if (propertyUpdate.changed) {
+                updatedReferenceCount += referenceCount
+            }
+        }
+        return ReferencedPropertyUpdate(content, updatedReferenceCount, unresolvedProperties)
     }
 
     private fun collectVersionReplacement(
@@ -311,4 +343,29 @@ object PomReferenceVersionEditor {
 
     private data class Replacement(val range: IntRange, val value: String)
     private data class PropertyUpdate(val content: String, val found: Boolean, val changed: Boolean)
+    private data class ReferencedPropertyUpdate(
+        val content: String,
+        val updatedReferenceCount: Int,
+        val unresolvedProperties: Set<String>,
+    )
+    private data class VersionReplacementCollector(
+        val target: UpdateTarget,
+        val ranges: ReferenceRanges,
+        val collected: CollectedReplacements,
+    )
+    private data class UpdateTarget(
+        val content: String,
+        val coordinates: MavenCoordinates,
+        val newVersion: String,
+        val referenceKinds: Set<MavenReferenceKind>,
+    )
+    private data class ReferenceRanges(
+        val comments: List<IntRange>,
+        val dependencyManagement: List<IntRange>,
+        val pluginBlocks: List<IntRange>,
+    )
+    private data class CollectedReplacements(
+        val replacements: MutableList<Replacement>,
+        val referencedProperties: MutableMap<String, Int>,
+    )
 }

@@ -75,22 +75,20 @@ class WorkspaceDependencyAnalyzer {
         val repositories = descriptors.groupBy { descriptor ->
             descriptor.project.gitRootPath ?: Path.of(descriptor.project.pomPath).parent.toString()
         }
-        val repositoryByCoordinates = mutableMapOf<MavenCoordinates, String>()
-        descriptors.forEach { descriptor ->
+        val repositoryByCoordinates = descriptors.mapNotNull { descriptor ->
             descriptor.project.groupId?.takeIf(String::isNotBlank)?.let { groupId ->
-                repositoryByCoordinates[MavenCoordinates(groupId, descriptor.project.artifactId)] =
-                    descriptor.project.gitRootPath ?: Path.of(descriptor.project.pomPath).parent.toString()
+                MavenCoordinates(groupId, descriptor.project.artifactId) to
+                    (descriptor.project.gitRootPath ?: Path.of(descriptor.project.pomPath).parent.toString())
             }
-        }
+        }.toMap()
 
-        val dependencies = repositories.keys.associateWith { linkedSetOf<String>() }.toMutableMap()
-        descriptors.forEach { descriptor ->
-            val repository = descriptor.project.gitRootPath ?: Path.of(descriptor.project.pomPath).parent.toString()
-            relationshipCoordinates(descriptor).keys.forEach { coordinates ->
-                repositoryByCoordinates[coordinates]
-                    ?.takeIf { it != repository }
-                    ?.let(dependencies.getValue(repository)::add)
-            }
+        val dependencies = repositories.keys.associateWith { repository ->
+            descriptors.asSequence()
+                .filter { descriptor -> repositoryPath(descriptor) == repository }
+                .flatMap { relationshipCoordinates(it).keys }
+                .mapNotNull(repositoryByCoordinates::get)
+                .filterNot(repository::equals)
+                .toSet()
         }
 
         val remaining = repositories.keys.toMutableSet()
@@ -150,4 +148,7 @@ class WorkspaceDependencyAnalyzer {
         } ?: error("Repository $repository has no Maven projects.")
 
     private fun normalized(path: String): Path = Path.of(path).toAbsolutePath().normalize()
+
+    private fun repositoryPath(descriptor: MavenProjectDependencyDescriptor): String =
+        descriptor.project.gitRootPath ?: Path.of(descriptor.project.pomPath).parent.toString()
 }

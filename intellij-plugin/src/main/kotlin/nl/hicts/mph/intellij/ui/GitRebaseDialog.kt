@@ -106,62 +106,74 @@ class GitRebaseDialog(
         stopButton.isEnabled = true
         statusLabel.text = "Rebasing repositories sequentially…"
         plan.repositories.indices.forEach { updateRow(it, GitRebaseStatus.PENDING, "Waiting") }
+        SynchronizeTask().queue()
+    }
 
-        object : Task.Backgroundable(ideProject, "Synchronizing repositories with develop", true) {
-            private var allSucceeded = false
-            private var cancelled = false
+    private inner class SynchronizeTask : Task.Backgroundable(
+        ideProject,
+        "Synchronizing repositories with develop",
+        true,
+    ) {
+        private var allSucceeded = false
+        private var cancelled = false
 
-            override fun run(indicator: ProgressIndicator) {
-                val listener = GitRebaseListener { repository, status, message ->
-                    ApplicationManager.getApplication().invokeLater {
-                        val index = plan.repositories.indexOf(repository)
-                        if (index >= 0) updateRow(index, status, message)
-                    }
+        override fun run(indicator: ProgressIndicator) {
+            val listener = GitRebaseListener { repository, status, message ->
+                ApplicationManager.getApplication().invokeLater {
+                    updateRepositoryRow(repository, status, message)
                 }
-                val results = gitService.rebase(plan, indicator, listener)
-                results.forEach { result ->
-                    ApplicationManager.getApplication().invokeLater {
-                        val index = plan.repositories.indexOf(result.repository)
-                        if (index >= 0) updateRow(index, result.status, result.message)
-                    }
-                }
-                cancelled = indicator.isCanceled || results.any { it.status == GitRebaseStatus.CANCELLED }
-                allSucceeded = results.isNotEmpty() && results.all { it.status == GitRebaseStatus.SUCCESS }
             }
-
-            override fun onSuccess() {
-                if (!allSucceeded) {
-                    statusLabel.text = if (cancelled) {
-                        "Cancelled. Version alignment was skipped."
-                    } else {
-                        "Finished with issues. Resolve them before aligning versions."
-                    }
-                    return
+            val results = gitService.rebase(plan, indicator, listener)
+            results.forEach { result ->
+                ApplicationManager.getApplication().invokeLater {
+                    updateRepositoryRow(result.repository, result.status, result.message)
                 }
-                statusLabel.text = "Reapplying '${plan.prefix}' and aligning dependent versions…"
-                val alignment = ideProject.service<BulkVersionUpdateService>().update(
-                    BulkVersionUpdateRequest(
-                        selectedProjects = plan.alignmentProjects,
-                        workspaceProjects = workspaceProjects,
-                        prefix = plan.prefix,
-                        mode = BulkVersionMode.ADD_PREFIX,
-                        updateDependents = true,
-                        normalizePrefix = true,
-                    ),
-                )
-                statusLabel.text = if (alignment.issues.isEmpty()) {
-                    "Completed. Git and ${alignment.updatedProjectCount} project version(s) are aligned."
+            }
+            cancelled = indicator.isCanceled || results.any { it.status == GitRebaseStatus.CANCELLED }
+            allSucceeded = results.isNotEmpty() && results.all { it.status == GitRebaseStatus.SUCCESS }
+        }
+
+        override fun onSuccess() {
+            if (allSucceeded) {
+                alignVersions()
+            } else {
+                statusLabel.text = if (cancelled) {
+                    "Cancelled. Version alignment was skipped."
                 } else {
-                    "Completed with ${alignment.issues.size} version-alignment warning(s)."
+                    "Finished with issues. Resolve them before aligning versions."
                 }
             }
+        }
 
-            override fun onFinished() {
-                running = false
-                startButton.isEnabled = true
-                stopButton.isEnabled = false
-            }
-        }.queue()
+        override fun onFinished() {
+            running = false
+            startButton.isEnabled = true
+            stopButton.isEnabled = false
+        }
+    }
+
+    private fun updateRepositoryRow(repository: GitRepositoryPlan, status: GitRebaseStatus, message: String) {
+        val index = plan.repositories.indexOf(repository)
+        if (index >= 0) updateRow(index, status, message)
+    }
+
+    private fun alignVersions() {
+        statusLabel.text = "Reapplying '${plan.prefix}' and aligning dependent versions…"
+        val alignment = ideProject.service<BulkVersionUpdateService>().update(
+            BulkVersionUpdateRequest(
+                selectedProjects = plan.alignmentProjects,
+                workspaceProjects = workspaceProjects,
+                prefix = plan.prefix,
+                mode = BulkVersionMode.ADD_PREFIX,
+                updateDependents = true,
+                normalizePrefix = true,
+            ),
+        )
+        statusLabel.text = if (alignment.issues.isEmpty()) {
+            "Completed. Git and ${alignment.updatedProjectCount} project version(s) are aligned."
+        } else {
+            "Completed with ${alignment.issues.size} version-alignment warning(s)."
+        }
     }
 
     private fun stop() {

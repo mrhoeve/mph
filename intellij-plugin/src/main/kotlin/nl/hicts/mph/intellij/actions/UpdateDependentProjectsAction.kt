@@ -42,14 +42,14 @@ class UpdateDependentProjectsAction : AnAction(), DumbAware {
                     Messages.showInfoMessage(
                         project,
                         "Import this pom.xml as a Maven project before finding its dependents.",
-                        "Maven Project Helper",
+                        MPH_TITLE,
                     )
             },
             showError = { error ->
                 Messages.showErrorDialog(
                     project,
                     error.message ?: "Unable to inspect the linked Maven projects.",
-                    "Maven Project Helper",
+                    MPH_TITLE,
                 )
             },
         ).queue()
@@ -82,7 +82,7 @@ class UpdateDependentProjectsAction : AnAction(), DumbAware {
             if (result.updatedProjectCount > 0) append("<br><br>Use Undo to revert all changes.")
         }
         NotificationGroupManager.getInstance()
-            .getNotificationGroup("Maven Project Helper")
+            .getNotificationGroup(MPH_TITLE)
             .createNotification(
                 "Dependent Maven Projects",
                 details,
@@ -96,4 +96,8 @@ class UpdateDependentProjectsAction : AnAction(), DumbAware {
 
     internal fun isPomFileName(name: String?, isDirectory: Boolean): Boolean =
         !isDirectory && name?.equals("pom.xml", ignoreCase = true) == true
+
+    private companion object {
+        const val MPH_TITLE = "Maven Project Helper"
+    }
 }
