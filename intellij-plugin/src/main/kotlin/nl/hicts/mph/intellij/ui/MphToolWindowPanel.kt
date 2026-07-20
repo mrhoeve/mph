@@ -14,6 +14,7 @@ import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.progress.ProgressIndicator
+import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.Project
@@ -38,6 +39,7 @@ import nl.hicts.mph.intellij.services.IdeaProjectDiscoveryService
 import nl.hicts.mph.intellij.services.BulkVersionUpdateRequest
 import nl.hicts.mph.intellij.services.BulkVersionUpdateService
 import nl.hicts.mph.intellij.services.GitRebaseService
+import nl.hicts.mph.intellij.services.GitWorkspaceService
 import nl.hicts.mph.intellij.services.IntellijSbomService
 import nl.hicts.mph.intellij.services.NexusIqSettings
 import nl.hicts.mph.intellij.model.WorkspaceDependencyAnalyzer
@@ -88,6 +90,28 @@ class MphToolWindowPanel(
 
             override fun getActionUpdateThread() = ActionUpdateThread.EDT
         }
+        val updateVersionAction = object : DumbAwareAction(
+            "Update Version",
+            "Set a project version and update all linked usages",
+            AllIcons.Vcs.Branch,
+        ) {
+            override fun actionPerformed(event: AnActionEvent) = updateSelectedProjectVersion()
+            override fun update(event: AnActionEvent) {
+                event.presentation.isEnabled = selectedBuildProjects().size == 1
+            }
+            override fun getActionUpdateThread() = ActionUpdateThread.EDT
+        }
+        val realignVersionsAction = object : DumbAwareAction(
+            "Realign Versions",
+            "Update linked Maven references to every selected project's current version",
+            AllIcons.Actions.Refresh,
+        ) {
+            override fun actionPerformed(event: AnActionEvent) = realignSelectedVersions()
+            override fun update(event: AnActionEvent) {
+                event.presentation.isEnabled = selectedProjects().isNotEmpty()
+            }
+            override fun getActionUpdateThread() = ActionUpdateThread.EDT
+        }
         val buildAction = object : DumbAwareAction(
             "Build",
             "Run Maven for the selected projects",
@@ -95,7 +119,13 @@ class MphToolWindowPanel(
         ) {
             override fun actionPerformed(event: AnActionEvent) {
                 val selected = selectedBuildProjects()
-                if (selected.isNotEmpty()) MavenBuildDialog(project, selected).show()
+                if (selected.isNotEmpty()) {
+                    val order = WorkspaceDependencyAnalyzer().buildOrder(
+                        project.service<IdeaProjectDiscoveryService>().dependencyDescriptors(),
+                    )
+                    val steps = order.entries.associate { it.project.pomPath to it.buildStep }
+                    MavenBuildDialog(project, selected, steps).show()
+                }
             }
 
             override fun update(event: AnActionEvent) {
@@ -216,7 +246,9 @@ class MphToolWindowPanel(
                 managedVersionsAction,
                 sbomAction,
                 nexusIqAction,
+                updateVersionAction,
                 alignVersionsAction,
+                realignVersionsAction,
                 buildAction,
                 rebaseAction,
                 settingsAction,
@@ -364,6 +396,28 @@ class MphToolWindowPanel(
         val dialog = BulkVersionUpdateDialog(project, selected)
         if (!dialog.showAndGet()) return
 
+        if (dialog.branchName.isNotBlank()) {
+            var branchResults = emptyList<nl.hicts.mph.intellij.services.GitBranchResult>()
+            ProgressManager.getInstance().run(object : Task.Modal(project, "Preparing Git branches", true) {
+                override fun run(indicator: ProgressIndicator) {
+                    branchResults = project.service<GitWorkspaceService>().createOrCheckoutBranch(
+                        selected.mapNotNull(MavenProjectInfo::gitRootPath),
+                        dialog.branchName,
+                    )
+                }
+            })
+            val failures = branchResults.filterNot(nl.hicts.mph.intellij.services.GitBranchResult::success)
+            if (failures.isNotEmpty()) {
+                Messages.showErrorDialog(
+                    project,
+                    failures.joinToString("\n") { "${it.rootPath}: ${it.message}" },
+                    "Git Branch Preparation Failed",
+                )
+                refresh()
+                return
+            }
+        }
+
         val result = project.service<BulkVersionUpdateService>().update(
             BulkVersionUpdateRequest(
                 selectedProjects = selected,
@@ -392,7 +446,60 @@ class MphToolWindowPanel(
                 if (result.issues.isEmpty()) NotificationType.INFORMATION else NotificationType.WARNING,
             )
             .notify(project)
+        refresh()
     }
+
+    private fun updateSelectedProjectVersion() {
+        val selected = selectedBuildProjects().singleOrNull() ?: return
+        val dialog = ProjectVersionUpdateDialog(project, selected)
+        if (!dialog.showAndGet()) return
+        val workspace = workspaceProjects()
+        val rootDirectory = Path.of(selected.pomPath).toAbsolutePath().normalize().parent
+        val projectAndModules = workspace.filter { info ->
+            Path.of(info.pomPath).toAbsolutePath().normalize().startsWith(rootDirectory)
+        }
+        val result = project.service<BulkVersionUpdateService>().update(
+            BulkVersionUpdateRequest(
+                selectedProjects = projectAndModules.ifEmpty { listOf(selected) },
+                workspaceProjects = workspace,
+                prefix = dialog.selectedVersion,
+                mode = nl.hicts.mph.intellij.services.BulkVersionMode.SET_VERSION,
+                updateDependents = true,
+            ),
+        )
+        notifyVersionResult("Maven versions updated", result)
+        refresh()
+    }
+
+    private fun realignSelectedVersions() {
+        val selected = selectedProjects()
+        if (selected.isEmpty()) return
+        val result = project.service<BulkVersionUpdateService>().update(
+            BulkVersionUpdateRequest(
+                selectedProjects = selected,
+                workspaceProjects = workspaceProjects(),
+                prefix = "",
+                mode = nl.hicts.mph.intellij.services.BulkVersionMode.KEEP_CURRENT,
+                updateDependents = true,
+            ),
+        )
+        notifyVersionResult("Maven references realigned", result)
+        refresh()
+    }
+
+    private fun notifyVersionResult(title: String, result: nl.hicts.mph.intellij.services.BulkVersionUpdateResult) {
+        val details = "Updated ${result.updatedProjectCount} project versions and " +
+            "${result.updatedReferenceCount} dependent references." +
+            result.issues.takeIf { it.isNotEmpty() }?.joinToString("<br>", "<br><br>").orEmpty()
+        NotificationGroupManager.getInstance().getNotificationGroup("Maven Project Helper")
+            .createNotification(
+                title,
+                details,
+                if (result.issues.isEmpty()) NotificationType.INFORMATION else NotificationType.WARNING,
+            ).notify(project)
+    }
+
+    private fun workspaceProjects(): List<MavenProjectInfo> = snapshot.groups.flatMap(GitProjectGroup::projects)
 
     private fun openRebaseDialog() {
         val selected = selectedProjects()
@@ -471,6 +578,11 @@ internal class MphProjectTreeRenderer : ColoredTreeCellRenderer() {
                 icon = AllIcons.Nodes.Folder
                 append(entry.label, SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES)
                 append("  ${entry.projectCount}", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                entry.projects.firstOrNull()?.gitStatus?.let { status ->
+                    append("  ${status.branchName}", SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES)
+                    if (status.behindCount > 0) append("  ↓${status.behindCount}", SimpleTextAttributes.ERROR_ATTRIBUTES)
+                    if (status.aheadCount > 0) append("  ↑${status.aheadCount}", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                }
                 toolTipText = entry.rootPath
             }
 

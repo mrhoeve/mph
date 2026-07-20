@@ -85,7 +85,13 @@ class BuildOrderDialog(
         }
         val buildButton = JButton("Build All", AllIcons.Actions.Execute).apply {
             isEnabled = order.entries.isNotEmpty() && !order.hasCycles
-            addActionListener { MavenBuildDialog(ideProject, order.entries.map(BuildOrderEntry::project)).show() }
+            addActionListener {
+                MavenBuildDialog(
+                    ideProject,
+                    order.entries.map(BuildOrderEntry::project),
+                    order.entries.associate { it.project.pomPath to it.buildStep },
+                ).show()
+            }
         }
         val exportButton = JButton("Export to Excel", AllIcons.ToolbarDecorator.Export).apply {
             isEnabled = order.entries.isNotEmpty()

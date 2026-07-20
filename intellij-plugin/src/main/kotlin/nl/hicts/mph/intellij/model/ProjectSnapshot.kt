@@ -13,10 +13,17 @@ data class MavenProjectInfo(
     val version: String?,
     val pomPath: String,
     val gitRootPath: String?,
+    val gitStatus: GitWorkspaceStatus? = null,
 ) {
     val coordinates: String
         get() = listOfNotNull(groupId, artifactId.takeIf(String::isNotBlank)).joinToString(":")
 }
+
+data class GitWorkspaceStatus(
+    val branchName: String,
+    val aheadCount: Int,
+    val behindCount: Int,
+)
 
 data class GitProjectGroup(
     val rootPath: String?,

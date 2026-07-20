@@ -16,6 +16,7 @@ import com.intellij.util.ui.JBUI
 import nl.hicts.mph.intellij.icons.MphIcons
 import nl.hicts.mph.intellij.model.MavenProjectInfo
 import nl.hicts.mph.intellij.services.BulkVersionMode
+import nl.hicts.mph.intellij.services.GitOutputParser
 import java.awt.BorderLayout
 import java.awt.Dimension
 import java.awt.Font
@@ -29,9 +30,12 @@ class BulkVersionUpdateDialog(
     project: Project,
     private val projects: List<MavenProjectInfo>,
 ) : DialogWrapper(project) {
-    private val modeField = JComboBox(DefaultComboBoxModel(BulkVersionMode.entries.toTypedArray()))
+    private val modeField = JComboBox(
+        DefaultComboBoxModel(arrayOf(BulkVersionMode.ADD_PREFIX, BulkVersionMode.REMOVE_PREFIX)),
+    )
     private val prefixField = JBTextField()
     private val updateDependentsField = JBCheckBox("Update references in all linked Maven projects", true)
+    private val branchField = JBTextField()
 
     val mode: BulkVersionMode
         get() = modeField.selectedItem as BulkVersionMode
@@ -39,12 +43,15 @@ class BulkVersionUpdateDialog(
         get() = prefixField.text.trim()
     val updateDependents: Boolean
         get() = updateDependentsField.isSelected
+    val branchName: String
+        get() = branchField.text.trim()
 
     init {
         title = "Align Maven Project Versions"
         setOKButtonText("Update ${projects.size} ${if (projects.size == 1) "Project" else "Projects"}")
         modeField.renderer = BulkVersionModeRenderer()
         prefixField.emptyText.text = "For example: PREFIX-1234-"
+        branchField.emptyText.text = "Optional, for example: feature/upgrade"
         init()
     }
 
@@ -63,6 +70,8 @@ class BulkVersionUpdateDialog(
         prefix.isBlank() -> ValidationInfo("Enter the prefix to add or remove.", prefixField)
         prefix.any { it == '<' || it == '>' || it == '&' } ->
             ValidationInfo("The prefix contains characters that are unsafe in XML.", prefixField)
+        branchName.isNotBlank() && !GitOutputParser.validBranchName(branchName) ->
+            ValidationInfo("Enter a valid Git branch name.", branchField)
         else -> null
     }
 
@@ -93,6 +102,7 @@ class BulkVersionUpdateDialog(
         return FormBuilder.createFormBuilder()
             .addLabeledComponent("Operation:", modeField, 1, false)
             .addLabeledComponent("Version prefix:", prefixField, 1, false)
+            .addLabeledComponent("Git branch:", branchField, 1, false)
             .addComponent(updateDependentsField, 8)
             .addSeparator(10)
             .addLabeledComponent("Selected projects:", scrollPane, 1, true)

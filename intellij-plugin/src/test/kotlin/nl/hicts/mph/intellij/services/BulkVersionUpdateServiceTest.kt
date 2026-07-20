@@ -1,6 +1,7 @@
 package nl.hicts.mph.intellij.services
 
 import com.intellij.openapi.command.undo.UndoManager
+import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.components.service
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.vfs.LocalFileSystem
@@ -10,6 +11,40 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 class BulkVersionUpdateServiceTest : BasePlatformTestCase() {
+    fun testSetsAnExplicitVersionAndRealignsCurrentReferences() {
+        val targetFile = tempPom("manual-target", pom("shared-api", "1.0-SNAPSHOT"))
+        val dependentFile = tempPom("manual-dependent", pom(
+            "sample-service",
+            "1.0-SNAPSHOT",
+            """<dependency><groupId>org.example</groupId><artifactId>shared-api</artifactId><version>0.9</version></dependency>""",
+        ))
+        val target = projectInfo("shared-api", targetFile)
+        val dependent = projectInfo("sample-service", dependentFile)
+        try {
+            val service = project.service<BulkVersionUpdateService>()
+            val explicit = service.update(BulkVersionUpdateRequest(
+                listOf(target), listOf(target, dependent), "2.0.0", BulkVersionMode.SET_VERSION, true,
+            ))
+            assertEquals(1, explicit.updatedReferenceCount)
+            assertTrue(document(targetFile).text.contains("<version>2.0.0</version>"))
+            assertTrue(document(dependentFile).text.contains("<version>2.0.0</version>"))
+
+            WriteCommandAction.runWriteCommandAction(project) {
+                val dependentDocument = document(dependentFile)
+                dependentDocument.setText(dependentDocument.text.replace("<version>2.0.0</version>", "<version>1.5</version>"))
+            }
+            val currentTarget = target.copy(version = "2.0.0")
+            val realigned = service.update(BulkVersionUpdateRequest(
+                listOf(currentTarget), listOf(currentTarget, dependent), "", BulkVersionMode.KEEP_CURRENT, true,
+            ))
+            assertEquals(1, realigned.updatedReferenceCount)
+            assertTrue(document(dependentFile).text.contains("<version>2.0.0</version>"))
+        } finally {
+            Files.deleteIfExists(targetFile)
+            Files.deleteIfExists(dependentFile)
+        }
+    }
+
     fun testUpdatesSelectedVersionsAndDependentReferencesAsOneUndoableCommand() {
         val targetSource = pom("shared-api", "1.0-SNAPSHOT")
         val dependentSource = pom(
