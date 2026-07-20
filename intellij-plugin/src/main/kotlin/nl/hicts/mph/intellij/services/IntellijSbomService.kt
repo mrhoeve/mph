@@ -39,6 +39,31 @@ data class SbomAnalysis(
         listOf(component) + component.children.flatMap(::flatten)
 }
 
+object SbomSearch {
+    fun filter(components: List<SbomComponent>, query: String): List<SbomComponent> {
+        val search = query.trim().lowercase()
+        if (search.isEmpty()) return components
+        return components.mapNotNull { component ->
+            val matchingChildren = filter(component.children, search)
+            if (component.matches(search) || matchingChildren.isNotEmpty()) {
+                component.copy(children = matchingChildren)
+            } else {
+                null
+            }
+        }
+    }
+
+    private fun SbomComponent.matches(query: String): Boolean = sequenceOf(
+        groupId,
+        artifactId,
+        version,
+        type,
+        scope,
+        coordinates,
+        "$groupId:$artifactId:$version:$scope",
+    ).any { it.lowercase().contains(query) }
+}
+
 @Service(Service.Level.PROJECT)
 class IntellijSbomService(
     private val project: Project,

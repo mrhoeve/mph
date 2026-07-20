@@ -29,6 +29,9 @@ class SbomDialogTest : BasePlatformTestCase() {
         try {
             assertEquals(1, dialog.dependencyTree.rowCount)
             assertEquals("", dialog.dependencyTree.emptyText.text)
+            dialog.searchField.text = "not-present"
+            assertEquals(0, dialog.dependencyTree.rowCount)
+            assertTrue(dialog.dependencyTree.emptyText.text.contains("No dependencies match"))
         } finally {
             dialog.close(DialogWrapper.CANCEL_EXIT_CODE)
         }
