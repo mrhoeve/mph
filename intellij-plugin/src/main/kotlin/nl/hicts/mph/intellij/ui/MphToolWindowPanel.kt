@@ -154,7 +154,7 @@ class MphToolWindowPanel(
     }
 
     private fun createHeader(): JComponent {
-        val title = JBLabel("Maven Project Helper", MphIcons.Plugin, SwingConstants.LEFT)
+        val title = JBLabel("Maven Project Helper", MphIcons.Mph, SwingConstants.LEFT)
         title.font = title.font.deriveFont(Font.BOLD, title.font.size2D + 2f)
         title.iconTextGap = JBUI.scale(10)
 
