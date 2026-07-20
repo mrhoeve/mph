@@ -33,6 +33,17 @@ class IdeaProjectDiscoveryService(
     }
 
     fun findDependents(targetPomPath: String, targetPomContent: String? = null): DependentProjectsAnalysis? {
+        val descriptors = dependencyDescriptors()
+        val analysis = DependentProjectsAnalyzer().analyze(targetPomPath, descriptors) ?: return null
+        val documentVersion = targetPomContent?.let(PomReferenceVersionEditor::findProjectVersion)
+        return if (documentVersion == null) {
+            analysis
+        } else {
+            analysis.copy(target = analysis.target.copy(version = documentVersion))
+        }
+    }
+
+    fun dependencyDescriptors(): List<MavenProjectDependencyDescriptor> {
         val mavenProjects = MavenProjectsManager.getInstance(project).projects
         val projectInfos = ProjectSnapshotBuilder().build(
             mavenProjects.map { mavenProject ->
@@ -46,7 +57,7 @@ class IdeaProjectDiscoveryService(
             gitRootPaths(),
         ).groups.flatMap { it.projects }.associateBy { normalizedPath(it.pomPath) }
 
-        val descriptors = mavenProjects.mapNotNull { mavenProject ->
+        return mavenProjects.mapNotNull { mavenProject ->
             val projectInfo = projectInfos[normalizedPath(mavenProject.file.path)] ?: return@mapNotNull null
             MavenProjectDependencyDescriptor(
                 project = projectInfo,
@@ -58,14 +69,6 @@ class IdeaProjectDiscoveryService(
                     coordinates(dependency.groupId, dependency.artifactId)
                 }.toSet(),
             )
-        }
-
-        val analysis = DependentProjectsAnalyzer().analyze(targetPomPath, descriptors) ?: return null
-        val documentVersion = targetPomContent?.let(PomReferenceVersionEditor::findProjectVersion)
-        return if (documentVersion == null) {
-            analysis
-        } else {
-            analysis.copy(target = analysis.target.copy(version = documentVersion))
         }
     }
 

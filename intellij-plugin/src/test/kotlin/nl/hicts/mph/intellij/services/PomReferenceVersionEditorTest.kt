@@ -9,6 +9,36 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PomReferenceVersionEditorTest {
+    @Test
+    fun `adds updates and removes local Maven properties with comments`() {
+        val original = """
+            <project>
+                <modelVersion>4.0.0</modelVersion>
+                <properties>
+                    <java.version>21</java.version>
+                </properties>
+            </project>
+        """.trimIndent()
+
+        val added = PomReferenceVersionEditor.upsertProperty(
+            original,
+            "spring-cloud.version",
+            "2025.1.2",
+            "Temporary compatibility override",
+        )
+        assertTrue(added.changed)
+        assertTrue(added.content.contains("<!-- Temporary compatibility override -->"))
+        assertEquals("2025.1.2", PomReferenceVersionEditor.localProperties(added.content)
+            .single { it.name == "spring-cloud.version" }.value)
+
+        val updated = PomReferenceVersionEditor.upsertProperty(added.content, "spring-cloud.version", "2025.1.3")
+        assertTrue(updated.content.contains("<spring-cloud.version>2025.1.3</spring-cloud.version>"))
+
+        val removed = PomReferenceVersionEditor.removeProperty(updated.content, "spring-cloud.version")
+        assertTrue(removed.changed)
+        assertFalse(removed.content.contains("spring-cloud.version"))
+        assertFalse(removed.content.contains("Temporary compatibility override"))
+    }
     private val target = MavenCoordinates("org.example", "shared-api")
 
     @Test

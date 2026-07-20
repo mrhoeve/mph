@@ -82,9 +82,12 @@ kover {
                     "nl.hicts.mph.intellij.services.GitRebaseService",
                     "nl.hicts.mph.intellij.services.IdeaProjectDiscoveryService",
                     "nl.hicts.mph.intellij.services.MavenBuildService",
-                    "nl.hicts.mph.intellij.ui.GitRebaseDialog",
-                    "nl.hicts.mph.intellij.ui.MavenBuildDialog",
-                    "nl.hicts.mph.intellij.ui.MphToolWindowFactory",
+                    "nl.hicts.mph.intellij.services.IntellijSbomService",
+                    "nl.hicts.mph.intellij.services.IntellijNexusIqService",
+                    "nl.hicts.mph.intellij.services.ManagedVersionService",
+                    "nl.hicts.mph.intellij.services.NexusIqSettings",
+                    "nl.hicts.mph.intellij.services.SpringBootVersionCatalog",
+                    "nl.hicts.mph.intellij.ui.*",
                 )
             }
         }

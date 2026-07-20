@@ -107,9 +107,9 @@ The ruleset is the enforcement layer: a workflow reports the check result, while
 
 ## IntelliJ IDEA plugin
 
-The [`intellij-plugin`](intellij-plugin) module brings the core MPH workflows into IntelliJ IDEA. Its **MPH** tool window uses IDEA's linked Maven projects and registered Git roots directly, groups modules by repository, and supports multi-selection for bulk version alignment, Maven builds, and synchronizing prefixed feature branches with `develop`. A context-aware **Update Dependent Maven Projects…** action remains available from a `pom.xml` to update just that project's dependent references.
+The [`intellij-plugin`](intellij-plugin) module brings the core MPH workflows into IntelliJ IDEA. Its **MPH** tool window uses IDEA's linked Maven projects and registered Git roots directly, groups modules by repository, and supports dependency exploration, build-order calculation and Excel export, managed-property and Spring Boot upgrades, CycloneDX SBOM export, Nexus IQ scanning, bulk version alignment, Maven builds, and synchronization of prefixed feature branches with `develop`. A context-aware **Update Dependent Maven Projects…** action remains available from a `pom.xml` to update just that project's dependent references.
 
-Version edits are performed as undoable IntelliJ changes and remain uncommitted. Maven output is streamed into an IDE console. The Git workflow performs safety checks, processes repositories sequentially, preserves stashes when manual intervention is required, and aligns versions only after every selected repository rebases successfully. See the [plugin README](intellij-plugin/README.md) for usage, development, installation, and verification commands.
+Version edits are performed as undoable IntelliJ changes and remain uncommitted. Maven and Nexus IQ output is streamed in the IDE, while Nexus IQ credentials are stored in IntelliJ's Password Safe. The Git workflow performs safety checks, processes repositories sequentially, preserves stashes when manual intervention is required, and aligns versions only after every selected repository rebases successfully. See the [plugin README](intellij-plugin/README.md) for usage, development, installation, and verification commands.
 
 ## Local verification build
 

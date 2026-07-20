@@ -19,6 +19,17 @@ data class PomProjectVersionUpdate(
     val unresolvedProperty: String? = null,
 )
 
+data class LocalPomProperty(
+    val name: String,
+    val value: String,
+    val comment: String? = null,
+)
+
+data class PomPropertyUpdate(
+    val content: String,
+    val changed: Boolean,
+)
+
 object PomReferenceVersionEditor {
     private val propertyReference = Regex("^\\$\\{([^}]+)}$")
 
@@ -51,6 +62,68 @@ object PomReferenceVersionEditor {
             content = content.replaceRange(value.range, newVersion),
             changed = true,
         )
+    }
+
+    fun localProperties(content: String): List<LocalPomProperty> {
+        val comments = ranges(content, "<!--", "-->")
+        val properties = tagMatches(content, "properties", comments).firstOrNull() ?: return emptyList()
+        val entry = Regex(
+            "(?:<!--\\s*(.*?)\\s*-->\\s*)?<([A-Za-z_][A-Za-z0-9_.-]*)>\\s*(.*?)\\s*</\\2>",
+            setOf(RegexOption.DOT_MATCHES_ALL),
+        )
+        val bodyStart = properties.value.indexOf('>').takeIf { it >= 0 }?.plus(1) ?: return emptyList()
+        val bodyEnd = properties.value.lastIndexOf("</properties>").takeIf { it >= bodyStart } ?: return emptyList()
+        return entry.findAll(properties.value.substring(bodyStart, bodyEnd)).map { match ->
+            LocalPomProperty(
+                name = match.groups[2]?.value.orEmpty(),
+                value = match.groups[3]?.value?.trim().orEmpty(),
+                comment = match.groups[1]?.value?.trim()?.takeIf(String::isNotBlank),
+            )
+        }.toList()
+    }
+
+    fun upsertProperty(
+        content: String,
+        propertyName: String,
+        value: String,
+        comment: String? = null,
+    ): PomPropertyUpdate {
+        requireSafePropertyName(propertyName)
+        requireSafeVersion(value)
+        require(comment?.contains("--") != true) { "An XML comment cannot contain '--'." }
+        val existing = updateProperty(content, propertyName, value)
+        if (existing.found) return PomPropertyUpdate(existing.content, existing.changed)
+
+        val commentLine = comment?.trim()?.takeIf(String::isNotBlank)?.let { "        <!-- $it -->\n" }.orEmpty()
+        val propertyLine = "        <$propertyName>$value</$propertyName>\n"
+        val properties = tagMatches(content, "properties", ranges(content, "<!--", "-->"))
+            .firstOrNull()
+        val updated = if (properties != null) {
+            val closing = content.indexOf("</properties>", properties.range.first)
+            if (closing < 0) return PomPropertyUpdate(content, changed = false)
+            content.replaceRange(closing, closing, commentLine + propertyLine)
+        } else {
+            val projectClosing = content.lastIndexOf("</project>")
+            if (projectClosing < 0) return PomPropertyUpdate(content, changed = false)
+            val block = "    <properties>\n$commentLine$propertyLine    </properties>\n"
+            content.replaceRange(projectClosing, projectClosing, block)
+        }
+        return PomPropertyUpdate(updated, changed = true)
+    }
+
+    fun removeProperty(content: String, propertyName: String): PomPropertyUpdate {
+        requireSafePropertyName(propertyName)
+        val properties = tagMatches(content, "properties", ranges(content, "<!--", "-->"))
+            .firstOrNull() ?: return PomPropertyUpdate(content, changed = false)
+        val property = Regex(
+            "(?:[ \\t]*<!--(?:(?!-->).)*-->\\s*)?[ \\t]*<${Regex.escape(propertyName)}>.*?</${Regex.escape(propertyName)}>\\s*",
+            setOf(RegexOption.DOT_MATCHES_ALL),
+        ).find(properties.value) ?: return PomPropertyUpdate(content, changed = false)
+        val absoluteRange = IntRange(
+            properties.range.first + property.range.first,
+            properties.range.first + property.range.last,
+        )
+        return PomPropertyUpdate(content.replaceRange(absoluteRange, ""), changed = true)
     }
 
     fun update(
@@ -200,6 +273,10 @@ object PomReferenceVersionEditor {
         require(version.none { it == '<' || it == '>' || it == '&' }) {
             "The target version contains characters that are unsafe in XML."
         }
+    }
+
+    private fun requireSafePropertyName(name: String) {
+        require(Regex("[A-Za-z_][A-Za-z0-9_.-]*").matches(name)) { "The Maven property name is invalid." }
     }
 
     private fun matchesCoordinates(block: String, target: MavenCoordinates): Boolean =
