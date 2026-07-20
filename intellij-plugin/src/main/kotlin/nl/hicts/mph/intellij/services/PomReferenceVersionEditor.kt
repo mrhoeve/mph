@@ -13,31 +13,44 @@ data class PomReferenceUpdate(
         get() = updatedReferenceCount > 0
 }
 
+data class PomProjectVersionUpdate(
+    val content: String,
+    val changed: Boolean,
+    val unresolvedProperty: String? = null,
+)
+
 object PomReferenceVersionEditor {
     private val propertyReference = Regex("^\\$\\{([^}]+)}$")
 
     fun findProjectVersion(content: String): String? {
-        val ignoredTags = listOf(
-            "parent",
-            "dependencies",
-            "dependencyManagement",
-            "build",
-            "profiles",
-            "properties",
-            "reporting",
-            "repositories",
-            "pluginRepositories",
-            "distributionManagement",
-        )
-        val ignoredRanges = ignoredTags.flatMap { tag -> tagRanges(content, tag, emptyList()) }
-        val version = Regex("<version>\\s*(.*?)\\s*</version>", setOf(RegexOption.DOT_MATCHES_ALL))
-            .findAll(content)
-            .firstOrNull { match -> ignoredRanges.none { match.range.first in it } }
+        val version = projectVersionMatch(content)
             ?.groups?.get(1)?.value?.trim()
             ?.takeIf(String::isNotBlank)
             ?: return null
         val propertyName = propertyReference.matchEntire(version)?.groups?.get(1)?.value ?: return version
         return findPropertyValue(content, propertyName)
+    }
+
+    fun updateProjectVersion(content: String, newVersion: String): PomProjectVersionUpdate {
+        requireSafeVersion(newVersion)
+        val version = projectVersionMatch(content)
+            ?: return PomProjectVersionUpdate(content, changed = false)
+        val value = version.groups[1] ?: return PomProjectVersionUpdate(content, changed = false)
+        val oldVersion = value.value.trim()
+        val propertyName = propertyReference.matchEntire(oldVersion)?.groups?.get(1)?.value
+        if (propertyName != null) {
+            val propertyUpdate = updateProperty(content, propertyName, newVersion)
+            return PomProjectVersionUpdate(
+                content = propertyUpdate.content,
+                changed = propertyUpdate.changed,
+                unresolvedProperty = propertyName.takeUnless { propertyUpdate.found },
+            )
+        }
+        if (oldVersion == newVersion) return PomProjectVersionUpdate(content, changed = false)
+        return PomProjectVersionUpdate(
+            content = content.replaceRange(value.range, newVersion),
+            changed = true,
+        )
     }
 
     fun update(
@@ -46,10 +59,7 @@ object PomReferenceVersionEditor {
         newVersion: String,
         referenceKinds: Set<MavenReferenceKind>,
     ): PomReferenceUpdate {
-        require(newVersion.isNotBlank()) { "The target version must not be blank." }
-        require(newVersion.none { it == '<' || it == '>' || it == '&' }) {
-            "The target version contains characters that are unsafe in XML."
-        }
+        requireSafeVersion(newVersion)
 
         val comments = ranges(content, "<!--", "-->")
         val dependencyManagement = tagRanges(content, "dependencyManagement", comments)
@@ -164,6 +174,32 @@ object PomReferenceVersionEditor {
                 ?.groups?.get(1)?.value?.trim()?.takeIf(String::isNotBlank)
         }
         return null
+    }
+
+    private fun projectVersionMatch(content: String): MatchResult? {
+        val ignoredTags = listOf(
+            "parent",
+            "dependencies",
+            "dependencyManagement",
+            "build",
+            "profiles",
+            "properties",
+            "reporting",
+            "repositories",
+            "pluginRepositories",
+            "distributionManagement",
+        )
+        val ignoredRanges = ignoredTags.flatMap { tag -> tagRanges(content, tag, emptyList()) }
+        return Regex("<version>\\s*(.*?)\\s*</version>", setOf(RegexOption.DOT_MATCHES_ALL))
+            .findAll(content)
+            .firstOrNull { match -> ignoredRanges.none { match.range.first in it } }
+    }
+
+    private fun requireSafeVersion(version: String) {
+        require(version.isNotBlank()) { "The target version must not be blank." }
+        require(version.none { it == '<' || it == '>' || it == '&' }) {
+            "The target version contains characters that are unsafe in XML."
+        }
     }
 
     private fun matchesCoordinates(block: String, target: MavenCoordinates): Boolean =

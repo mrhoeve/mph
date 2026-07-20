@@ -56,7 +56,7 @@ intellijPlatform {
         }
 
         description = """
-            A native IntelliJ IDEA prototype for exploring Maven projects across a multi-repository workspace.
+            Manage versions, builds, dependencies, and Git synchronization across a Maven workspace from IntelliJ IDEA.
         """.trimIndent()
 
         vendor {
@@ -77,8 +77,13 @@ kover {
             excludes {
                 classes(
                     "nl.hicts.mph.intellij.actions.UpdateDependentProjectsAction",
+                    "nl.hicts.mph.intellij.services.BulkVersionUpdateService",
                     "nl.hicts.mph.intellij.services.DependentProjectVersionUpdateService",
+                    "nl.hicts.mph.intellij.services.GitRebaseService",
                     "nl.hicts.mph.intellij.services.IdeaProjectDiscoveryService",
+                    "nl.hicts.mph.intellij.services.MavenBuildService",
+                    "nl.hicts.mph.intellij.ui.GitRebaseDialog",
+                    "nl.hicts.mph.intellij.ui.MavenBuildDialog",
                     "nl.hicts.mph.intellij.ui.MphToolWindowFactory",
                 )
             }

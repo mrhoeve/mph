@@ -4,7 +4,7 @@
     <vendor>MPH</vendor>
 
     <description><![CDATA[
-        A native IntelliJ IDEA prototype for exploring Maven projects across a multi-repository workspace.
+        Manage versions, builds, dependencies, and Git synchronization across a Maven workspace from IntelliJ IDEA.
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>

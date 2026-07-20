@@ -6,14 +6,18 @@ import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.ActionPlaces
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DefaultActionGroup
+import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.service
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
+import com.intellij.notification.NotificationGroupManager
+import com.intellij.notification.NotificationType
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.SimpleToolWindowPanel
+import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.openapi.vfs.newvfs.BulkFileListener
@@ -30,6 +34,9 @@ import nl.hicts.mph.intellij.model.GitProjectGroup
 import nl.hicts.mph.intellij.model.MavenProjectInfo
 import nl.hicts.mph.intellij.model.ProjectSnapshot
 import nl.hicts.mph.intellij.services.IdeaProjectDiscoveryService
+import nl.hicts.mph.intellij.services.BulkVersionUpdateRequest
+import nl.hicts.mph.intellij.services.BulkVersionUpdateService
+import nl.hicts.mph.intellij.services.GitRebaseService
 import java.awt.BorderLayout
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
@@ -58,14 +65,57 @@ class MphToolWindowPanel(
     private val rootNode = DefaultMutableTreeNode("Maven Projects")
     private val treeModel = DefaultTreeModel(rootNode)
     private val tree = Tree(treeModel)
+    private var snapshot = ProjectSnapshot(emptyList())
 
     init {
         val refreshAction = object : DumbAwareAction("Refresh", "Refresh Maven projects", null) {
             override fun actionPerformed(event: AnActionEvent) = refresh()
         }
+        val alignVersionsAction = object : DumbAwareAction(
+            "Align Versions",
+            "Add or remove a version prefix across the selected Maven projects",
+            AllIcons.Actions.Edit,
+        ) {
+            override fun actionPerformed(event: AnActionEvent) = alignSelectedVersions()
+
+            override fun update(event: AnActionEvent) {
+                event.presentation.isEnabled = selectedProjects().isNotEmpty()
+            }
+
+            override fun getActionUpdateThread() = ActionUpdateThread.EDT
+        }
+        val buildAction = object : DumbAwareAction(
+            "Build",
+            "Run Maven for the selected projects",
+            AllIcons.Actions.Compile,
+        ) {
+            override fun actionPerformed(event: AnActionEvent) {
+                val selected = selectedBuildProjects()
+                if (selected.isNotEmpty()) MavenBuildDialog(project, selected).show()
+            }
+
+            override fun update(event: AnActionEvent) {
+                event.presentation.isEnabled = selectedBuildProjects().isNotEmpty()
+            }
+
+            override fun getActionUpdateThread() = ActionUpdateThread.EDT
+        }
+        val rebaseAction = object : DumbAwareAction(
+            "Sync with develop",
+            "Stash changes, rebase selected repositories on develop, restore work, and realign versions",
+            AllIcons.Vcs.Branch,
+        ) {
+            override fun actionPerformed(event: AnActionEvent) = openRebaseDialog()
+
+            override fun update(event: AnActionEvent) {
+                event.presentation.isEnabled = selectedProjects().any { !it.gitRootPath.isNullOrBlank() }
+            }
+
+            override fun getActionUpdateThread() = ActionUpdateThread.EDT
+        }
         val toolbar = ActionManager.getInstance().createActionToolbar(
             ActionPlaces.TOOLWINDOW_TOOLBAR_BAR,
-            DefaultActionGroup(refreshAction),
+            DefaultActionGroup(alignVersionsAction, buildAction, rebaseAction, refreshAction),
             true,
         )
         toolbar.targetComponent = this
@@ -73,7 +123,7 @@ class MphToolWindowPanel(
 
         tree.isRootVisible = false
         tree.showsRootHandles = true
-        tree.selectionModel.selectionMode = javax.swing.tree.TreeSelectionModel.SINGLE_TREE_SELECTION
+        tree.selectionModel.selectionMode = javax.swing.tree.TreeSelectionModel.DISCONTIGUOUS_TREE_SELECTION
         tree.emptyText.text = "No linked Maven projects"
         tree.cellRenderer = MphProjectTreeRenderer()
         TreeSpeedSearch.installOn(tree, true) { path -> path.lastPathComponent.toString() }
@@ -138,6 +188,7 @@ class MphToolWindowPanel(
         }
 
     internal fun render(snapshot: ProjectSnapshot) {
+        this.snapshot = snapshot
         rootNode.removeAllChildren()
         snapshot.groups.forEach { group -> rootNode.add(groupNode(group)) }
         treeModel.reload()
@@ -147,7 +198,7 @@ class MphToolWindowPanel(
 
     private fun groupNode(group: GitProjectGroup): DefaultMutableTreeNode {
         val label = group.rootPath?.let { Path.of(it).fileName?.toString() ?: it } ?: "Outside a Git repository"
-        val repository = RepositoryTreeEntry(label, group.rootPath, group.projects.size)
+        val repository = RepositoryTreeEntry(label, group.rootPath, group.projects)
         return DefaultMutableTreeNode(repository).also { node ->
             group.projects.forEach { node.add(DefaultMutableTreeNode(ProjectTreeEntry(it))) }
         }
@@ -181,6 +232,79 @@ class MphToolWindowPanel(
         openPom(projectInfo.pomPath)
     }
 
+    internal fun selectedProjects(): List<MavenProjectInfo> = tree.selectionPaths.orEmpty()
+        .flatMap { path ->
+            when (val entry = (path.lastPathComponent as? DefaultMutableTreeNode)?.userObject) {
+                is ProjectTreeEntry -> listOf(entry.project)
+                is RepositoryTreeEntry -> entry.projects
+                else -> emptyList()
+            }
+        }
+        .distinctBy(MavenProjectInfo::pomPath)
+
+    internal fun selectedBuildProjects(): List<MavenProjectInfo> = tree.selectionPaths.orEmpty()
+        .flatMap { path ->
+            when (val entry = (path.lastPathComponent as? DefaultMutableTreeNode)?.userObject) {
+                is ProjectTreeEntry -> listOf(entry.project)
+                is RepositoryTreeEntry -> listOfNotNull(entry.rootProject())
+                else -> emptyList()
+            }
+        }
+        .distinctBy(MavenProjectInfo::pomPath)
+
+    private fun alignSelectedVersions() {
+        val selected = selectedProjects()
+        if (selected.isEmpty()) return
+        val dialog = BulkVersionUpdateDialog(project, selected)
+        if (!dialog.showAndGet()) return
+
+        val result = project.service<BulkVersionUpdateService>().update(
+            BulkVersionUpdateRequest(
+                selectedProjects = selected,
+                workspaceProjects = snapshot.groups.flatMap(GitProjectGroup::projects),
+                prefix = dialog.prefix,
+                mode = dialog.mode,
+                updateDependents = dialog.updateDependents,
+            ),
+        )
+        val summary = buildString {
+            append("Updated ${result.updatedProjectCount} project")
+            if (result.updatedProjectCount != 1) append('s')
+            append(" and ${result.updatedReferenceCount} dependent reference")
+            if (result.updatedReferenceCount != 1) append('s')
+            append(". Changes remain uncommitted and can be undone together.")
+            if (result.issues.isNotEmpty()) {
+                append("<br><br>")
+                append(result.issues.joinToString("<br>") { issue -> "• $issue" })
+            }
+        }
+        NotificationGroupManager.getInstance()
+            .getNotificationGroup("Maven Project Helper")
+            .createNotification(
+                "Maven version alignment completed",
+                summary,
+                if (result.issues.isEmpty()) NotificationType.INFORMATION else NotificationType.WARNING,
+            )
+            .notify(project)
+    }
+
+    private fun openRebaseDialog() {
+        val selected = selectedProjects()
+        if (selected.isEmpty()) return
+        val workspaceProjects = snapshot.groups.flatMap(GitProjectGroup::projects)
+        val plan = try {
+            project.service<GitRebaseService>().createPlan(selected, workspaceProjects)
+        } catch (error: IllegalArgumentException) {
+            Messages.showErrorDialog(
+                project,
+                error.message ?: "The selected repositories cannot be rebased safely.",
+                "Cannot Synchronize Repositories",
+            )
+            return
+        }
+        GitRebaseDialog(project, plan, workspaceProjects).show()
+    }
+
     override fun dispose() = Unit
 }
 
@@ -197,8 +321,19 @@ internal data class ProjectTreeEntry(
 internal data class RepositoryTreeEntry(
     val label: String,
     val rootPath: String?,
-    val projectCount: Int,
+    val projects: List<MavenProjectInfo>,
 ) {
+    val projectCount: Int
+        get() = projects.size
+
+    fun rootProject(): MavenProjectInfo? {
+        val root = rootPath?.let(Path::of)?.toAbsolutePath()?.normalize()
+        return projects.minByOrNull { project ->
+            val parent = Path.of(project.pomPath).toAbsolutePath().normalize().parent
+            if (root != null && parent.startsWith(root)) root.relativize(parent).nameCount else parent.nameCount
+        }
+    }
+
     override fun toString(): String = label
 }
 

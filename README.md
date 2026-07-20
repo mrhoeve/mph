@@ -103,11 +103,11 @@ To prevent merging until CI succeeds, create a repository ruleset under **GitHub
 
 The ruleset is the enforcement layer: a workflow reports the check result, while GitHub branch rules decide whether that result blocks a merge. The release app token is generated only after the reusable CI workflow has passed and is restricted to the `release` environment.
 
-## IntelliJ IDEA plugin prototype
+## IntelliJ IDEA plugin
 
-The [`intellij-plugin`](intellij-plugin) module is the first prototype of MPH as a native IntelliJ IDEA plugin. Its **MPH** tool window uses IDEA's linked Maven projects and registered Git roots directly, shows project coordinates and versions grouped by repository, and opens a project's `pom.xml` on double-click. A context-aware **Update Dependent Maven Projects…** action previews linked modules that reference the selected POM as a parent, dependency, or managed dependency, then updates their local version references as one undoable IntelliJ command after confirmation.
+The [`intellij-plugin`](intellij-plugin) module brings the core MPH workflows into IntelliJ IDEA. Its **MPH** tool window uses IDEA's linked Maven projects and registered Git roots directly, groups modules by repository, and supports multi-selection for bulk version alignment, Maven builds, and synchronizing prefixed feature branches with `develop`. A context-aware **Update Dependent Maven Projects…** action remains available from a `pom.xml` to update just that project's dependent references.
 
-The prototype deliberately keeps all write, build, and Git operations disabled while the project-model integration is validated. See the [plugin README](intellij-plugin/README.md) for development, installation, and verification commands.
+Version edits are performed as undoable IntelliJ changes and remain uncommitted. Maven output is streamed into an IDE console. The Git workflow performs safety checks, processes repositories sequentially, preserves stashes when manual intervention is required, and aligns versions only after every selected repository rebases successfully. See the [plugin README](intellij-plugin/README.md) for usage, development, installation, and verification commands.
 
 ## Local verification build
 

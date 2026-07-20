@@ -47,7 +47,7 @@ function Invoke-CheckedCommand {
     param(
         [Parameter(Mandatory)] [string]$Description,
         [Parameter(Mandatory)] [string]$Command,
-        [Parameter(Mandatory)] [string[]]$Arguments,
+        [string[]]$Arguments = @(),
         [Parameter(Mandatory)] [string]$WorkingDirectory
     )
 
