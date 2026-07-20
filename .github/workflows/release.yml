@@ -39,6 +39,7 @@ jobs:
     uses: ./.github/workflows/build-and-publish.yml
     with:
       release_version: ${{ inputs.release_version }}
+      release_build: true
     secrets:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
@@ -71,12 +72,27 @@ jobs:
         distribution: 'temurin'
         cache: maven
 
-    - name: Download verified release artifact
+    - name: Download verified application artifact
       uses: actions/download-artifact@v7
       with:
         name: mph-jar
-        path: .
-        merge-multiple: true
+        path: release-assets
+
+    - name: Download verified IntelliJ plugin artifact
+      uses: actions/download-artifact@v7
+      with:
+        name: mph-intellij-plugin
+        path: release-assets
+
+    - name: Verify release assets
+      env:
+        RELEASE_VERSION: ${{ needs.build.outputs.version }}
+      run: |
+        test -f release-assets/mph.jar || { echo "::error::Verified application artifact is missing."; exit 1; }
+        test -f "release-assets/mph-intellij-plugin-$RELEASE_VERSION.zip" || {
+          echo "::error::Verified IntelliJ plugin for version $RELEASE_VERSION is missing."
+          exit 1
+        }
 
     - name: Get GitHub App user ID
       id: app-user
@@ -171,7 +187,9 @@ jobs:
         tag_name: v${{ needs.build.outputs.version }}
         name: Release v${{ needs.build.outputs.version }}
         body: "Manual release of version ${{ needs.build.outputs.version }} from the verified develop branch."
-        files: mph.jar
+        files: |
+          release-assets/mph.jar
+          release-assets/mph-intellij-plugin-${{ needs.build.outputs.version }}.zip
         prerelease: false
         make_latest: "true"
         generate_release_notes: true

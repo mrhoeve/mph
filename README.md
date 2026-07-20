@@ -62,7 +62,7 @@ After successful verification, the release workflow:
 2. Removes `-SNAPSHOT` (or applies the manually supplied release version), creates the release commit, and tags it.
 3. Creates a second commit containing the next development `-SNAPSHOT` version.
 4. Atomically advances `main` to the tagged release commit, advances `develop` to the next development commit, and pushes the tag.
-5. Creates the GitHub release from the already verified JAR.
+5. Creates the GitHub release from the already verified application JAR and IntelliJ plugin ZIP. Both artifacts use the same release version.
 
 For example, releasing `0.23-SNAPSHOT` creates `v0.23` on `main` and leaves `develop` at `0.24-SNAPSHOT`. Both versions can be overridden in the manual workflow form.
 

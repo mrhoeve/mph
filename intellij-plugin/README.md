@@ -50,3 +50,5 @@ Generate the JaCoCo-compatible Kover XML report used by the combined project Son
 ```
 
 The prototype currently targets IntelliJ IDEA 2026.1.
+
+The plugin version is derived from the root Maven `pom.xml`, so local application and plugin packages always use the same version. Release verification uses the `releaseBuild` Gradle property to remove `-SNAPSHOT`, or supplies an explicit `mphVersion` when the manual release version is overridden.
