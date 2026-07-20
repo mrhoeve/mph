@@ -56,6 +56,8 @@ GitHub Actions runs the frontend and backend unit tests on every push and pull r
 
 Every push also builds the application and runs SonarQube Cloud analysis. Releases use a separate **Release** workflow that must be started manually with `develop` selected in GitHub Actions. Selecting another branch fails before verification or publication. The workflow verifies the exact `develop` commit with the complete CI workflow, including its tests and SonarQube quality gate, and aborts if `develop` changes while verification is running.
 
+After a successful push to any branch except `main`, CI also publishes a mutable GitHub pre-release for that branch. For example, `feature/plugin` produces tag `snapshot-feature-plugin`, application asset `mph-feature-plugin-SNAPSHOT.jar`, and plugin asset `mph-intellij-plugin-feature-plugin-SNAPSHOT.zip`. A later successful push to the same branch replaces that pre-release and its assets. Failed builds and pull-request-only runs never update snapshots, and snapshots never affect the immutable production releases or GitHub's latest-release designation.
+
 After successful verification, the release workflow:
 
 1. Confirms that `main` is an ancestor of the verified `develop` commit.

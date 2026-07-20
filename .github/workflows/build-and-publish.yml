@@ -203,3 +203,98 @@ jobs:
       with:
         name: mph-jar
         path: target/mph.jar
+
+  branch-snapshot:
+    name: Publish branch snapshot
+    if: >-
+      ${{ github.event_name == 'push' &&
+          github.ref_type == 'branch' &&
+          github.ref_name != 'main' }}
+    needs:
+    - intellij-plugin
+    - build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: branch-snapshot-${{ github.ref }}
+      cancel-in-progress: true
+
+    steps:
+    - name: Download verified application artifact
+      uses: actions/download-artifact@v8
+      with:
+        name: mph-jar
+        path: snapshot-assets/application
+
+    - name: Download verified IntelliJ plugin artifact
+      uses: actions/download-artifact@v8
+      with:
+        name: mph-intellij-plugin
+        path: snapshot-assets/plugin
+
+    - name: Prepare branch snapshot assets
+      id: snapshot
+      env:
+        BRANCH_NAME: ${{ github.ref_name }}
+      run: |
+        set -euo pipefail
+
+        BRANCH_SLUG=$(printf '%s' "$BRANCH_NAME" |
+          tr '[:upper:]' '[:lower:]' |
+          sed -E 's/[^a-z0-9._-]+/-/g; s/^-+//; s/-+$//')
+        if [[ -z "$BRANCH_SLUG" ]]; then
+          echo "::error::The branch name could not be converted to a safe snapshot name."
+          exit 1
+        fi
+
+        mapfile -t PLUGIN_FILES < <(find snapshot-assets/plugin -type f -name '*.zip')
+        if [[ ${#PLUGIN_FILES[@]} -ne 1 ]]; then
+          echo "::error::Expected exactly one IntelliJ plugin ZIP, found ${#PLUGIN_FILES[@]}."
+          exit 1
+        fi
+        if [[ ! -f snapshot-assets/application/mph.jar ]]; then
+          echo "::error::The verified application JAR is missing."
+          exit 1
+        fi
+
+        SNAPSHOT_TAG="snapshot-$BRANCH_SLUG"
+        SNAPSHOT_TITLE="Snapshot: $BRANCH_NAME"
+        APPLICATION_ASSET="mph-$BRANCH_SLUG-SNAPSHOT.jar"
+        PLUGIN_ASSET="mph-intellij-plugin-$BRANCH_SLUG-SNAPSHOT.zip"
+
+        cp snapshot-assets/application/mph.jar "snapshot-assets/$APPLICATION_ASSET"
+        cp "${PLUGIN_FILES[0]}" "snapshot-assets/$PLUGIN_ASSET"
+
+        echo "tag=$SNAPSHOT_TAG" >> "$GITHUB_OUTPUT"
+        echo "title=$SNAPSHOT_TITLE" >> "$GITHUB_OUTPUT"
+        echo "application_asset=snapshot-assets/$APPLICATION_ASSET" >> "$GITHUB_OUTPUT"
+        echo "plugin_asset=snapshot-assets/$PLUGIN_ASSET" >> "$GITHUB_OUTPUT"
+
+    - name: Replace mutable branch snapshot
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+        SNAPSHOT_TAG: ${{ steps.snapshot.outputs.tag }}
+        SNAPSHOT_TITLE: ${{ steps.snapshot.outputs.title }}
+        APPLICATION_ASSET: ${{ steps.snapshot.outputs.application_asset }}
+        PLUGIN_ASSET: ${{ steps.snapshot.outputs.plugin_asset }}
+        BRANCH_NAME: ${{ github.ref_name }}
+        VERIFIED_SHA: ${{ github.sha }}
+      run: |
+        set -euo pipefail
+
+        if gh release view "$SNAPSHOT_TAG" >/dev/null 2>&1; then
+          gh release delete "$SNAPSHOT_TAG" --cleanup-tag --yes
+        elif gh api "repos/$GH_REPO/git/ref/tags/$SNAPSHOT_TAG" >/dev/null 2>&1; then
+          gh api --method DELETE "repos/$GH_REPO/git/refs/tags/$SNAPSHOT_TAG"
+        fi
+
+        gh release create "$SNAPSHOT_TAG" \
+          "$APPLICATION_ASSET" \
+          "$PLUGIN_ASSET" \
+          --target "$VERIFIED_SHA" \
+          --title "$SNAPSHOT_TITLE" \
+          --notes "Mutable snapshot of branch '$BRANCH_NAME' at commit $VERIFIED_SHA. It passed the complete build, test, Playwright, plugin-verification, and SonarQube quality-gate workflow." \
+          --prerelease \
+          --latest=false
