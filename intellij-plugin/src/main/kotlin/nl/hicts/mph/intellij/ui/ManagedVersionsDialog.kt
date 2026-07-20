@@ -25,7 +25,6 @@ import javax.swing.JButton
 import javax.swing.JComponent
 import javax.swing.JPanel
 import javax.swing.event.DocumentEvent
-import javax.swing.event.ListSelectionEvent
 import javax.swing.table.DefaultTableModel
 
 class ManagedVersionsDialog(
@@ -53,7 +52,7 @@ class ManagedVersionsDialog(
             override fun textChanged(event: DocumentEvent) = refreshTable()
         })
         overridesOnly.addActionListener { refreshTable() }
-        table.selectionModel.addListSelectionListener(::selectionChanged)
+        table.selectionModel.addListSelectionListener { selectionChanged() }
         table.setShowGrid(false)
         table.rowHeight = JBUI.scale(28)
         table.columnModel.getColumn(0).preferredWidth = JBUI.scale(240)
@@ -105,10 +104,10 @@ class ManagedVersionsDialog(
         summary.foreground = JBUI.CurrentTheme.ContextHelp.FOREGROUND
         springBootButton.isVisible = analysis.springBoot != null
         springBootButton.text = analysis.springBoot?.let { "Upgrade Spring Boot ${it.currentVersion}" } ?: "Upgrade Spring Boot"
-        selectionChanged(null)
+        selectionChanged()
     }
 
-    private fun selectionChanged(event: ListSelectionEvent?) {
+    private fun selectionChanged() {
         val selected = selectedProperty()
         overrideButton.isEnabled = selected != null
         removeButton.isEnabled = selected?.isOverridden == true

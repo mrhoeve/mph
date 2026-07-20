@@ -55,4 +55,74 @@ class NexusIqSupportTest {
         assertFalse(result.violations.single().waived)
         assertEquals(listOf("Known vulnerability"), result.violations.single().reasons)
     }
+
+    @Test
+    fun `summarizes every Nexus IQ threat band`() {
+        val report = NexusIqReport(
+            null,
+            listOf(9, 7, 4, 3, 2, 1, 0).map { level ->
+                NexusIqViolation("component-$level", "policy", level, emptyList(), false, false)
+            },
+        )
+
+        assertEquals(1, report.critical)
+        assertEquals(2, report.severe)
+        assertEquals(2, report.moderate)
+        assertEquals(2, report.low)
+    }
+
+    @Test
+    fun `handles incomplete application and report API responses`() {
+        assertNull(NexusIqSupport.internalApplicationId("""{"applications":["invalid",{"publicId":"other"}]}""", "sample"))
+        assertNull(NexusIqSupport.internalApplicationId("""{"applications":[{"publicId":"sample","id":null}]}""", "sample"))
+        assertNull(NexusIqSupport.latestReport("[]", "https://iq.example.org"))
+        assertNull(
+            NexusIqSupport.latestReport(
+                """["invalid",{"evaluationDate":"2026-01-01T00:00:00Z"}]""",
+                "https://iq.example.org",
+            ),
+        )
+        assertNull(
+            NexusIqSupport.latestReport(
+                """[{"evaluationDate":"2026-01-01T00:00:00Z","reportHtmlUrl":"/without-report-id"}]""",
+                "https://iq.example.org",
+            ),
+        )
+        assertEquals(
+            "https://reports.example.org/report/absolute" to "absolute",
+            NexusIqSupport.latestReport(
+                """[{"evaluationDate":"2026-01-01T00:00:00Z","reportHtmlUrl":"https://reports.example.org/report/absolute"}]""",
+                "https://iq.example.org",
+            ),
+        )
+        assertEquals(
+            "http://reports.example.org/report/plain" to "plain",
+            NexusIqSupport.latestReport(
+                """[{"evaluationDate":null,"reportHtmlUrl":"http://reports.example.org/report/plain"}]""",
+                "https://iq.example.org",
+            ),
+        )
+    }
+
+    @Test
+    fun `parses optional policy fields with safe defaults`() {
+        assertTrue(NexusIqSupport.policyReport("{}", null).violations.isEmpty())
+        val policy = """{
+          "components": [
+            {"componentIdentifier":{"format":"maven"},"violations":[{"policyThreatLevel":2,"waived":true}]},
+            {"packageUrl":"pkg:maven/org.example/sample@1","violations":[{"policyName":null,"policyThreatCategory":null}]},
+            {"violations":[{"constraints":[{"conditions":[{}, {"conditionReason":null}]}]}]},
+            {"displayName":"no-violations"}
+          ]
+        }"""
+
+        val result = NexusIqSupport.policyReport(policy, null)
+
+        assertEquals(3, result.violations.size)
+        assertEquals(1, result.moderate)
+        assertEquals(2, result.low)
+        assertTrue(result.violations.any { it.component.contains("maven") && it.waived })
+        assertTrue(result.violations.any { it.component.startsWith("pkg:maven") && !it.direct })
+        assertTrue(result.violations.any { it.component == "Unknown component" && it.reasons.isEmpty() })
+    }
 }
