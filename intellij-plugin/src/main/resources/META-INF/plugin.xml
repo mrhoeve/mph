@@ -22,6 +22,11 @@
                 anchor="right"
                 icon="/icons/mph.svg"
                 factoryClass="nl.hicts.mph.intellij.ui.MphToolWindowFactory"/>
+        <applicationConfigurable
+                parentId="tools"
+                instance="nl.hicts.mph.intellij.ui.NexusIqConfigurable"
+                id="nl.hicts.mph.intellij.settings"
+                displayName="Maven Project Helper"/>
     </extensions>
 
     <actions>

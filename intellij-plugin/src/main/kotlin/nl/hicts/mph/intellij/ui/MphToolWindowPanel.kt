@@ -10,6 +10,7 @@ import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.service
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
+import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.progress.ProgressIndicator
@@ -37,6 +38,9 @@ import nl.hicts.mph.intellij.services.IdeaProjectDiscoveryService
 import nl.hicts.mph.intellij.services.BulkVersionUpdateRequest
 import nl.hicts.mph.intellij.services.BulkVersionUpdateService
 import nl.hicts.mph.intellij.services.GitRebaseService
+import nl.hicts.mph.intellij.services.IntellijSbomService
+import nl.hicts.mph.intellij.services.NexusIqSettings
+import nl.hicts.mph.intellij.model.WorkspaceDependencyAnalyzer
 import java.awt.BorderLayout
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
@@ -113,9 +117,111 @@ class MphToolWindowPanel(
 
             override fun getActionUpdateThread() = ActionUpdateThread.EDT
         }
+        val dependenciesAction = object : DumbAwareAction(
+            "Dependencies",
+            "Explore direct Maven dependencies and workspace dependents",
+            AllIcons.Nodes.PpLib,
+        ) {
+            override fun actionPerformed(event: AnActionEvent) = openDependencyExplorer()
+
+            override fun update(event: AnActionEvent) {
+                event.presentation.isEnabled = selectedBuildProjects().size == 1
+            }
+
+            override fun getActionUpdateThread() = ActionUpdateThread.EDT
+        }
+        val buildOrderAction = object : DumbAwareAction(
+            "Build Order",
+            "Calculate repository build stages from Maven dependencies",
+            AllIcons.Actions.Preview,
+        ) {
+            override fun actionPerformed(event: AnActionEvent) = openBuildOrder()
+
+            override fun update(event: AnActionEvent) {
+                event.presentation.isEnabled = snapshot.projectCount > 0
+            }
+
+            override fun getActionUpdateThread() = ActionUpdateThread.EDT
+        }
+        val managedVersionsAction = object : DumbAwareAction(
+            "Managed Versions",
+            "Inspect and override managed Maven version properties or upgrade Spring Boot",
+            AllIcons.Nodes.Property,
+        ) {
+            override fun actionPerformed(event: AnActionEvent) {
+                selectedBuildProjects().singleOrNull()?.let { ManagedVersionsDialog(project, it).show() }
+            }
+
+            override fun update(event: AnActionEvent) {
+                event.presentation.isEnabled = selectedBuildProjects().size == 1
+            }
+
+            override fun getActionUpdateThread() = ActionUpdateThread.EDT
+        }
+        val sbomAction = object : DumbAwareAction(
+            "SBOM",
+            "Inspect the resolved dependency tree and export a CycloneDX SBOM",
+            AllIcons.Nodes.PpLibFolder,
+        ) {
+            override fun actionPerformed(event: AnActionEvent) {
+                selectedBuildProjects().singleOrNull()?.let { selected ->
+                    try {
+                        SbomDialog(project, project.service<IntellijSbomService>().inspect(selected)).show()
+                    } catch (error: IllegalArgumentException) {
+                        Messages.showErrorDialog(project, error.message, "Cannot Inspect Dependencies")
+                    }
+                }
+            }
+
+            override fun update(event: AnActionEvent) {
+                event.presentation.isEnabled = selectedBuildProjects().size == 1
+            }
+
+            override fun getActionUpdateThread() = ActionUpdateThread.EDT
+        }
+        val nexusIqAction = object : DumbAwareAction(
+            "Nexus IQ",
+            "Evaluate the selected Maven project and inspect policy violations",
+            AllIcons.General.InspectionsEye,
+        ) {
+            override fun actionPerformed(event: AnActionEvent) {
+                if (!ApplicationManager.getApplication().service<NexusIqSettings>().configured()) {
+                    ShowSettingsUtil.getInstance().showSettingsDialog(project, NexusIqConfigurable::class.java)
+                }
+                if (ApplicationManager.getApplication().service<NexusIqSettings>().configured()) {
+                    selectedBuildProjects().singleOrNull()?.let { NexusIqDialog(project, it).show() }
+                }
+            }
+
+            override fun update(event: AnActionEvent) {
+                event.presentation.isEnabled = selectedBuildProjects().size == 1
+            }
+
+            override fun getActionUpdateThread() = ActionUpdateThread.EDT
+        }
+        val settingsAction = object : DumbAwareAction(
+            "Settings",
+            "Configure Maven Project Helper and Nexus IQ",
+            AllIcons.General.Settings,
+        ) {
+            override fun actionPerformed(event: AnActionEvent) {
+                ShowSettingsUtil.getInstance().showSettingsDialog(project, NexusIqConfigurable::class.java)
+            }
+        }
         val toolbar = ActionManager.getInstance().createActionToolbar(
             ActionPlaces.TOOLWINDOW_TOOLBAR_BAR,
-            DefaultActionGroup(alignVersionsAction, buildAction, rebaseAction, refreshAction),
+            DefaultActionGroup(
+                dependenciesAction,
+                buildOrderAction,
+                managedVersionsAction,
+                sbomAction,
+                nexusIqAction,
+                alignVersionsAction,
+                buildAction,
+                rebaseAction,
+                settingsAction,
+                refreshAction,
+            ),
             true,
         )
         toolbar.targetComponent = this
@@ -303,6 +409,19 @@ class MphToolWindowPanel(
             return
         }
         GitRebaseDialog(project, plan, workspaceProjects).show()
+    }
+
+    private fun openDependencyExplorer() {
+        val selected = selectedBuildProjects().singleOrNull() ?: return
+        val descriptors = project.service<IdeaProjectDiscoveryService>().dependencyDescriptors()
+        val relationships = WorkspaceDependencyAnalyzer().relationships(selected.pomPath, descriptors) ?: return
+        DependencyExplorerDialog(project, relationships, openPom).show()
+    }
+
+    private fun openBuildOrder() {
+        val descriptors = project.service<IdeaProjectDiscoveryService>().dependencyDescriptors()
+        val order = WorkspaceDependencyAnalyzer().buildOrder(descriptors)
+        BuildOrderDialog(project, order, openPom).show()
     }
 
     override fun dispose() = Unit
