@@ -16,11 +16,15 @@ This module provides Maven Project Helper as a native IntelliJ IDEA plugin for m
 - Reports inherited properties and references without a local version instead of modifying them unsafely.
 - Supports selecting multiple modules or complete repositories in the **MPH** tool window.
 - Adds or removes one shared version prefix and optionally updates dependent references across all linked projects as one undoable operation.
-- Runs configurable Maven goals sequentially, preferring each repository's Maven wrapper and streaming output into an IntelliJ console.
+- Sets a project and its modules to a manually entered version or the version found in the latest Git tag, then updates every linked usage.
+- Optionally creates or checks out one shared Git branch before applying a bulk version prefix.
+- Shows each repository's current branch and its ahead/behind status relative to `origin/develop`.
+- Realigns dependent references to the selected projects' current versions without changing those project versions.
+- Runs configurable Maven goals sequentially or in dependency-aware parallel stages, preferring each repository's Maven wrapper and streaming output into an IntelliJ console.
 - Synchronizes prefixed feature branches with `origin/develop`: fetches, safely updates the local `develop` reference, stashes tracked and untracked work, rebases, restores the stash, and reapplies the prefix to the current versions.
 - Explores incoming and outgoing Maven relationships, including dependencies outside the current IDEA workspace.
 - Calculates repository build stages, highlights dependency cycles, builds in that order, and exports the plan as an Excel workbook.
-- Shows effective managed version properties, filters local overrides, adds or removes overrides, and upgrades Spring Boot parent or BOM versions.
+- Shows effective managed version properties, filters local overrides, adds or removes overrides, upgrades Spring Boot parent or BOM versions, and retrieves Nexus IQ remediation recommendations for managed components.
 - Inspects the resolved direct and transitive dependency tree and exports CycloneDX 1.5 JSON or XML SBOMs.
 - Runs Nexus IQ evaluations, retrieves security-policy results, and links directly to the generated report.
 
@@ -31,6 +35,8 @@ After an update, IntelliJ refreshes its linked Maven model automatically. All ch
 Open **View -> Tool Windows -> MPH**. Select modules with Ctrl-click (Cmd-click on macOS), or select a repository row to include all its modules.
 
 - **Align Versions** previews the selected projects, adds or removes a prefix, and can update references in every linked Maven project.
+- **Update Version** accepts an explicit version or discovers it from the latest Git tag, updating modules and usages together.
+- **Realign Versions** repairs linked references using every selected project's current version.
 - **Build** runs `clean install` by default. Unit and integration tests can be enabled in the dialog. Selecting a repository row builds its root POM; selecting individual modules builds those POMs.
 - **Sync with develop** is available for projects in Git repositories. It refuses protected branches (`main`, `master`, and `develop`), detached heads, active Git operations, divergent local `develop` branches, and repositories without `origin/develop`.
 - **Dependencies** shows what the selected module uses and which linked modules use it. Double-click a linked module to open its POM.

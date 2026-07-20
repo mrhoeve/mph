@@ -12,6 +12,20 @@ data class NexusIqViolation(
     val waived: Boolean,
 )
 
+data class NexusComponent(
+    val groupId: String,
+    val artifactId: String,
+    val version: String,
+)
+
+data class NexusComponentFinding(
+    val component: NexusComponent,
+    val threatLevel: Int,
+    val policy: String,
+    val reasons: List<String>,
+    val remediationVersion: String?,
+)
+
 data class NexusIqReport(
     val reportUrl: String?,
     val violations: List<NexusIqViolation>,
@@ -74,6 +88,56 @@ object NexusIqSupport {
             }
         }.sortedWith(compareByDescending<NexusIqViolation> { it.threatLevel }.thenBy(NexusIqViolation::component))
         return NexusIqReport(reportUrl, violations)
+    }
+
+    fun componentDetailsRequest(components: Collection<NexusComponent>): String {
+        val root = JsonObject()
+        val array = com.google.gson.JsonArray()
+        components.distinct().forEach { component ->
+            val coordinates = JsonObject().apply {
+                addProperty("groupId", component.groupId)
+                addProperty("artifactId", component.artifactId)
+                addProperty("version", component.version)
+                addProperty("extension", "jar")
+            }
+            val identifier = JsonObject().apply {
+                addProperty("format", "maven")
+                add("coordinates", coordinates)
+            }
+            array.add(JsonObject().apply { add("componentIdentifier", identifier) })
+        }
+        root.add("components", array)
+        return root.toString()
+    }
+
+    fun componentFindings(json: String): List<NexusComponentFinding> {
+        val details = JsonParser.parseString(json).asJsonObject.getAsJsonArray("componentDetails") ?: return emptyList()
+        return details.flatMap { detailElement ->
+            val detail = detailElement.asJsonObject
+            val coordinates = detail.getAsJsonObject("componentIdentifier")?.getAsJsonObject("coordinates")
+                ?: return@flatMap emptyList()
+            val component = NexusComponent(
+                coordinates.string("groupId").orEmpty(),
+                coordinates.string("artifactId").orEmpty(),
+                coordinates.string("version").orEmpty(),
+            )
+            if (component.groupId.isBlank() || component.artifactId.isBlank()) return@flatMap emptyList()
+            val remediation = detail.getAsJsonObject("remediation")?.string("version")
+            detail.getAsJsonObject("policyData")?.getAsJsonArray("policyViolations").orEmpty().map { violationElement ->
+                val violation = violationElement.asJsonObject
+                NexusComponentFinding(
+                    component,
+                    violation.get("threatLevel")?.asInt ?: 0,
+                    violation.string("policyName").orEmpty(),
+                    violation.getAsJsonArray("constraintViolations").orEmpty().flatMap { constraint ->
+                        constraint.asJsonObject.getAsJsonArray("reasons").orEmpty().mapNotNull { reason ->
+                            reason.asJsonObject.string("reason")
+                        }
+                    }.distinct(),
+                    remediation,
+                )
+            }
+        }.sortedByDescending(NexusComponentFinding::threatLevel)
     }
 
     private fun JsonObject.string(name: String): String? = get(name)?.takeUnless { it.isJsonNull }?.asString
