@@ -74,13 +74,17 @@ class MphToolWindowPanel(
     private var snapshot = ProjectSnapshot(emptyList())
 
     init {
-        val refreshAction = object : DumbAwareAction("Refresh", "Refresh Maven projects", null) {
+        val refreshAction = object : DumbAwareAction(
+            "Refresh",
+            "Refresh Maven projects",
+            AllIcons.Actions.Refresh,
+        ) {
             override fun actionPerformed(event: AnActionEvent) = refresh()
         }
         val alignVersionsAction = object : DumbAwareAction(
             "Align Versions",
             "Add or remove a version prefix across the selected Maven projects",
-            AllIcons.Actions.Edit,
+            MphIcons.VersionsAlign,
         ) {
             override fun actionPerformed(event: AnActionEvent) = alignSelectedVersions()
 
@@ -93,7 +97,7 @@ class MphToolWindowPanel(
         val updateVersionAction = object : DumbAwareAction(
             "Update Version",
             "Set a project version and update all linked usages",
-            AllIcons.Vcs.Branch,
+            MphIcons.VersionTag,
         ) {
             override fun actionPerformed(event: AnActionEvent) = updateSelectedProjectVersion()
             override fun update(event: AnActionEvent) {
@@ -104,7 +108,7 @@ class MphToolWindowPanel(
         val realignVersionsAction = object : DumbAwareAction(
             "Realign Versions",
             "Update linked Maven references to every selected project's current version",
-            AllIcons.Actions.Refresh,
+            MphIcons.VersionsRealign,
         ) {
             override fun actionPerformed(event: AnActionEvent) = realignSelectedVersions()
             override fun update(event: AnActionEvent) {
@@ -163,7 +167,7 @@ class MphToolWindowPanel(
         val buildOrderAction = object : DumbAwareAction(
             "Build Order",
             "Calculate repository build stages from Maven dependencies",
-            AllIcons.Actions.Preview,
+            MphIcons.BuildOrder,
         ) {
             override fun actionPerformed(event: AnActionEvent) = openBuildOrder()
 
