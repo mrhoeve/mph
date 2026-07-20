@@ -13,6 +13,8 @@ import nl.hicts.mph.intellij.model.MavenReferenceKind
 enum class BulkVersionMode(val displayName: String) {
     ADD_PREFIX("Add prefix"),
     REMOVE_PREFIX("Remove prefix"),
+    SET_VERSION("Set explicit version"),
+    KEEP_CURRENT("Realign current versions"),
 }
 
 data class BulkVersionUpdateRequest(
@@ -45,7 +47,9 @@ class BulkVersionUpdateService(
 ) {
     fun update(request: BulkVersionUpdateRequest): BulkVersionUpdateResult {
         require(request.selectedProjects.isNotEmpty()) { "Select at least one Maven project." }
-        require(request.prefix.isNotBlank()) { "Enter a version prefix." }
+        require(request.mode == BulkVersionMode.KEEP_CURRENT || request.prefix.isNotBlank()) {
+            if (request.mode == BulkVersionMode.SET_VERSION) "Enter a target version." else "Enter a version prefix."
+        }
 
         val fileDocumentManager = FileDocumentManager.getInstance()
         val documents = request.workspaceProjects
@@ -113,6 +117,8 @@ class BulkVersionUpdateService(
             when (request.mode) {
                 BulkVersionMode.ADD_PREFIX -> request.prefix + currentVersion
                 BulkVersionMode.REMOVE_PREFIX -> currentVersion.removePrefix(request.prefix)
+                BulkVersionMode.SET_VERSION -> request.prefix
+                BulkVersionMode.KEEP_CURRENT -> currentVersion
             }
         }
 

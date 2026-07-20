@@ -1,6 +1,7 @@
 package nl.hicts.mph.intellij.services
 
 import com.intellij.openapi.components.Service
+import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
 import git4idea.repo.GitRepositoryManager
 import nl.hicts.mph.intellij.model.DependentProjectsAnalysis
@@ -19,7 +20,7 @@ class IdeaProjectDiscoveryService(
 ) {
     fun discover(): ProjectSnapshot {
         val mavenProjects = MavenProjectsManager.getInstance(project).projects
-        return ProjectSnapshotBuilder().build(
+        val snapshot = ProjectSnapshotBuilder().build(
             mavenProjects.map { mavenProject ->
                 MavenProjectDescriptor(
                     groupId = mavenProject.mavenId.groupId,
@@ -30,6 +31,12 @@ class IdeaProjectDiscoveryService(
             },
             gitRootPaths(),
         )
+        val statuses = snapshot.groups.mapNotNull { group ->
+            group.rootPath?.let { it to project.service<GitWorkspaceService>().status(it) }
+        }.toMap()
+        return snapshot.copy(groups = snapshot.groups.map { group ->
+            group.copy(projects = group.projects.map { info -> info.copy(gitStatus = statuses[group.rootPath]) })
+        })
     }
 
     fun findDependents(targetPomPath: String, targetPomContent: String? = null): DependentProjectsAnalysis? {

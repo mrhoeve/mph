@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 enum class MavenBuildStatus {
@@ -27,6 +28,9 @@ data class MavenBuildOptions(
     val goals: List<String> = listOf("clean", "install"),
     val skipUnitTests: Boolean = true,
     val skipIntegrationTests: Boolean = true,
+    val parallel: Boolean = false,
+    val maxParallel: Int = 1,
+    val buildSteps: Map<String, Int> = emptyMap(),
 )
 
 data class MavenProjectBuildResult(
@@ -52,17 +56,50 @@ class MavenBuildService {
     ): List<MavenProjectBuildResult> {
         cancelRequested.set(false)
         return try {
-            projects.distinctBy(MavenProjectInfo::pomPath).map { project ->
-                if (indicator.isCanceled || cancelRequested.get()) {
-                    listener.onEvent(project, MavenBuildStatus.CANCELLED, "Build cancelled before it started.\n")
-                    MavenProjectBuildResult(project, MavenBuildStatus.CANCELLED, null)
-                } else {
-                    runProject(project, options, indicator, listener)
-                }
+            executionStages(projects, options).flatMap { stage ->
+                if (options.parallel && stage.size > 1) runParallel(stage, options, indicator, listener)
+                else stage.map { project -> runOrCancel(project, options, indicator, listener) }
             }
         } finally {
             cancelRequested.set(false)
         }
+    }
+
+    internal fun executionStages(
+        projects: List<MavenProjectInfo>,
+        options: MavenBuildOptions,
+    ): List<List<MavenProjectInfo>> {
+        val unique = projects.distinctBy(MavenProjectInfo::pomPath)
+        if (!options.parallel) return unique.map(::listOf)
+        return unique.groupBy { options.buildSteps[it.pomPath] ?: 1 }.toSortedMap().values.toList()
+    }
+
+    private fun runParallel(
+        projects: List<MavenProjectInfo>,
+        options: MavenBuildOptions,
+        indicator: ProgressIndicator,
+        listener: MavenBuildListener,
+    ): List<MavenProjectBuildResult> {
+        val executor = Executors.newFixedThreadPool(options.maxParallel.coerceIn(1, projects.size))
+        return try {
+            executor.invokeAll(projects.map { project ->
+                java.util.concurrent.Callable { runOrCancel(project, options, indicator, listener) }
+            }).map { it.get() }
+        } finally {
+            executor.shutdownNow()
+        }
+    }
+
+    private fun runOrCancel(
+        project: MavenProjectInfo,
+        options: MavenBuildOptions,
+        indicator: ProgressIndicator,
+        listener: MavenBuildListener,
+    ): MavenProjectBuildResult = if (indicator.isCanceled || cancelRequested.get()) {
+        listener.onEvent(project, MavenBuildStatus.CANCELLED, "Build cancelled before it started.\n")
+        MavenProjectBuildResult(project, MavenBuildStatus.CANCELLED, null)
+    } else {
+        runProject(project, options, indicator, listener)
     }
 
     fun cancel() {

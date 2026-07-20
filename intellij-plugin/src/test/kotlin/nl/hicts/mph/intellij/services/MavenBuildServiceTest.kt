@@ -49,6 +49,24 @@ class MavenBuildServiceTest {
         }
     }
 
+    @Test
+    fun `groups parallel builds by dependency stage`() {
+        val first = project("C:/workspace/first/pom.xml").copy(artifactId = "first")
+        val second = project("C:/workspace/second/pom.xml").copy(artifactId = "second")
+        val third = project("C:/workspace/third/pom.xml").copy(artifactId = "third")
+        val service = MavenBuildService()
+
+        val stages = service.executionStages(
+            listOf(third, first, second),
+            MavenBuildOptions(parallel = true, maxParallel = 2, buildSteps = mapOf(
+                first.pomPath to 1, second.pomPath to 1, third.pomPath to 2,
+            )),
+        )
+
+        assertEquals(listOf(listOf(first, second), listOf(third)), stages)
+        assertEquals(3, service.executionStages(listOf(first, second, third), MavenBuildOptions()).size)
+    }
+
     private fun project(pomPath: String) = MavenProjectInfo(
         groupId = "org.example",
         artifactId = "sample-service",

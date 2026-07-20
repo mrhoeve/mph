@@ -33,16 +33,21 @@ import javax.swing.JButton
 import javax.swing.JComponent
 import javax.swing.JList
 import javax.swing.JPanel
+import javax.swing.JSpinner
+import javax.swing.SpinnerNumberModel
 
 class MavenBuildDialog(
     private val ideProject: Project,
     projects: List<MavenProjectInfo>,
+    private val buildSteps: Map<String, Int> = emptyMap(),
 ) : DialogWrapper(ideProject) {
     private val buildService = ideProject.service<MavenBuildService>()
     private val selectedProjects = projects.distinctBy(MavenProjectInfo::pomPath)
     private val goalsField = JBTextField("clean install")
     private val skipUnitTests = JBCheckBox("Skip unit tests", true)
     private val skipIntegrationTests = JBCheckBox("Skip integration tests", true)
+    private val parallel = JBCheckBox("Run independent projects in parallel", projects.size > 1)
+    private val maxParallel = JSpinner(SpinnerNumberModel(minOf(4, maxOf(1, projects.size)), 1, 32, 1))
     private val startButton = JButton("Run Build", AllIcons.Actions.Execute)
     private val stopButton = JButton("Stop", AllIcons.Actions.Suspend)
     private val statusLabel = JBLabel("Ready to build ${selectedProjects.size} Maven project(s)")
@@ -57,6 +62,8 @@ class MavenBuildDialog(
         selectedProjects.forEach { listModel.addElement(MavenBuildRow(it, MavenBuildStatus.PENDING)) }
         projectList.cellRenderer = MavenBuildRowRenderer()
         stopButton.isEnabled = false
+        parallel.addActionListener { maxParallel.isEnabled = parallel.isSelected }
+        maxParallel.isEnabled = parallel.isSelected
         startButton.addActionListener { startBuild() }
         stopButton.addActionListener { stopBuild() }
         init()
@@ -72,6 +79,8 @@ class MavenBuildDialog(
             .addLabeledComponent("Maven goals:", goalsField, 1, false)
             .addComponent(skipUnitTests)
             .addComponent(skipIntegrationTests)
+            .addComponent(parallel)
+            .addLabeledComponent("Maximum parallel builds:", maxParallel, 1, false)
             .panel
         options.preferredSize = Dimension(JBUI.scale(270), JBUI.scale(150))
         projectList.visibleRowCount = 5
@@ -127,6 +136,8 @@ class MavenBuildDialog(
         goalsField.isEnabled = false
         skipUnitTests.isEnabled = false
         skipIntegrationTests.isEnabled = false
+        parallel.isEnabled = false
+        maxParallel.isEnabled = false
         console.clear()
         selectedProjects.indices.forEach { updateRow(it, MavenBuildStatus.PENDING) }
 
@@ -134,6 +145,9 @@ class MavenBuildDialog(
             goals = goals,
             skipUnitTests = skipUnitTests.isSelected,
             skipIntegrationTests = skipIntegrationTests.isSelected,
+            parallel = parallel.isSelected,
+            maxParallel = maxParallel.value as Int,
+            buildSteps = buildSteps,
         )
         object : Task.Backgroundable(ideProject, "Building Maven projects", true) {
             private var failed = 0
@@ -166,6 +180,8 @@ class MavenBuildDialog(
                 goalsField.isEnabled = true
                 skipUnitTests.isEnabled = true
                 skipIntegrationTests.isEnabled = true
+                parallel.isEnabled = true
+                maxParallel.isEnabled = parallel.isSelected
                 statusLabel.text = when {
                     cancelled -> "Build cancelled"
                     failed > 0 -> "$failed project(s) failed"
