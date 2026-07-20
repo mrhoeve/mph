@@ -64,6 +64,20 @@ intellijPlatform {
     }
 }
 
+kover {
+    reports {
+        filters {
+            excludes {
+                classes(
+                    "nl.hicts.mph.intellij.actions.UpdateDependentProjectsAction",
+                    "nl.hicts.mph.intellij.services.IdeaProjectDiscoveryService",
+                    "nl.hicts.mph.intellij.ui.MphToolWindowFactory",
+                )
+            }
+        }
+    }
+}
+
 tasks {
     test {
         useJUnit()

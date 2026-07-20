@@ -19,4 +19,16 @@
                 icon="/icons/mphToolWindow.svg"
                 factoryClass="nl.hicts.mph.intellij.ui.MphToolWindowFactory"/>
     </extensions>
+
+    <actions>
+        <action
+                id="nl.hicts.mph.intellij.UpdateDependentProjects"
+                class="nl.hicts.mph.intellij.actions.UpdateDependentProjectsAction"
+                text="Update Dependent Maven Projects…"
+                description="Find linked Maven projects that reference this project"
+                icon="nl.hicts.mph.intellij.icons.MphIcons.UpdateDependents">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+        </action>
+    </actions>
 </idea-plugin>

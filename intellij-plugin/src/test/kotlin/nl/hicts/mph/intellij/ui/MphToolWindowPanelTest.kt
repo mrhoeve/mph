@@ -8,6 +8,7 @@ import nl.hicts.mph.intellij.model.ProjectSnapshot
 import java.awt.event.MouseEvent
 import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.TreePath
+import javax.swing.JTree
 
 class MphToolWindowPanelTest : BasePlatformTestCase() {
     fun testRendersRepositoriesAndProjects() {
@@ -131,6 +132,35 @@ class MphToolWindowPanelTest : BasePlatformTestCase() {
         assertNull(openedPomPath)
         listener.mouseClicked(mouseEvent(panel, clickCount = 2, button = MouseEvent.BUTTON1))
         assertEquals(projectInfo.pomPath, openedPomPath)
+    }
+
+    fun testRendersRepositoryProjectAndFallbackTreeRows() {
+        val renderer = MphProjectTreeRenderer()
+        val tree = JTree()
+        val repository = RepositoryTreeEntry("sample-repository", "/workspace/sample", 2)
+        val projectWithCoordinates = ProjectTreeEntry(
+            MavenProjectInfo(
+                "org.example",
+                "sample-service",
+                "1.0-SNAPSHOT",
+                "/workspace/sample/pom.xml",
+                "/workspace/sample",
+            ),
+        )
+        val projectWithoutCoordinates = ProjectTreeEntry(
+            MavenProjectInfo(null, "sample-client", null, "/workspace/client/pom.xml", null),
+        )
+
+        renderer.getTreeCellRendererComponent(tree, DefaultMutableTreeNode(repository), false, true, false, 0, false)
+        assertEquals("/workspace/sample", renderer.toolTipText)
+
+        renderer.getTreeCellRendererComponent(tree, DefaultMutableTreeNode(projectWithCoordinates), true, false, true, 1, true)
+        assertEquals("/workspace/sample/pom.xml", renderer.toolTipText)
+
+        renderer.getTreeCellRendererComponent(tree, DefaultMutableTreeNode(projectWithoutCoordinates), false, false, true, 2, false)
+        assertEquals("/workspace/client/pom.xml", renderer.toolTipText)
+
+        renderer.getTreeCellRendererComponent(tree, DefaultMutableTreeNode("Other"), false, false, true, 3, false)
     }
 
     private fun selectOnlyProject(panel: MphToolWindowPanel, projectInfo: MavenProjectInfo) {

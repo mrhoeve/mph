@@ -10,8 +10,10 @@ This module contains the first read-only prototype of Maven Project Helper as a 
 - Shows Maven coordinates and versions.
 - Opens a project's `pom.xml` on double-click.
 - Refreshes manually and after a `pom.xml` filesystem change.
+- Adds **Update Dependent Maven Projects…** to the editor and Project-view context menus for `pom.xml` files.
+- Previews every linked project that uses the selected project as a parent, dependency, or managed dependency.
 
-It deliberately does not modify POM files, execute builds, or perform Git operations yet.
+The dependency preview deliberately does not modify POM files yet. Its next implementation step will reuse the preview as confirmation before applying surgical, undoable version updates.
 
 ## Run the development IDE
 
