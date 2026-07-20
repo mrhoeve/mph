@@ -12,8 +12,10 @@ This module contains the first read-only prototype of Maven Project Helper as a 
 - Refreshes manually and after a `pom.xml` filesystem change.
 - Adds **Update Dependent Maven Projects…** to the editor and Project-view context menus for `pom.xml` files.
 - Previews every linked project that uses the selected project as a parent, dependency, or managed dependency.
+- Updates literal and locally property-managed versions as one undoable IntelliJ command after confirmation.
+- Reports inherited properties and references without a local version instead of modifying them unsafely.
 
-The dependency preview deliberately does not modify POM files yet. Its next implementation step will reuse the preview as confirmation before applying surgical, undoable version updates.
+After an update, IntelliJ refreshes its linked Maven model automatically. All changes remain uncommitted and can be reverted together with **Undo**.
 
 ## Run the development IDE
 

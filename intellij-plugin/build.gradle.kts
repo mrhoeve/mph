@@ -70,6 +70,7 @@ kover {
             excludes {
                 classes(
                     "nl.hicts.mph.intellij.actions.UpdateDependentProjectsAction",
+                    "nl.hicts.mph.intellij.services.DependentProjectVersionUpdateService",
                     "nl.hicts.mph.intellij.services.IdeaProjectDiscoveryService",
                     "nl.hicts.mph.intellij.ui.MphToolWindowFactory",
                 )

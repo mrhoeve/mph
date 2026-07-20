@@ -13,6 +13,6 @@ class IdeaProjectDiscoveryServiceTest : BasePlatformTestCase() {
     }
 
     fun testDoesNotFindDependentsForAnUnlinkedPom() {
-        assertNull(project.service<IdeaProjectDiscoveryService>().findDependents("/missing/pom.xml"))
+        assertNull(project.service<IdeaProjectDiscoveryService>().findDependents("/missing/pom.xml", null))
     }
 }

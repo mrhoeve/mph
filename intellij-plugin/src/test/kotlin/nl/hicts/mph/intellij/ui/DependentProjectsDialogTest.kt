@@ -22,7 +22,8 @@ class DependentProjectsDialogTest : BasePlatformTestCase() {
         val dialog = DependentProjectsDialog(project, analysis)
 
         try {
-            assertEquals("Dependent Maven Projects", dialog.title)
+            assertEquals("Update Dependent Maven Projects", dialog.title)
+            assertTrue(dialog.canApplyUpdate)
         } finally {
             dialog.close(DialogWrapper.CANCEL_EXIT_CODE)
         }
@@ -35,7 +36,8 @@ class DependentProjectsDialogTest : BasePlatformTestCase() {
         )
 
         try {
-            assertEquals("Dependent Maven Projects", dialog.title)
+            assertEquals("Update Dependent Maven Projects", dialog.title)
+            assertFalse(dialog.canApplyUpdate)
         } finally {
             dialog.close(DialogWrapper.CANCEL_EXIT_CODE)
         }

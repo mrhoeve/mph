@@ -105,7 +105,7 @@ The ruleset is the enforcement layer: a workflow reports the check result, while
 
 ## IntelliJ IDEA plugin prototype
 
-The [`intellij-plugin`](intellij-plugin) module is the first prototype of MPH as a native IntelliJ IDEA plugin. Its **MPH** tool window uses IDEA's linked Maven projects and registered Git roots directly, shows project coordinates and versions grouped by repository, and opens a project's `pom.xml` on double-click. A context-aware **Update Dependent Maven Projects…** action now previews linked modules that reference the selected POM as a parent, dependency, or managed dependency.
+The [`intellij-plugin`](intellij-plugin) module is the first prototype of MPH as a native IntelliJ IDEA plugin. Its **MPH** tool window uses IDEA's linked Maven projects and registered Git roots directly, shows project coordinates and versions grouped by repository, and opens a project's `pom.xml` on double-click. A context-aware **Update Dependent Maven Projects…** action previews linked modules that reference the selected POM as a parent, dependency, or managed dependency, then updates their local version references as one undoable IntelliJ command after confirmation.
 
 The prototype deliberately keeps all write, build, and Git operations disabled while the project-model integration is validated. See the [plugin README](intellij-plugin/README.md) for development, installation, and verification commands.
 

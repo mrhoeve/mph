@@ -28,9 +28,18 @@ class DependentProjectsDialog(
     project: Project,
     private val analysis: DependentProjectsAnalysis,
 ) : DialogWrapper(project) {
+    internal val canApplyUpdate: Boolean =
+        analysis.dependents.isNotEmpty() && !analysis.target.version.isNullOrBlank()
+
     init {
-        title = "Dependent Maven Projects"
-        setOKButtonText("Done")
+        title = "Update Dependent Maven Projects"
+        setOKButtonText(
+            if (canApplyUpdate) {
+                "Update ${analysis.dependents.size} ${if (analysis.dependents.size == 1) "Project" else "Projects"}"
+            } else {
+                "Close"
+            },
+        )
         init()
     }
 
@@ -43,7 +52,8 @@ class DependentProjectsDialog(
         return panel
     }
 
-    override fun createActions(): Array<Action> = arrayOf(okAction)
+    override fun createActions(): Array<Action> =
+        if (canApplyUpdate) arrayOf(okAction, cancelAction) else arrayOf(okAction)
 
     private fun createHeader(): JComponent {
         val text = JPanel()
@@ -93,7 +103,13 @@ class DependentProjectsDialog(
         0 -> "No linked Maven projects reference this project."
         1 -> "1 linked Maven project references this project."
         else -> "${analysis.dependents.size} linked Maven projects reference this project."
-    } + " This first preview does not modify any files."
+    } + if (canApplyUpdate) {
+        " Review the projects below before updating their POM files."
+    } else if (analysis.target.version.isNullOrBlank()) {
+        " The selected project has no resolved version to apply."
+    } else {
+        ""
+    }
 }
 
 internal class DependentProjectListRenderer : ColoredListCellRenderer<DependentMavenProject>() {
