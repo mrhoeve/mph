@@ -1,7 +1,10 @@
 package nl.hicts.mph.intellij.ui
 
 import com.intellij.icons.AllIcons
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.service
+import com.intellij.openapi.progress.ProgressIndicator
+import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.Messages
@@ -17,6 +20,7 @@ import nl.hicts.mph.intellij.services.ManagedPropertyFilter
 import nl.hicts.mph.intellij.services.ManagedVersionAnalysis
 import nl.hicts.mph.intellij.services.ManagedVersionProperty
 import nl.hicts.mph.intellij.services.ManagedVersionService
+import nl.hicts.mph.intellij.services.NexusIqSettings
 import java.awt.BorderLayout
 import java.awt.Dimension
 import java.awt.FlowLayout
@@ -37,13 +41,17 @@ class ManagedVersionsDialog(
     private val search = JBTextField()
     private val overridesOnly = JBCheckBox("Show only overrides")
     private val summary = JBLabel()
-    private val model = object : DefaultTableModel(arrayOf("Property", "Value", "Source", "Comment"), 0) {
+    private val model = object : DefaultTableModel(
+        arrayOf("Property", "Value", "Source", "Security", "Recommended", "Comment"),
+        0,
+    ) {
         override fun isCellEditable(row: Int, column: Int) = false
     }
     private val table = JBTable(model)
     private val overrideButton = JButton("Override", AllIcons.Actions.Edit)
     private val removeButton = JButton("Remove Override", AllIcons.Actions.GC)
     private val springBootButton = JButton("Upgrade Spring Boot", AllIcons.Nodes.PpLib)
+    private val nexusButton = JButton("Check Nexus IQ", AllIcons.General.InspectionsEye)
 
     init {
         title = "Managed Component Versions"
@@ -59,9 +67,13 @@ class ManagedVersionsDialog(
         table.columnModel.getColumn(1).preferredWidth = JBUI.scale(180)
         table.columnModel.getColumn(2).preferredWidth = JBUI.scale(170)
         table.columnModel.getColumn(3).preferredWidth = JBUI.scale(260)
+        table.columnModel.getColumn(4).preferredWidth = JBUI.scale(130)
+        table.columnModel.getColumn(5).preferredWidth = JBUI.scale(220)
         overrideButton.addActionListener { overrideSelected() }
         removeButton.addActionListener { removeSelected() }
         springBootButton.addActionListener { upgradeSpringBoot() }
+        nexusButton.addActionListener { checkNexusIq() }
+        nexusButton.isEnabled = ApplicationManager.getApplication().service<NexusIqSettings>().configured()
         refreshTable()
         init()
     }
@@ -80,6 +92,7 @@ class ManagedVersionsDialog(
             add(summary, BorderLayout.SOUTH)
         }
         val actions = JPanel(FlowLayout(FlowLayout.RIGHT, JBUI.scale(8), 0)).apply {
+            add(nexusButton)
             add(springBootButton)
             add(removeButton)
             add(overrideButton)
@@ -97,7 +110,14 @@ class ManagedVersionsDialog(
         displayed = ManagedPropertyFilter.filter(analysis.properties, overridesOnly.isSelected, search.text.trim())
         model.rowCount = 0
         displayed.forEach { property ->
-            model.addRow(arrayOf(property.name, property.value, property.source, property.comment.orEmpty()))
+            model.addRow(arrayOf(
+                property.name,
+                property.value,
+                property.source,
+                property.highestThreat?.let { "Threat $it" }.orEmpty(),
+                property.remediationVersion.orEmpty(),
+                property.comment.orEmpty(),
+            ))
         }
         val overrides = analysis.properties.count(ManagedVersionProperty::isOverridden)
         summary.text = "${displayed.size} shown · ${analysis.properties.size} managed version properties · $overrides local overrides"
@@ -144,6 +164,28 @@ class ManagedVersionsDialog(
         if (!dialog.showAndGet()) return
         service.upgradeSpringBoot(projectInfo, springBoot, dialog.selectedVersion)
         reload()
+    }
+
+    private fun checkNexusIq() {
+        nexusButton.isEnabled = false
+        summary.text = "Checking managed components with Nexus IQ…"
+        object : Task.Backgroundable(ideProject, "Checking managed Maven versions", true) {
+            private lateinit var enriched: ManagedVersionAnalysis
+            override fun run(indicator: ProgressIndicator) {
+                enriched = service.enrichWithNexus(analysis)
+            }
+
+            override fun onSuccess() {
+                analysis = enriched
+                refreshTable()
+                nexusButton.isEnabled = true
+            }
+
+            override fun onThrowable(error: Throwable) {
+                summary.text = "Nexus IQ check failed: ${error.message ?: error.javaClass.simpleName}"
+                nexusButton.isEnabled = true
+            }
+        }.queue()
     }
 
     private fun reload() {

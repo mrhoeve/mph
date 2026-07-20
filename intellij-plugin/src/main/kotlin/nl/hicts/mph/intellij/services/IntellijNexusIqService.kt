@@ -23,6 +23,20 @@ data class NexusIqScanResult(
 
 @Service(Service.Level.PROJECT)
 class IntellijNexusIqService(private val project: Project) {
+    fun componentFindings(components: Collection<NexusComponent>): List<NexusComponentFinding> {
+        if (components.isEmpty()) return emptyList()
+        val configuration = service<NexusIqSettings>()
+        require(configuration.configured()) { "Configure the Nexus IQ server first." }
+        val state = configuration.state
+        val json = post(
+            "${state.serverUrl.trimEnd('/')}/api/v2/components/details",
+            state.username,
+            configuration.password,
+            NexusIqSupport.componentDetailsRequest(components),
+        )
+        return NexusIqSupport.componentFindings(json)
+    }
+
     fun applicationId(projectInfo: MavenProjectInfo): String? {
         val settings = service<NexusIqSettings>().state
         val jenkinsfile = Path.of(projectInfo.pomPath).parent.resolve("Jenkinsfile")
@@ -95,6 +109,18 @@ class IntellijNexusIqService(private val project: Project) {
             }
             connection.setRequestProperty("Accept", "application/json")
         }.readString()
+
+    private fun post(url: String, username: String, password: String?, body: String): String =
+        HttpRequests.post(url, "application/json").tuner { connection ->
+            if (username.isNotBlank() && !password.isNullOrBlank()) {
+                val token = Base64.getEncoder().encodeToString("$username:$password".toByteArray(StandardCharsets.UTF_8))
+                connection.setRequestProperty("Authorization", "Basic $token")
+            }
+            connection.setRequestProperty("Accept", "application/json")
+        }.connect { request ->
+            request.write(body)
+            request.readString()
+        }
 
     private fun url(value: String): String = java.net.URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20")
 }

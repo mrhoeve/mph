@@ -3,6 +3,7 @@ package nl.hicts.mph.intellij.services
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.components.Service
+import com.intellij.openapi.components.service
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
@@ -19,7 +20,13 @@ data class ManagedVersionProperty(
     val source: String,
     val isOverridden: Boolean,
     val comment: String? = null,
-)
+    val findings: List<NexusComponentFinding> = emptyList(),
+) {
+    val remediationVersion: String?
+        get() = findings.firstNotNullOfOrNull(NexusComponentFinding::remediationVersion)
+    val highestThreat: Int?
+        get() = findings.maxOfOrNull(NexusComponentFinding::threatLevel)
+}
 
 data class SpringBootVersionReference(
     val currentVersion: String,
@@ -31,6 +38,7 @@ data class ManagedVersionAnalysis(
     val project: MavenProjectInfo,
     val properties: List<ManagedVersionProperty>,
     val springBoot: SpringBootVersionReference?,
+    val componentsByProperty: Map<String, List<NexusComponent>> = emptyMap(),
 )
 
 object ManagedPropertyFilter {
@@ -41,7 +49,8 @@ object ManagedPropertyFilter {
     ): List<ManagedVersionProperty> = properties.filter { property ->
         (!overridesOnly || property.isOverridden) &&
             (query.isBlank() || property.name.contains(query, ignoreCase = true) ||
-                property.value.contains(query, ignoreCase = true))
+                property.value.contains(query, ignoreCase = true) ||
+                property.remediationVersion?.contains(query, ignoreCase = true) == true)
     }
 }
 
@@ -87,7 +96,30 @@ class ManagedVersionService(
                 MavenReferenceKind.MANAGED_DEPENDENCY,
             )
         }
-        return ManagedVersionAnalysis(projectInfo, properties, parent ?: bom)
+        val managedComponents = mavenProject.managedDependencies().values.mapNotNull { dependency ->
+            val group = dependency.groupId?.takeIf(String::isNotBlank) ?: return@mapNotNull null
+            val artifact = dependency.artifactId?.takeIf(String::isNotBlank) ?: return@mapNotNull null
+            val version = dependency.version?.takeIf(String::isNotBlank) ?: return@mapNotNull null
+            NexusComponent(group, artifact, version)
+        }
+        val propertiesByName = properties.associateBy(ManagedVersionProperty::name)
+        val propertiesByValue = properties.groupBy(ManagedVersionProperty::value)
+        val componentsByProperty = managedComponents.mapNotNull { component ->
+            val conventional = propertiesByName["${component.artifactId}.version"]
+                ?.takeIf { it.value == component.version }
+            val property = conventional ?: propertiesByValue[component.version]?.singleOrNull()
+            property?.name?.let { it to component }
+        }.groupBy({ it.first }, { it.second })
+        return ManagedVersionAnalysis(projectInfo, properties, parent ?: bom, componentsByProperty)
+    }
+
+    fun enrichWithNexus(analysis: ManagedVersionAnalysis): ManagedVersionAnalysis {
+        val findings = project.service<IntellijNexusIqService>()
+            .componentFindings(analysis.componentsByProperty.values.flatten())
+        return analysis.copy(properties = analysis.properties.map { property ->
+            val components = analysis.componentsByProperty[property.name].orEmpty().toSet()
+            property.copy(findings = findings.filter { it.component in components })
+        })
     }
 
     fun overrideProperty(projectInfo: MavenProjectInfo, name: String, value: String, comment: String?) {

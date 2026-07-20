@@ -24,4 +24,24 @@ class ManagedPropertyFilterTest {
             ManagedPropertyFilter.filter(properties, overridesOnly = false, query = "2025.1").map { it.name },
         )
     }
+
+    @Test
+    fun `search matches Nexus IQ remediation versions`() {
+        val secured = properties.first().copy(findings = listOf(
+            NexusComponentFinding(
+                NexusComponent("org.example", "sample-library", "2025.1.2"),
+                8,
+                "Critical Security",
+                listOf("Known vulnerability"),
+                "2025.1.4",
+            ),
+        ))
+
+        assertEquals(
+            listOf("spring-cloud.version"),
+            ManagedPropertyFilter.filter(listOf(secured), overridesOnly = false, query = "2025.1.4").map { it.name },
+        )
+        assertEquals(8, secured.highestThreat)
+        assertEquals("2025.1.4", secured.remediationVersion)
+    }
 }

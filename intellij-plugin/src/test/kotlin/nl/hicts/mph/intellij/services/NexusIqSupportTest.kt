@@ -125,4 +125,29 @@ class NexusIqSupportTest {
         assertTrue(result.violations.any { it.component.startsWith("pkg:maven") && !it.direct })
         assertTrue(result.violations.any { it.component == "Unknown component" && it.reasons.isEmpty() })
     }
+
+    @Test
+    fun `creates component requests and parses remediation recommendations`() {
+        val component = NexusComponent("org.example", "sample-library", "1.0.0")
+        val request = NexusIqSupport.componentDetailsRequest(listOf(component, component))
+        assertEquals(1, com.google.gson.JsonParser.parseString(request).asJsonObject.getAsJsonArray("components").size())
+
+        val response = """{
+          "componentDetails": [{
+            "componentIdentifier": {"coordinates": {
+              "groupId":"org.example", "artifactId":"sample-library", "version":"1.0.0"
+            }},
+            "remediation": {"version":"1.2.3"},
+            "policyData": {"policyViolations": [{
+              "policyName":"Critical Security", "threatLevel":9,
+              "constraintViolations":[{"reasons":[{"reason":"Known vulnerability"}]}]
+            }]}
+          }]
+        }"""
+        val finding = NexusIqSupport.componentFindings(response).single()
+        assertEquals(component, finding.component)
+        assertEquals("1.2.3", finding.remediationVersion)
+        assertEquals(listOf("Known vulnerability"), finding.reasons)
+        assertEquals(9, finding.threatLevel)
+    }
 }

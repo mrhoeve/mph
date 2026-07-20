@@ -12,8 +12,10 @@ class PropertyOverrideDialog(
     project: Project,
     property: ManagedVersionProperty,
 ) : DialogWrapper(project) {
-    private val valueField = JBTextField(property.value)
-    private val commentField = JBTextField(property.comment.orEmpty())
+    private val valueField = JBTextField(property.remediationVersion ?: property.value)
+    private val commentField = JBTextField(
+        property.comment ?: if (property.remediationVersion != null) "Nexus IQ security remediation" else "",
+    )
     val value: String
         get() = valueField.text.trim()
     val comment: String?
