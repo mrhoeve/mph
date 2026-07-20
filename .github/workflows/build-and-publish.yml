@@ -10,6 +10,11 @@ on:
         required: false
         type: string
         default: ''
+      release_build:
+        description: Build release artifacts instead of development artifacts
+        required: false
+        type: boolean
+        default: false
     secrets:
       SONAR_TOKEN:
         required: true
@@ -46,9 +51,25 @@ jobs:
 
     - name: Test, package, and verify IntelliJ plugin
       working-directory: intellij-plugin
+      env:
+        REQUESTED_RELEASE_VERSION: ${{ inputs.release_version || '' }}
+        RELEASE_BUILD: ${{ inputs.release_build || false }}
       run: |
         chmod +x gradlew
-        ./gradlew koverXmlReport buildPlugin verifyPlugin --console=plain
+        GRADLE_ARGUMENTS=()
+        if [[ -n "$REQUESTED_RELEASE_VERSION" ]]; then
+          GRADLE_ARGUMENTS+=("-PmphVersion=$REQUESTED_RELEASE_VERSION")
+        elif [[ "$RELEASE_BUILD" == "true" ]]; then
+          GRADLE_ARGUMENTS+=("-PreleaseBuild=true")
+        fi
+        ./gradlew "${GRADLE_ARGUMENTS[@]}" koverXmlReport buildPlugin verifyPlugin --console=plain
+
+    - name: Upload IntelliJ Plugin Package
+      uses: actions/upload-artifact@v7
+      with:
+        name: mph-intellij-plugin
+        path: intellij-plugin/build/distributions/*.zip
+        if-no-files-found: error
 
     - name: Upload IntelliJ Plugin Coverage
       uses: actions/upload-artifact@v7
@@ -81,12 +102,13 @@ jobs:
       id: get_version
       env:
         REQUESTED_RELEASE_VERSION: ${{ inputs.release_version || '' }}
+        RELEASE_BUILD: ${{ inputs.release_build || false }}
       run: |
         chmod +x mvnw
         VERSION=$(./mvnw help:evaluate -Dexpression=project.version -q -DforceStdout)
         if [[ -n "$REQUESTED_RELEASE_VERSION" ]]; then
           RELEASE_VERSION=$REQUESTED_RELEASE_VERSION
-        elif [[ $VERSION == *"-SNAPSHOT" ]]; then
+        elif [[ "$RELEASE_BUILD" == "true" && $VERSION == *"-SNAPSHOT" ]]; then
           RELEASE_VERSION=${VERSION%-SNAPSHOT}
         else
           RELEASE_VERSION=$VERSION
