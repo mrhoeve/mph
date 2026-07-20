@@ -11,4 +11,8 @@ class IdeaProjectDiscoveryServiceTest : BasePlatformTestCase() {
         assertEquals(0, snapshot.repositoryCount)
         assertEmpty(snapshot.groups)
     }
+
+    fun testDoesNotFindDependentsForAnUnlinkedPom() {
+        assertNull(project.service<IdeaProjectDiscoveryService>().findDependents("/missing/pom.xml"))
+    }
 }

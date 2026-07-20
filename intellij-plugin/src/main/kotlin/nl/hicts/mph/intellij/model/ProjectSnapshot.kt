@@ -32,3 +32,31 @@ data class ProjectSnapshot(
     val repositoryCount: Int
         get() = groups.count { it.rootPath != null }
 }
+
+data class MavenCoordinates(
+    val groupId: String,
+    val artifactId: String,
+)
+
+enum class MavenReferenceKind(val displayName: String) {
+    PARENT("Parent"),
+    DEPENDENCY("Dependency"),
+    MANAGED_DEPENDENCY("Managed dependency"),
+}
+
+data class MavenProjectDependencyDescriptor(
+    val project: MavenProjectInfo,
+    val parent: MavenCoordinates?,
+    val dependencies: Set<MavenCoordinates>,
+    val managedDependencies: Set<MavenCoordinates>,
+)
+
+data class DependentMavenProject(
+    val project: MavenProjectInfo,
+    val references: Set<MavenReferenceKind>,
+)
+
+data class DependentProjectsAnalysis(
+    val target: MavenProjectInfo,
+    val dependents: List<DependentMavenProject>,
+)
