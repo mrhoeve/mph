@@ -13,6 +13,7 @@ import nl.hicts.mph.intellij.model.ProjectSnapshot
 import nl.hicts.mph.intellij.model.ProjectSnapshotBuilder
 import org.jetbrains.idea.maven.project.MavenProjectsManager
 import java.nio.file.Path
+import java.nio.file.Files
 
 @Service(Service.Level.PROJECT)
 class IdeaProjectDiscoveryService(
@@ -66,15 +67,34 @@ class IdeaProjectDiscoveryService(
 
         return mavenProjects.mapNotNull { mavenProject ->
             val projectInfo = projectInfos[normalizedPath(mavenProject.file.path)] ?: return@mapNotNull null
+            val declarations = runCatching {
+                PomDependencyDeclarations.parse(
+                    Files.readString(Path.of(mavenProject.file.path)),
+                    java.util.Properties().apply {
+                        putAll(mavenProject.properties)
+                        val id = mavenProject.mavenId
+                        id.groupId?.let { group ->
+                            setProperty("project.groupId", group)
+                            setProperty("pom.groupId", group)
+                        }
+                        id.artifactId?.let { artifact ->
+                            setProperty("project.artifactId", artifact)
+                            setProperty("pom.artifactId", artifact)
+                        }
+                        id.version?.let { version ->
+                            setProperty("project.version", version)
+                            setProperty("pom.version", version)
+                        }
+                    },
+                )
+            }.getOrNull()
             MavenProjectDependencyDescriptor(
                 project = projectInfo,
                 parent = coordinates(mavenProject.parentId?.groupId, mavenProject.parentId?.artifactId),
-                dependencies = mavenProject.dependencies.mapNotNull { dependency ->
+                dependencies = declarations?.dependencies ?: mavenProject.dependencies.mapNotNull { dependency ->
                     coordinates(dependency.groupId, dependency.artifactId)
                 }.toSet(),
-                managedDependencies = mavenProject.managedDependencies().values.mapNotNull { dependency ->
-                    coordinates(dependency.groupId, dependency.artifactId)
-                }.toSet(),
+                managedDependencies = declarations?.managedDependencies ?: emptySet(),
             )
         }
     }

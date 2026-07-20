@@ -27,18 +27,20 @@ class DependencyExplorerDialog(
     private val openPom: (String) -> Unit,
 ) : DialogWrapper(project) {
     private val root = DefaultMutableTreeNode(relationships.project.artifactId)
-    private val tree = Tree(DefaultTreeModel(root))
+    private val treeModel = DefaultTreeModel(root)
+    internal val dependencyTree = Tree(treeModel)
 
     init {
         title = "Maven Dependency Explorer"
         createNodes()
-        tree.isRootVisible = false
-        tree.showsRootHandles = true
-        tree.cellRenderer = RelationshipRenderer()
-        tree.addMouseListener(object : MouseAdapter() {
+        treeModel.reload(root)
+        dependencyTree.isRootVisible = false
+        dependencyTree.showsRootHandles = true
+        dependencyTree.cellRenderer = RelationshipRenderer()
+        dependencyTree.addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(event: MouseEvent) {
                 if (event.clickCount != 2 || event.button != MouseEvent.BUTTON1) return
-                val node = tree.lastSelectedPathComponent as? DefaultMutableTreeNode ?: return
+                val node = dependencyTree.lastSelectedPathComponent as? DefaultMutableTreeNode ?: return
                 val relationship = node.userObject as? WorkspaceProjectRelationship ?: return
                 relationship.project?.pomPath?.let(openPom)
             }
@@ -50,7 +52,7 @@ class DependencyExplorerDialog(
         val titleLabel = JBLabel(relationships.project.artifactId, AllIcons.Nodes.Module, JBLabel.LEFT)
         titleLabel.font = titleLabel.font.deriveFont(Font.BOLD, titleLabel.font.size2D + 3f)
         val summary = JBLabel(
-            "${relationships.dependencies.size} dependencies · ${relationships.dependents.size} workspace dependents",
+            "${relationships.dependencies.size} declared dependencies · ${relationships.dependents.size} workspace dependents",
         )
         summary.foreground = JBUI.CurrentTheme.ContextHelp.FOREGROUND
         val header = javax.swing.JPanel(BorderLayout(0, JBUI.scale(4))).apply {
@@ -62,7 +64,7 @@ class DependencyExplorerDialog(
         return javax.swing.JPanel(BorderLayout(0, JBUI.scale(12))).apply {
             border = JBUI.Borders.empty(8, 4, 4, 4)
             add(header, BorderLayout.NORTH)
-            add(ScrollPaneFactory.createScrollPane(tree, true), BorderLayout.CENTER)
+            add(ScrollPaneFactory.createScrollPane(dependencyTree, true), BorderLayout.CENTER)
             preferredSize = Dimension(JBUI.scale(760), JBUI.scale(520))
         }
     }
@@ -78,7 +80,7 @@ class DependencyExplorerDialog(
 
     private fun expandAll() {
         var row = 0
-        while (row < tree.rowCount) tree.expandRow(row++)
+        while (row < dependencyTree.rowCount) dependencyTree.expandRow(row++)
     }
 }
 
