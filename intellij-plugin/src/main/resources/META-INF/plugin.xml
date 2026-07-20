@@ -20,7 +20,7 @@
         <toolWindow
                 id="MPH"
                 anchor="right"
-                icon="/META-INF/pluginIcon.svg"
+                icon="/icons/mph.svg"
                 factoryClass="nl.hicts.mph.intellij.ui.MphToolWindowFactory"/>
     </extensions>
 
