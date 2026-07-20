@@ -23,7 +23,7 @@ This module provides Maven Project Helper as a native IntelliJ IDEA plugin for m
 - Runs configurable Maven goals sequentially or in dependency-aware parallel stages, preferring each repository's Maven wrapper and streaming output into an IntelliJ console.
 - Synchronizes prefixed feature branches with `origin/develop`: fetches, safely updates the local `develop` reference, stashes tracked and untracked work, rebases, restores the stash, and reapplies the prefix to the current versions.
 - Explores incoming and outgoing Maven relationships, including dependencies outside the current IDEA workspace.
-- Calculates repository build stages, highlights dependency cycles, builds in that order, and exports the plan as an Excel workbook.
+- Calculates repository build stages, visualizes the complete project and module dependency graph, highlights dependency cycles, builds in that order, and exports the plan as Excel or the graph as PNG.
 - Shows effective managed version properties, filters local overrides, adds or removes overrides, upgrades Spring Boot parent or BOM versions, and retrieves Nexus IQ remediation recommendations for managed components.
 - Inspects the resolved direct and transitive dependency tree and exports CycloneDX 1.5 JSON or XML SBOMs.
 - Runs Nexus IQ evaluations, retrieves security-policy results, and links directly to the generated report.
@@ -40,7 +40,7 @@ Open **View -> Tool Windows -> MPH**. Select modules with Ctrl-click (Cmd-click 
 - **Build** runs `clean install` by default. Unit and integration tests can be enabled in the dialog. Selecting a repository row builds its root POM; selecting individual modules builds those POMs.
 - **Sync with develop** is available for projects in Git repositories. It refuses protected branches (`main`, `master`, and `develop`), detached heads, active Git operations, divergent local `develop` branches, and repositories without `origin/develop`.
 - **Dependencies** shows what the selected module uses and which linked modules use it. Double-click a linked module to open its POM.
-- **Build Order** groups repositories into safe build stages, can pass the calculated order to the Maven build dialog, and exports an `.xlsx` plan.
+- **Build Order** groups repositories into safe build stages, offers a focusable graph with zoom, pan, POM navigation and PNG export, can pass the calculated order to the Maven build dialog, and exports an `.xlsx` plan.
 - **Managed Versions** searches effective version properties, optionally shows only local overrides, and offers a Spring Boot upgrade when a parent or BOM is detected.
 - **SBOM** shows the resolved Maven dependency tree and exports CycloneDX 1.5 JSON or XML.
 - **Nexus IQ** evaluates a project whose `Jenkinsfile` calls `servicePipeline(...)` or `libraryPipeline(...)`, then displays its security-policy violations.

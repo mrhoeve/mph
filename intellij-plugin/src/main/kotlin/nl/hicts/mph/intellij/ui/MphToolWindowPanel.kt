@@ -528,7 +528,7 @@ class MphToolWindowPanel(
     private fun openBuildOrder() {
         val descriptors = project.service<IdeaProjectDiscoveryService>().dependencyDescriptors()
         val order = WorkspaceDependencyAnalyzer().buildOrder(descriptors)
-        BuildOrderDialog(project, order, openPom).show()
+        BuildOrderDialog(project, order, descriptors, openPom).show()
     }
 
     override fun dispose() = Unit
