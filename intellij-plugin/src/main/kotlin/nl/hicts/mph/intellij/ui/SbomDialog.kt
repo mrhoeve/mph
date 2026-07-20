@@ -1,19 +1,22 @@
 package nl.hicts.mph.intellij.ui
 
 import com.intellij.icons.AllIcons
-import com.intellij.openapi.fileChooser.FileSaverDescriptor
 import com.intellij.openapi.fileChooser.FileChooserFactory
+import com.intellij.openapi.fileChooser.FileSaverDescriptor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.ui.ColoredTreeCellRenderer
+import com.intellij.ui.DocumentAdapter
 import com.intellij.ui.ScrollPaneFactory
 import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.components.JBLabel
+import com.intellij.ui.components.JBTextField
 import com.intellij.ui.treeStructure.Tree
 import com.intellij.util.ui.JBUI
 import nl.hicts.mph.intellij.services.CycloneDxExporter
 import nl.hicts.mph.intellij.services.SbomAnalysis
 import nl.hicts.mph.intellij.services.SbomComponent
+import nl.hicts.mph.intellij.services.SbomSearch
 import java.awt.BorderLayout
 import java.awt.Dimension
 import java.awt.FlowLayout
@@ -23,6 +26,7 @@ import javax.swing.JButton
 import javax.swing.JComponent
 import javax.swing.JPanel
 import javax.swing.JTree
+import javax.swing.event.DocumentEvent
 import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.DefaultTreeModel
 import javax.swing.tree.TreePath
@@ -32,19 +36,22 @@ class SbomDialog(
     private val analysis: SbomAnalysis,
 ) : DialogWrapper(ideaProject) {
     private val root = DefaultMutableTreeNode(analysis.project.artifactId)
-    internal val dependencyTree = Tree(DefaultTreeModel(root))
+    private val treeModel = DefaultTreeModel(root)
+    internal val dependencyTree = Tree(treeModel)
+    internal val searchField = JBTextField()
+    private val summary = JBLabel()
 
     init {
         title = "Software Bill of Materials"
-        analysis.dependencies.forEach { root.add(componentNode(it)) }
+        searchField.emptyText.text = "Search dependencies…"
+        searchField.toolTipText = "Search group, artifact, coordinates, version, scope, or type"
+        searchField.document.addDocumentListener(object : DocumentAdapter() {
+            override fun textChanged(event: DocumentEvent) = refreshTree()
+        })
         dependencyTree.isRootVisible = false
         dependencyTree.showsRootHandles = true
-        dependencyTree.emptyText.text = if (analysis.dependencies.isEmpty()) {
-            "No dependencies found for this Maven project."
-        } else {
-            ""
-        }
         dependencyTree.cellRenderer = SbomRenderer()
+        refreshTree()
         init()
     }
 
@@ -52,15 +59,17 @@ class SbomDialog(
         val titleLabel = JBLabel(analysis.project.artifactId, AllIcons.Nodes.Module, JBLabel.LEFT).apply {
             font = font.deriveFont(Font.BOLD, font.size2D + 3f)
         }
-        val unresolved = analysis.components.count { !it.resolved }
-        val summary = JBLabel(
-            "${analysis.components.size} components · ${analysis.dependencies.size} direct" +
-                if (unresolved == 0) " · all resolved" else " · $unresolved unresolved",
-        ).apply { foreground = JBUI.CurrentTheme.ContextHelp.FOREGROUND }
-        val header = JPanel(BorderLayout(0, JBUI.scale(4))).apply {
+        summary.foreground = JBUI.CurrentTheme.ContextHelp.FOREGROUND
+        val projectHeader = JPanel(BorderLayout(0, JBUI.scale(4))).apply {
             isOpaque = false
             add(titleLabel, BorderLayout.NORTH)
             add(summary, BorderLayout.SOUTH)
+        }
+        searchField.preferredSize = Dimension(JBUI.scale(300), searchField.preferredSize.height)
+        val header = JPanel(BorderLayout(JBUI.scale(20), 0)).apply {
+            isOpaque = false
+            add(projectHeader, BorderLayout.CENTER)
+            add(searchField, BorderLayout.EAST)
         }
         val actions = JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(8), 0)).apply {
             isOpaque = false
@@ -71,7 +80,6 @@ class SbomDialog(
                 addActionListener { export("xml", CycloneDxExporter.xml(analysis)) }
             })
         }
-        expandDirectDependencies()
         return JPanel(BorderLayout(0, JBUI.scale(12))).apply {
             border = JBUI.Borders.empty(8, 4, 4, 4)
             add(header, BorderLayout.NORTH)
@@ -81,10 +89,35 @@ class SbomDialog(
         }
     }
 
+    private fun refreshTree() {
+        val filtered = SbomSearch.filter(analysis.dependencies, searchField.text)
+        root.removeAllChildren()
+        filtered.forEach { root.add(componentNode(it)) }
+        treeModel.reload()
+        dependencyTree.emptyText.text = when {
+            analysis.dependencies.isEmpty() -> "No dependencies found for this Maven project."
+            filtered.isEmpty() -> "No dependencies match '${searchField.text.trim()}'."
+            else -> ""
+        }
+        val visible = filtered.flatMap(::flatten).distinctBy(SbomComponent::bomRef)
+        updateSummary(visible.size, visible.count { !it.resolved })
+        if (searchField.text.isBlank()) expandDirectDependencies() else expandAllRows()
+    }
+
     private fun componentNode(component: SbomComponent): DefaultMutableTreeNode =
         DefaultMutableTreeNode(component).also { node ->
             component.children.forEach { node.add(componentNode(it)) }
         }
+
+    private fun flatten(component: SbomComponent): List<SbomComponent> =
+        listOf(component) + component.children.flatMap(::flatten)
+
+    private fun updateSummary(visibleComponents: Int, unresolved: Int) {
+        val total = analysis.components.size
+        val count = if (searchField.text.isBlank()) "$total components" else "$visibleComponents of $total components"
+        summary.text = "$count · ${analysis.dependencies.size} direct" +
+            if (unresolved == 0) " · all resolved" else " · $unresolved unresolved"
+    }
 
     private fun expandDirectDependencies() {
         dependencyTree.expandPath(TreePath(root.path))
@@ -92,6 +125,12 @@ class SbomDialog(
             val child = root.getChildAt(index) as DefaultMutableTreeNode
             dependencyTree.expandPath(TreePath(child.path))
         }
+    }
+
+    private fun expandAllRows() {
+        dependencyTree.expandPath(TreePath(root.path))
+        var row = 0
+        while (row < dependencyTree.rowCount) dependencyTree.expandRow(row++)
     }
 
     private fun export(extension: String, content: String) {
