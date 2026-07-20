@@ -119,6 +119,23 @@ Run the complete local build from PowerShell:
 
 The script performs a locked `npm ci`, installs the Playwright Chromium runtime when needed, runs the frontend unit tests with coverage, tests and packages the IntelliJ plugin with Kotlin coverage and JetBrains compatibility verification, runs `mvnw clean verify`, and finally runs the full-stack Playwright tests against the packaged application. Use `-SkipPlaywright` on a machine that cannot launch a browser, or `-SkipPlaywrightBrowserInstall` when Chromium is already managed separately.
 
+To build only the IntelliJ plugin while developing it, run:
+
+```powershell
+.\build-plugin-local.cmd
+```
+
+This runs the plugin tests with Kover coverage, creates the installable ZIP, and runs JetBrains Plugin Verifier. Use `-SkipVerification` for a faster test/package cycle or `-SkipClean` to retain incremental Gradle outputs.
+
+The plugin requires JDK 21. The build script detects JDK 21 from `MPH_JAVA_HOME_21`, `JAVA_HOME_21_X64`, `JDK_21`, a Java-21 `JAVA_HOME`, and common JDK installation folders. For a custom location, either pass it directly or set the dedicated environment variable:
+
+```powershell
+.\build-plugin-local.cmd -JavaHome 'D:\devtools\corretto-jdk21.0.5_11'
+$env:MPH_JAVA_HOME_21 = 'D:\devtools\corretto-jdk21.0.5_11'
+```
+
+`MPH_JAVA_HOME_21` affects only the plugin build, so the system-wide `JAVA_HOME` can continue to use another JDK.
+
 To include analysis against the internal SonarQube instance, create a `.sonar-token` file in the repository root containing only your token. This filename is ignored by Git. Alternatively, set `SONAR_TOKEN` in the current process environment. Then run:
 
 ```powershell
