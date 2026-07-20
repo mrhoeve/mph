@@ -27,6 +27,16 @@ Open or import a multi-module Maven workspace in the development IDE, then open 
 
 ## Verification
 
+From the repository root, the recommended local command is:
+
+```powershell
+.\build-plugin-local.cmd
+```
+
+The script locates JDK 21 even when `JAVA_HOME` points to another JDK. Pass `-JavaHome 'D:\path\to\jdk-21'` or set `MPH_JAVA_HOME_21` if JDK 21 is installed in a non-standard location.
+
+The equivalent direct Gradle command is:
+
 ```shell
 ./gradlew test verifyPlugin buildPlugin
 ```
