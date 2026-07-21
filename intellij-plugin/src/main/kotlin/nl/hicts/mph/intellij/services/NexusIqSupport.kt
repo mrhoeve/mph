@@ -2,6 +2,8 @@ package nl.hicts.mph.intellij.services
 
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import java.nio.file.Files
+import java.nio.file.Path
 
 data class NexusIqViolation(
     val component: String,
@@ -38,6 +40,23 @@ data class NexusIqReport(
 
 object NexusIqSupport {
     private val pipeline = Regex("(?:servicePipeline|libraryPipeline)\\s*\\(\\s*['\"]([^'\"]+)['\"]")
+
+    fun findJenkinsfile(pomPath: String, gitRootPath: String?): Path? {
+        val projectDirectory = runCatching { Path.of(pomPath).toAbsolutePath().normalize().parent }.getOrNull()
+            ?: return null
+        val repositoryRoot = gitRootPath?.takeIf(String::isNotBlank)?.let { rootPath ->
+            runCatching { Path.of(rootPath).toAbsolutePath().normalize() }.getOrNull()
+        }?.takeIf(projectDirectory::startsWith) ?: projectDirectory
+
+        var directory: Path? = projectDirectory
+        while (directory != null && directory.startsWith(repositoryRoot)) {
+            val candidate = directory.resolve("Jenkinsfile")
+            if (Files.isRegularFile(candidate)) return candidate
+            if (directory == repositoryRoot) break
+            directory = directory.parent
+        }
+        return null
+    }
 
     fun applicationId(jenkinsfile: String, prefix: String = "", suffix: String = ""): String? =
         pipeline.find(jenkinsfile)?.groupValues?.get(1)?.let { "$prefix$it$suffix" }

@@ -5,8 +5,28 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.nio.file.Files
 
 class NexusIqSupportTest {
+    @Test
+    fun `finds the closest Jenkinsfile up to the repository root`() {
+        val repository = Files.createTempDirectory("mph-nexus-jenkinsfile-")
+        try {
+            val module = Files.createDirectories(repository.resolve("modules/sample"))
+            val pom = Files.writeString(module.resolve("pom.xml"), "<project/>")
+            val rootJenkinsfile = Files.writeString(repository.resolve("Jenkinsfile"), "servicePipeline('sample')")
+
+            assertEquals(rootJenkinsfile, NexusIqSupport.findJenkinsfile(pom.toString(), repository.toString()))
+
+            val moduleJenkinsfile = Files.writeString(module.resolve("Jenkinsfile"), "libraryPipeline('sample-module')")
+            assertEquals(moduleJenkinsfile, NexusIqSupport.findJenkinsfile(pom.toString(), repository.toString()))
+            Files.delete(moduleJenkinsfile)
+            assertNull(NexusIqSupport.findJenkinsfile(pom.toString(), module.toString()))
+        } finally {
+            repository.toFile().deleteRecursively()
+        }
+    }
+
     @Test
     fun `extracts application ID from supported Jenkins pipelines`() {
         assertEquals(
