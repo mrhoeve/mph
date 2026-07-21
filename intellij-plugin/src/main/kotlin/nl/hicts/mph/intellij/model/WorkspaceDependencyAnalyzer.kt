@@ -44,8 +44,9 @@ class WorkspaceDependencyAnalyzer {
             MavenCoordinates(groupId, target.project.artifactId)
         }
 
-        val dependencies = relationshipCoordinates(target).map { (coordinates, kinds) ->
-            WorkspaceProjectRelationship(coordinates, byCoordinates[coordinates]?.project, kinds)
+        val dependencies = relationshipCoordinates(target).mapNotNull { (coordinates, kinds) ->
+            val dependency = byCoordinates[coordinates] ?: return@mapNotNull null
+            WorkspaceProjectRelationship(coordinates, dependency.project, kinds)
         }.sortedWith(compareBy({ it.coordinates.artifactId }, { it.coordinates.groupId }))
 
         val dependents = if (targetCoordinates == null) {

@@ -52,7 +52,7 @@ class DependencyExplorerDialog(
         val titleLabel = JBLabel(relationships.project.artifactId, AllIcons.Nodes.Module, JBLabel.LEFT)
         titleLabel.font = titleLabel.font.deriveFont(Font.BOLD, titleLabel.font.size2D + 3f)
         val summary = JBLabel(
-            "${relationships.dependencies.size} declared dependencies · ${relationships.dependents.size} workspace dependents",
+            "${relationships.dependencies.size} workspace dependencies · ${relationships.dependents.size} workspace dependents",
         )
         summary.foreground = JBUI.CurrentTheme.ContextHelp.FOREGROUND
         val header = javax.swing.JPanel(BorderLayout(0, JBUI.scale(4))).apply {

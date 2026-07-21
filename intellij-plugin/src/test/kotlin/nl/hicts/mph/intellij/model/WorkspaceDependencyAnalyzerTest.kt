@@ -20,9 +20,8 @@ class WorkspaceDependencyAnalyzerTest {
 
         val relationships = analyzer.relationships(service.project.pomPath, listOf(shared, service))!!
 
-        assertEquals(listOf("external-library", "shared-api"), relationships.dependencies.map { it.coordinates.artifactId })
-        assertEquals(null, relationships.dependencies.first().project)
-        assertEquals("shared-api", relationships.dependencies.last().project?.artifactId)
+        assertEquals(listOf("shared-api"), relationships.dependencies.map { it.coordinates.artifactId })
+        assertEquals("shared-api", relationships.dependencies.single().project?.artifactId)
         assertTrue(analyzer.relationships(shared.project.pomPath, listOf(shared, service))!!.dependents.single()
             .kinds.contains(MavenReferenceKind.DEPENDENCY))
     }
