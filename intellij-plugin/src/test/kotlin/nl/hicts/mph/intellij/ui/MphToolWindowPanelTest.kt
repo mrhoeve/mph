@@ -30,7 +30,7 @@ class MphToolWindowPanelTest : BasePlatformTestCase() {
         val repository = root.getChildAt(0) as DefaultMutableTreeNode
         val module = repository.getChildAt(0) as DefaultMutableTreeNode
         assertEquals("sample-service", repository.toString())
-        assertEquals("sample-service  1.2-SNAPSHOT  (org.example)", module.toString())
+        assertEquals("sample-service", module.toString())
     }
 
     fun testRefreshTaskRendersDiscoveryResultAndReportsErrors() {
@@ -63,6 +63,27 @@ class MphToolWindowPanelTest : BasePlatformTestCase() {
         panel.openSelectedPom()
 
         assertEquals(pomPath, openedPomPath)
+    }
+
+    fun testOpensTheRootPomFromARepositoryRow() {
+        val rootPom = "/workspace/sample/pom.xml"
+        var openedPomPath: String? = null
+        val rootProject = projectInfo("sample-parent", rootPom).copy(gitRootPath = "/workspace/sample")
+        val module = projectInfo("sample-module", "/workspace/sample/module/pom.xml")
+            .copy(gitRootPath = "/workspace/sample")
+        val panel = MphToolWindowPanel(
+            project,
+            openPom = { openedPomPath = it },
+            refreshOnCreate = false,
+        )
+        panel.render(ProjectSnapshot(listOf(GitProjectGroup("/workspace/sample", listOf(rootProject, module)))))
+        val treeRoot = panel.projectTree.model.root as DefaultMutableTreeNode
+        val repository = treeRoot.getChildAt(0) as DefaultMutableTreeNode
+        panel.projectTree.selectionPath = TreePath(repository.path)
+
+        panel.openSelectedPom()
+
+        assertEquals(rootPom, openedPomPath)
     }
 
     fun testFormatsProjectEntriesWithoutOptionalCoordinates() {
@@ -159,13 +180,16 @@ class MphToolWindowPanelTest : BasePlatformTestCase() {
         )
 
         renderer.getTreeCellRendererComponent(tree, DefaultMutableTreeNode(repository), false, true, false, 0, false)
-        assertEquals("/workspace/sample", renderer.toolTipText)
+        assertEquals("sample-repository  1.0-SNAPSHOT", renderer.getCharSequence(false).toString())
+        assertNull(renderer.toolTipText)
 
         renderer.getTreeCellRendererComponent(tree, DefaultMutableTreeNode(projectWithCoordinates), true, false, true, 1, true)
-        assertEquals("/workspace/sample/pom.xml", renderer.toolTipText)
+        assertEquals("sample-service", renderer.getCharSequence(false).toString())
+        assertNull(renderer.toolTipText)
 
         renderer.getTreeCellRendererComponent(tree, DefaultMutableTreeNode(projectWithoutCoordinates), false, false, true, 2, false)
-        assertEquals("/workspace/client/pom.xml", renderer.toolTipText)
+        assertEquals("sample-client", renderer.getCharSequence(false).toString())
+        assertNull(renderer.toolTipText)
 
         renderer.getTreeCellRendererComponent(tree, DefaultMutableTreeNode("Other"), false, false, true, 3, false)
     }

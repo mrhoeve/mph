@@ -121,19 +121,23 @@ class MphToolWindowPanel(
             "Run Maven for the selected projects",
             AllIcons.Actions.Compile,
         ) {
-            override fun actionPerformed(event: AnActionEvent) {
-                val selected = selectedBuildProjects()
-                if (selected.isNotEmpty()) {
-                    val order = WorkspaceDependencyAnalyzer().buildOrder(
-                        project.service<IdeaProjectDiscoveryService>().dependencyDescriptors(),
-                    )
-                    val steps = order.entries.associate { it.project.pomPath to it.buildStep }
-                    MavenBuildDialog(project, selected, steps).show()
-                }
-            }
+            override fun actionPerformed(event: AnActionEvent) = buildSelectedProjects()
 
             override fun update(event: AnActionEvent) {
                 event.presentation.isEnabled = selectedBuildProjects().isNotEmpty()
+            }
+
+            override fun getActionUpdateThread() = ActionUpdateThread.EDT
+        }
+        val openPomAction = object : DumbAwareAction(
+            "Open POM",
+            "Open the selected pom.xml in the editor",
+            AllIcons.FileTypes.Xml,
+        ) {
+            override fun actionPerformed(event: AnActionEvent) = openSelectedPom()
+
+            override fun update(event: AnActionEvent) {
+                event.presentation.isEnabled = selectedBuildProjects().size == 1
             }
 
             override fun getActionUpdateThread() = ActionUpdateThread.EDT
@@ -269,11 +273,26 @@ class MphToolWindowPanel(
         tree.emptyText.text = "No linked Maven projects"
         tree.cellRenderer = MphProjectTreeRenderer()
         TreeSpeedSearch.installOn(tree, true) { path -> path.lastPathComponent.toString() }
+        val contextMenu = ActionManager.getInstance().createActionPopupMenu(
+            ActionPlaces.TOOLWINDOW_POPUP,
+            DefaultActionGroup(openPomAction, buildAction),
+        )
         tree.addMouseListener(object : MouseAdapter() {
+            override fun mousePressed(event: MouseEvent) = showContextMenu(event)
+
+            override fun mouseReleased(event: MouseEvent) = showContextMenu(event)
+
             override fun mouseClicked(event: MouseEvent) {
                 if (event.clickCount == 2 && event.button == MouseEvent.BUTTON1) {
                     openSelectedPom()
                 }
+            }
+
+            private fun showContextMenu(event: MouseEvent) {
+                if (!event.isPopupTrigger) return
+                val path = tree.getPathForLocation(event.x, event.y) ?: return
+                tree.selectionPath = path
+                contextMenu.component.show(tree, event.x, event.y)
             }
         })
 
@@ -370,8 +389,22 @@ class MphToolWindowPanel(
 
     internal fun openSelectedPom() {
         val node = tree.lastSelectedPathComponent as? DefaultMutableTreeNode ?: return
-        val projectInfo = (node.userObject as? ProjectTreeEntry)?.project ?: return
+        val projectInfo = when (val entry = node.userObject) {
+            is ProjectTreeEntry -> entry.project
+            is RepositoryTreeEntry -> entry.rootProject()
+            else -> null
+        } ?: return
         openPom(projectInfo.pomPath)
+    }
+
+    private fun buildSelectedProjects() {
+        val selected = selectedBuildProjects()
+        if (selected.isEmpty()) return
+        val order = WorkspaceDependencyAnalyzer().buildOrder(
+            project.service<IdeaProjectDiscoveryService>().dependencyDescriptors(),
+        )
+        val steps = order.entries.associate { it.project.pomPath to it.buildStep }
+        MavenBuildDialog(project, selected, steps).show()
     }
 
     internal fun selectedProjects(): List<MavenProjectInfo> = tree.selectionPaths.orEmpty()
@@ -541,11 +574,7 @@ class MphToolWindowPanel(
 internal data class ProjectTreeEntry(
     val project: MavenProjectInfo,
 ) {
-    override fun toString(): String = buildString {
-        append(project.artifactId)
-        project.version?.takeIf(String::isNotBlank)?.let { append("  ").append(it) }
-        project.groupId?.takeIf(String::isNotBlank)?.let { append("  (").append(it).append(')') }
-    }
+    override fun toString(): String = project.artifactId
 }
 
 internal data class RepositoryTreeEntry(
@@ -553,9 +582,6 @@ internal data class RepositoryTreeEntry(
     val rootPath: String?,
     val projects: List<MavenProjectInfo>,
 ) {
-    val projectCount: Int
-        get() = projects.size
-
     fun rootProject(): MavenProjectInfo? {
         val root = rootPath?.let(Path::of)?.toAbsolutePath()?.normalize()
         return projects.minByOrNull { project ->
@@ -577,29 +603,25 @@ internal class MphProjectTreeRenderer : ColoredTreeCellRenderer() {
         row: Int,
         hasFocus: Boolean,
     ) {
+        toolTipText = null
         when (val entry = (value as? DefaultMutableTreeNode)?.userObject) {
             is RepositoryTreeEntry -> {
                 icon = AllIcons.Nodes.Folder
                 append(entry.label, SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES)
-                append("  ${entry.projectCount}", SimpleTextAttributes.GRAYED_ATTRIBUTES)
-                entry.projects.firstOrNull()?.gitStatus?.let { status ->
+                val rootProject = entry.rootProject()
+                rootProject?.version?.takeIf(String::isNotBlank)?.let { version ->
+                    append("  $version", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                }
+                rootProject?.gitStatus?.let { status ->
                     append("  ${status.branchName}", SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES)
                     if (status.behindCount > 0) append("  ↓${status.behindCount}", SimpleTextAttributes.ERROR_ATTRIBUTES)
                     if (status.aheadCount > 0) append("  ↑${status.aheadCount}", SimpleTextAttributes.GRAYED_ATTRIBUTES)
                 }
-                toolTipText = entry.rootPath
             }
 
             is ProjectTreeEntry -> {
                 icon = AllIcons.Nodes.Module
                 append(entry.project.artifactId, SimpleTextAttributes.REGULAR_ATTRIBUTES)
-                entry.project.version?.takeIf(String::isNotBlank)?.let {
-                    append("  $it", SimpleTextAttributes.GRAYED_ATTRIBUTES)
-                }
-                entry.project.groupId?.takeIf(String::isNotBlank)?.let {
-                    append("  $it", SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES)
-                }
-                toolTipText = entry.project.pomPath
             }
 
             else -> append(entry?.toString().orEmpty())
