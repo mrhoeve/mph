@@ -14,7 +14,8 @@ class WorkspaceDependencyGraphTest {
         val module = descriptor("platform-api", "platform", pom = "api/pom.xml", parent = coordinates("platform"))
         val service = descriptor("sample-service", "service", dependencies = setOf(coordinates("platform-api")))
         val unrelated = descriptor("unrelated", "unrelated")
-        val descriptors = listOf(parent, module, service, unrelated)
+        val sibling = descriptor("platform-admin", "platform", pom = "admin/pom.xml", parent = coordinates("platform"))
+        val descriptors = listOf(parent, module, service, unrelated, sibling)
         val order = WorkspaceDependencyAnalyzer().buildOrder(descriptors)
 
         val graph = WorkspaceDependencyGraphBuilder().build(descriptors, order)

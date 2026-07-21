@@ -33,8 +33,9 @@ data class WorkspaceDependencyGraph(
         val target = nodes.firstOrNull { it.id == nodeId } ?: return this
         val included = linkedSetOf(target.id)
         includeDescendants(target.id, included)
+        val focusAndDescendants = included.toSet()
         edges.filter { it.kind == DependencyGraphEdgeKind.DEPENDENCY }.forEach { edge ->
-            if (edge.sourceId in included || edge.targetId in included) {
+            if (edge.sourceId in focusAndDescendants || edge.targetId in focusAndDescendants) {
                 included += edge.sourceId
                 included += edge.targetId
             }
