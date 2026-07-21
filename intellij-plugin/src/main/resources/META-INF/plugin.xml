@@ -7,6 +7,57 @@
         Manage versions, builds, dependencies, and Git synchronization across a Maven workspace from IntelliJ IDEA.
     ]]></description>
 
+    <!--
+        Release maintenance: update this section for every plugin release. Put the newest version first and describe
+        user-visible features, improvements, and important fixes; IntelliJ renders it in the plugin's What's New tab.
+    -->
+    <change-notes><![CDATA[
+        <h2>Initial IntelliJ IDEA release</h2>
+        <p>
+            Maven Project Helper brings multi-repository Maven workspace management directly into IntelliJ IDEA.
+            It is designed for teams that develop many related services, libraries, parents, and modules together.
+        </p>
+
+        <h3>Workspace insight</h3>
+        <ul>
+            <li>Discover linked Maven projects and modules from IntelliJ's Maven model.</li>
+            <li>Inspect workspace-only dependencies and dependents, with direct navigation to their POM files.</li>
+            <li>Explore an interactive dependency graph with project focus, zoom controls, and PNG export.</li>
+            <li>Calculate repository build stages, identify cycles, and export the build order to Excel.</li>
+            <li>Inspect searchable dependency trees and export CycloneDX SBOMs as JSON or XML.</li>
+        </ul>
+
+        <h3>Version management</h3>
+        <ul>
+            <li>Update a project version together with references in dependent workspace projects.</li>
+            <li>Apply or remove upgrade prefixes across multiple projects and realign linked versions.</li>
+            <li>Update dependent projects directly from the POM editor context menu.</li>
+            <li>Inspect managed version properties and coordinate Spring Boot upgrades.</li>
+            <li>Read released versions from Git tags while respecting the local Maven and Git environment.</li>
+        </ul>
+
+        <h3>Build and Git workflows</h3>
+        <ul>
+            <li>Build selected repositories or individual modules with configurable Maven options and live output.</li>
+            <li>Open or build any project from the MPH tool-window context menu.</li>
+            <li>View branch names and ahead/behind status for every repository.</li>
+            <li>Create coordinated feature branches across multiple repositories.</li>
+            <li>Synchronize upgrade branches with develop using stash, rebase, restore, and safe version realignment.</li>
+        </ul>
+
+        <h3>Security and supply chain</h3>
+        <ul>
+            <li>Run Nexus IQ evaluations for repositories and modules using existing Jenkins pipeline application IDs.</li>
+            <li>Inspect policy violations, severity summaries, remediation guidance, and full Nexus IQ reports.</li>
+            <li>Keep credentials in IntelliJ's secure password storage and reuse local Maven configuration.</li>
+        </ul>
+
+        <p>
+            Thank you for trying the first IntelliJ IDEA release of Maven Project Helper.
+            Feedback and issue reports are welcome on GitHub.
+        </p>
+    ]]></change-notes>
+
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.java</depends>
     <depends>org.jetbrains.idea.maven</depends>
