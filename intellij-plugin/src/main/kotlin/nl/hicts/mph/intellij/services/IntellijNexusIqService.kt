@@ -12,7 +12,6 @@ import com.intellij.util.io.HttpRequests
 import nl.hicts.mph.intellij.model.MavenProjectInfo
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
-import java.nio.file.Path
 import java.util.Base64
 
 data class NexusIqScanResult(
@@ -39,8 +38,7 @@ class IntellijNexusIqService(private val project: Project) {
 
     fun applicationId(projectInfo: MavenProjectInfo): String? {
         val settings = service<NexusIqSettings>().state
-        val jenkinsfile = Path.of(projectInfo.pomPath).parent.resolve("Jenkinsfile")
-        if (!Files.isRegularFile(jenkinsfile)) return null
+        val jenkinsfile = NexusIqSupport.findJenkinsfile(projectInfo.pomPath, projectInfo.gitRootPath) ?: return null
         return NexusIqSupport.applicationId(
             Files.readString(jenkinsfile),
             settings.applicationIdPrefix,
