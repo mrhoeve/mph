@@ -246,6 +246,13 @@ class MphToolWindowPanel(
                 ShowSettingsUtil.getInstance().showSettingsDialog(project, NexusIqConfigurable::class.java)
             }
         }
+        val aboutAction = object : DumbAwareAction(
+            "About",
+            "About Maven Project Helper",
+            AllIcons.General.Information,
+        ) {
+            override fun actionPerformed(event: AnActionEvent) = AboutMphDialog(project).show()
+        }
         val toolbar = ActionManager.getInstance().createActionToolbar(
             ActionPlaces.TOOLWINDOW_TOOLBAR_BAR,
             DefaultActionGroup(
@@ -259,6 +266,7 @@ class MphToolWindowPanel(
                 realignVersionsAction,
                 buildAction,
                 rebaseAction,
+                aboutAction,
                 settingsAction,
                 refreshAction,
             ),

@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>nl.hicts.mph.plugin</id>
     <name>Maven Project Helper</name>
-    <vendor>MPH</vendor>
+    <vendor url="https://github.com/mrhoeve/mph">MPH</vendor>
 
     <description><![CDATA[
         Manage versions, builds, dependencies, and Git synchronization across a Maven workspace from IntelliJ IDEA.
