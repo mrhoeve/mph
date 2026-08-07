@@ -17,6 +17,7 @@
             Maven Project Helper brings multi-repository Maven workspace management directly into IntelliJ IDEA.
             It is designed for teams that develop many related services, libraries, parents, and modules together.
         </p>
+        <p><b>Compatible with IntelliJ IDEA 2026.1 and 2026.2.</b></p>
 
         <h3>Workspace insight</h3>
         <ul>
