@@ -1,8 +1,6 @@
 package nl.hicts.mph.intellij.ui
 
 import com.intellij.ide.BrowserUtil
-import com.intellij.ide.plugins.PluginManagerCore
-import com.intellij.openapi.extensions.PluginId
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.ui.TitledSeparator
@@ -22,7 +20,6 @@ import javax.swing.JComponent
 import javax.swing.JPanel
 
 internal object MphProjectInfo {
-    const val PLUGIN_ID = "nl.hicts.mph.plugin"
     const val PROJECT_URL = "https://github.com/mrhoeve/mph"
     const val ISSUES_URL = "$PROJECT_URL/issues"
 }
@@ -37,8 +34,7 @@ internal class AboutMphDialog(project: Project) : DialogWrapper(project) {
     override fun createActions(): Array<Action> = arrayOf(okAction)
 
     override fun createCenterPanel(): JComponent {
-        val installedVersion = PluginManagerCore.getPlugin(PluginId.getId(MphProjectInfo.PLUGIN_ID))
-            ?.version ?: "Development build"
+        val installedVersion = javaClass.`package`.implementationVersion ?: "Development build"
 
         val heading = JBLabel("Maven Project Helper", MphIcons.Mph, JBLabel.LEFT).apply {
             font = font.deriveFont(Font.BOLD, font.size2D + 5f)

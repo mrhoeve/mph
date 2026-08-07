@@ -97,6 +97,10 @@ kover {
 }
 
 tasks {
+    jar {
+        manifest.attributes["Implementation-Version"] = project.version.toString()
+    }
+
     test {
         useJUnit()
     }
