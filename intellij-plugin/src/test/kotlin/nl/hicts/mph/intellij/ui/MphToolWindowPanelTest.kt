@@ -1,6 +1,7 @@
 package nl.hicts.mph.intellij.ui
 
 import com.intellij.openapi.progress.EmptyProgressIndicator
+import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import nl.hicts.mph.intellij.model.GitProjectGroup
 import nl.hicts.mph.intellij.model.MavenProjectInfo
@@ -44,6 +45,50 @@ class MphToolWindowPanelTest : BasePlatformTestCase() {
 
         task.onThrowable(IllegalStateException("Test discovery failure"))
         assertEquals("Unable to discover Maven projects: Test discovery failure", panel.summaryText)
+    }
+
+    fun testReloadsTheMavenModelBeforeRefreshingTheScreen() {
+        var reloadRequested = false
+        var discovered = false
+        val refreshed = snapshot(projectInfo("refreshed-service", "/workspace/refreshed-service/pom.xml"))
+        val panel = MphToolWindowPanel(
+            project = project,
+            discoverProjects = {
+                discovered = true
+                refreshed
+            },
+            reloadMavenProjects = { onSuccess, _ ->
+                reloadRequested = true
+                assertFalse(discovered)
+                onSuccess()
+            },
+            queueRefreshTask = { task ->
+                task.run(EmptyProgressIndicator())
+                task.onSuccess()
+            },
+            refreshOnCreate = false,
+        )
+
+        panel.reloadAndRefresh()
+        assertTrue(reloadRequested)
+        assertEquals("Reloading Maven projects…", panel.summaryText)
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        assertTrue(discovered)
+        assertEquals("1 Maven projects in 1 Git repositories", panel.summaryText)
+    }
+
+    fun testReportsMavenReloadFailures() {
+        val panel = MphToolWindowPanel(
+            project = project,
+            reloadMavenProjects = { _, onFailure -> onFailure(IllegalStateException("Test reload failure")) },
+            refreshOnCreate = false,
+        )
+
+        panel.reloadAndRefresh()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        assertEquals("Unable to reload Maven projects: Test reload failure", panel.summaryText)
     }
 
     fun testOpensTheSelectedPom() {

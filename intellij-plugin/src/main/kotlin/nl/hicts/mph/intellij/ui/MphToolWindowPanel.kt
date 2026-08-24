@@ -2,6 +2,7 @@ package nl.hicts.mph.intellij.ui
 
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.ActionPlaces
 import com.intellij.openapi.actionSystem.AnActionEvent
@@ -43,6 +44,7 @@ import nl.hicts.mph.intellij.services.GitWorkspaceService
 import nl.hicts.mph.intellij.services.IntellijSbomService
 import nl.hicts.mph.intellij.services.NexusIqSettings
 import nl.hicts.mph.intellij.model.WorkspaceDependencyAnalyzer
+import org.jetbrains.idea.maven.project.MavenProjectsManager
 import java.awt.BorderLayout
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
@@ -65,6 +67,8 @@ class MphToolWindowPanel(
             OpenFileDescriptor(project, virtualFile).navigate(true)
         }
     },
+    private val reloadMavenProjects: ((() -> Unit, (Throwable) -> Unit) -> Unit)? = null,
+    private val queueRefreshTask: (Task.Backgroundable) -> Unit = Task.Backgroundable::queue,
     refreshOnCreate: Boolean = true,
 ) : SimpleToolWindowPanel(true, true), Disposable {
     private val summary = JBLabel("Discovering Maven projects…", SwingConstants.LEFT)
@@ -72,14 +76,21 @@ class MphToolWindowPanel(
     private val treeModel = DefaultTreeModel(rootNode)
     private val tree = Tree(treeModel)
     private var snapshot = ProjectSnapshot(emptyList())
+    private var reloadInProgress = false
 
     init {
         val refreshAction = object : DumbAwareAction(
             "Refresh",
-            "Refresh Maven projects",
+            "Reload Maven projects and refresh the screen",
             AllIcons.Actions.Refresh,
         ) {
-            override fun actionPerformed(event: AnActionEvent) = refresh()
+            override fun actionPerformed(event: AnActionEvent) = reloadAndRefresh()
+
+            override fun update(event: AnActionEvent) {
+                event.presentation.isEnabled = !reloadInProgress
+            }
+
+            override fun getActionUpdateThread() = ActionUpdateThread.EDT
         }
         val alignVersionsAction = object : DumbAwareAction(
             "Align Versions",
@@ -336,7 +347,47 @@ class MphToolWindowPanel(
         if (project.isDisposed) return
         summary.text = "Refreshing Maven projects…"
 
-        createRefreshTask().queue()
+        queueRefreshTask(createRefreshTask())
+    }
+
+    internal fun reloadAndRefresh() {
+        if (project.isDisposed || reloadInProgress) return
+        reloadInProgress = true
+        summary.text = "Reloading Maven projects…"
+        (reloadMavenProjects ?: ::reloadMavenModel)(
+            {
+                ApplicationManager.getApplication().invokeLater {
+                    reloadInProgress = false
+                    refresh()
+                }
+            },
+            { error ->
+                ApplicationManager.getApplication().invokeLater {
+                    reloadInProgress = false
+                    summary.text = "Unable to reload Maven projects: ${error.message ?: error.javaClass.simpleName}"
+                }
+            },
+        )
+    }
+
+    private fun reloadMavenModel(onSuccess: () -> Unit, onFailure: (Throwable) -> Unit) {
+        val manager = MavenProjectsManager.getInstance(project)
+        val listenerDisposable = Disposer.newDisposable("MPH Maven reload listener")
+        Disposer.register(this, listenerDisposable)
+        manager.addManagerListener(
+            object : MavenProjectsManager.Listener {
+                override fun projectImportCompleted() {
+                    Disposer.dispose(listenerDisposable)
+                    onSuccess()
+                }
+            },
+            listenerDisposable,
+        )
+        runCatching(manager::forceUpdateAllProjectsOrFindAllAvailablePomFiles)
+            .onFailure { error ->
+                Disposer.dispose(listenerDisposable)
+                onFailure(error)
+            }
     }
 
     internal fun createRefreshTask(): Task.Backgroundable =

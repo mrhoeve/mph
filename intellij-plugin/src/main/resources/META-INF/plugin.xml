@@ -22,6 +22,7 @@
         <h3>Workspace insight</h3>
         <ul>
             <li>Discover linked Maven projects and modules from IntelliJ's Maven model.</li>
+            <li>Reload the Maven model and refresh workspace details directly from the tool window.</li>
             <li>Inspect workspace-only dependencies and dependents, with direct navigation to their POM files.</li>
             <li>Explore an interactive dependency graph with project focus, zoom controls, and PNG export.</li>
             <li>Calculate repository build stages, identify cycles, and export the build order to Excel.</li>
