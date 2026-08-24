@@ -94,6 +94,54 @@ class BulkVersionUpdateServiceTest : BasePlatformTestCase() {
         }
     }
 
+    fun testRealignsReferencesToModulesThatInheritTheirParentVersion() {
+        val parentFile = tempPom("parent", pom("sample-parent", "2.0-SNAPSHOT"))
+        val moduleSource = inheritedPom("sample-module", "sample-parent")
+        val aliasModuleSource = inheritedPom("alias-module", "sample-parent", "${'$'}{project.parent.version}")
+        val moduleFile = tempPom("inherited-module", moduleSource)
+        val aliasModuleFile = tempPom("parent-version-module", aliasModuleSource)
+        val dependentFile = tempPom(
+            "module-dependent",
+            pom(
+                "sample-service",
+                "2.0-SNAPSHOT",
+                """
+                    <dependencies>
+                        <dependency><groupId>org.example</groupId><artifactId>sample-module</artifactId><version>1.0-SNAPSHOT</version></dependency>
+                        <dependency><groupId>org.example</groupId><artifactId>alias-module</artifactId><version>1.0-SNAPSHOT</version></dependency>
+                    </dependencies>
+                """.trimIndent(),
+            ),
+        )
+        val parent = projectInfo("sample-parent", parentFile, "2.0-SNAPSHOT")
+        val module = projectInfo("sample-module", moduleFile, "2.0-SNAPSHOT")
+        val aliasModule = projectInfo("alias-module", aliasModuleFile, "2.0-SNAPSHOT")
+        val dependent = projectInfo("sample-service", dependentFile, "2.0-SNAPSHOT")
+
+        try {
+            val result = project.service<BulkVersionUpdateService>().update(
+                BulkVersionUpdateRequest(
+                    selectedProjects = listOf(parent, module, aliasModule),
+                    workspaceProjects = listOf(parent, module, aliasModule, dependent),
+                    prefix = "",
+                    mode = BulkVersionMode.KEEP_CURRENT,
+                    updateDependents = true,
+                ),
+            )
+
+            assertTrue(result.issues.toString(), result.issues.isEmpty())
+            assertEquals(2, result.updatedReferenceCount)
+            assertEquals(3, Regex("<version>2.0-SNAPSHOT</version>").findAll(document(dependentFile).text).count())
+            assertEquals(moduleSource, document(moduleFile).text)
+            assertEquals(aliasModuleSource, document(aliasModuleFile).text)
+        } finally {
+            Files.deleteIfExists(parentFile)
+            Files.deleteIfExists(moduleFile)
+            Files.deleteIfExists(aliasModuleFile)
+            Files.deleteIfExists(dependentFile)
+        }
+    }
+
     private fun tempPom(name: String, content: String): Path =
         Files.createTempFile("mph-bulk-$name-", ".txt").also { Files.writeString(it, content) }
 
@@ -101,10 +149,10 @@ class BulkVersionUpdateServiceTest : BasePlatformTestCase() {
         LocalFileSystem.getInstance().refreshAndFindFileByNioFile(path)!!,
     )!!
 
-    private fun projectInfo(artifactId: String, path: Path) = MavenProjectInfo(
+    private fun projectInfo(artifactId: String, path: Path, version: String = "1.0-SNAPSHOT") = MavenProjectInfo(
         groupId = "org.example",
         artifactId = artifactId,
-        version = "1.0-SNAPSHOT",
+        version = version,
         pomPath = path.toString(),
         gitRootPath = path.parent.toString(),
     )
@@ -116,6 +164,19 @@ class BulkVersionUpdateServiceTest : BasePlatformTestCase() {
             <artifactId>$artifactId</artifactId>
             <version>$version</version>
             $body
+        </project>
+    """.trimIndent()
+
+    private fun inheritedPom(artifactId: String, parentArtifactId: String, version: String? = null) = """
+        <project>
+            <modelVersion>4.0.0</modelVersion>
+            <parent>
+                <groupId>org.example</groupId>
+                <artifactId>$parentArtifactId</artifactId>
+                <version>2.0-SNAPSHOT</version>
+            </parent>
+            <artifactId>$artifactId</artifactId>
+            ${version?.let { "<version>$it</version>" }.orEmpty()}
         </project>
     """.trimIndent()
 }

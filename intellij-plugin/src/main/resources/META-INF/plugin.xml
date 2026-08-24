@@ -31,7 +31,7 @@
         <h3>Version management</h3>
         <ul>
             <li>Update a project version together with references in dependent workspace projects.</li>
-            <li>Apply or remove upgrade prefixes across multiple projects and realign linked versions.</li>
+            <li>Apply or remove upgrade prefixes across multiple projects and realign linked versions, including modules that inherit their parent version.</li>
             <li>Update dependent projects directly from the POM editor context menu.</li>
             <li>Inspect managed version properties and coordinate Spring Boot upgrades.</li>
             <li>Read released versions from Git tags while respecting the local Maven and Git environment.</li>

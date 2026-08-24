@@ -102,12 +102,18 @@ class BulkVersionUpdateService(
             issues += "${projectInfo.artifactId}: pom.xml is unavailable or not writable."
             return@mapNotNull null
         }
-        val currentVersion = PomReferenceVersionEditor.findProjectVersion(document.text)
+        val localVersion = PomReferenceVersionEditor.findProjectVersion(document.text)
+        val currentVersion = localVersion ?: request.takeIf { it.mode == BulkVersionMode.KEEP_CURRENT }
+            ?.let { projectInfo.version }
         if (currentVersion.isNullOrBlank()) {
             issues += "${projectInfo.artifactId}: the project version is inherited or unresolved."
             return@mapNotNull null
         }
-        TargetVersion(projectInfo, adjustedVersion(request, currentVersion))
+        TargetVersion(
+            project = projectInfo,
+            version = adjustedVersion(request, currentVersion),
+            updateProjectVersion = localVersion != null,
+        )
     }
 
     private fun adjustedVersion(request: BulkVersionUpdateRequest, currentVersion: String): String =
@@ -130,7 +136,9 @@ class BulkVersionUpdateService(
         issues: MutableList<String>,
     ): DocumentUpdate {
         var content = originalContent
-        targets.firstOrNull { it.project.pomPath == projectInfo.pomPath }?.let { target ->
+        targets.firstOrNull {
+            it.project.pomPath == projectInfo.pomPath && it.updateProjectVersion
+        }?.let { target ->
             val update = PomReferenceVersionEditor.updateProjectVersion(content, target.version)
             content = update.content
             update.unresolvedProperty?.let { property ->
@@ -176,6 +184,10 @@ class BulkVersionUpdateService(
         return update
     }
 
-    private data class TargetVersion(val project: MavenProjectInfo, val version: String)
+    private data class TargetVersion(
+        val project: MavenProjectInfo,
+        val version: String,
+        val updateProjectVersion: Boolean,
+    )
     private data class DocumentUpdate(val content: String, val updatedReferences: Int)
 }
