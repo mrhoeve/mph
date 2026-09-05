@@ -35,7 +35,7 @@ describe('SbomViewComponent', () => {
     expect((fixture.nativeElement as HTMLElement).textContent).toContain('2 components found');
 
     const buttons = [...(fixture.nativeElement as HTMLElement).querySelectorAll('.toggle-btn')];
-    buttons.find(button => button.textContent === 'JSON')?.dispatchEvent(new Event('click'));
+    buttons.find(button => button.textContent?.trim() === 'JSON')?.dispatchEvent(new Event('click'));
     fixture.detectChanges();
     expect((fixture.nativeElement as HTMLElement).querySelector('.raw-content')?.textContent).toContain('{"bom":true}');
   });

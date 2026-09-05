@@ -1,8 +1,29 @@
-import { Component, EventEmitter, Output, signal, inject, OnInit, DestroyRef, computed, ElementRef, ViewChild, ViewChildren, QueryList, AfterViewInit, OnDestroy } from '@angular/core';
+import {
+  Component,
+  EventEmitter,
+  Output,
+  signal,
+  inject,
+  OnInit,
+  DestroyRef,
+  computed,
+  ElementRef,
+  ViewChild,
+  ViewChildren,
+  QueryList,
+  AfterViewInit,
+  OnDestroy,
+  ChangeDetectionStrategy,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ProjectAnalysis, MavenProjectService } from '../../../services/maven-project-service';
-import { MavenBuildService, BuildStatus, BuildOptions, ProjectProgress } from '../../../services/maven-build.service';
+import {
+  MavenBuildService,
+  BuildStatus,
+  BuildOptions,
+  ProjectProgress,
+} from '../../../services/maven-build.service';
 import { Subscription } from 'rxjs';
 
 interface LogLine {
@@ -21,7 +42,8 @@ interface ProjectBuildInfo {
   selector: 'app-maven-build-modal',
   standalone: true,
   imports: [CommonModule, FormsModule],
-  templateUrl: './maven-build-modal.component.html'
+  changeDetection: ChangeDetectionStrategy.Eager,
+  templateUrl: './maven-build-modal.component.html',
 })
 export class MavenBuildModalComponent implements OnInit, AfterViewInit, OnDestroy {
   private readonly mavenProjectService = inject(MavenProjectService);
@@ -32,7 +54,7 @@ export class MavenBuildModalComponent implements OnInit, AfterViewInit, OnDestro
   readonly isLoading = signal(true);
   readonly isBuilding = signal(false);
   readonly errorMessage = signal<string | null>(null);
-  
+
   readonly skipUTs = signal(true);
   readonly skipITs = signal(true);
   readonly parallel = signal(true);
@@ -50,34 +72,49 @@ export class MavenBuildModalComponent implements OnInit, AfterViewInit, OnDestro
   readonly groupedProjects = computed(() => {
     const list = [...this.projects()];
     const currentlyBuilding = this.isBuilding();
-    
-    const hasResults = list.some(p => p.status === BuildStatus.FAILED || p.status === BuildStatus.SUCCESS || p.status === BuildStatus.RUNNING);
+
+    const hasResults = list.some(
+      (p) =>
+        p.status === BuildStatus.FAILED ||
+        p.status === BuildStatus.SUCCESS ||
+        p.status === BuildStatus.RUNNING,
+    );
 
     if (!currentlyBuilding && !hasResults) {
       list.sort((a, b) => a.originalIndex - b.originalIndex);
-      return [{
-        name: '',
-        projects: list
-      }];
+      return [
+        {
+          name: '',
+          projects: list,
+        },
+      ];
     }
 
-    const groups: { name: string, projects: ProjectBuildInfo[] }[] = [];
-    
-    const failed = list.filter(p => p.status === BuildStatus.FAILED).sort((a, b) => a.originalIndex - b.originalIndex);
+    const groups: { name: string; projects: ProjectBuildInfo[] }[] = [];
+
+    const failed = list
+      .filter((p) => p.status === BuildStatus.FAILED)
+      .sort((a, b) => a.originalIndex - b.originalIndex);
     if (failed.length > 0) groups.push({ name: 'Failed', projects: failed });
 
-    const running = list.filter(p => p.status === BuildStatus.RUNNING).sort((a, b) => a.originalIndex - b.originalIndex);
+    const running = list
+      .filter((p) => p.status === BuildStatus.RUNNING)
+      .sort((a, b) => a.originalIndex - b.originalIndex);
     if (running.length > 0) groups.push({ name: 'Running', projects: running });
 
-    const pending = list.filter(p => p.status === BuildStatus.PENDING).sort((a, b) => a.originalIndex - b.originalIndex);
+    const pending = list
+      .filter((p) => p.status === BuildStatus.PENDING)
+      .sort((a, b) => a.originalIndex - b.originalIndex);
     if (pending.length > 0) groups.push({ name: 'Pending', projects: pending });
 
-    const completed = list.filter(p => p.status === BuildStatus.SUCCESS || p.status === BuildStatus.SKIPPED).sort((a, b) => a.originalIndex - b.originalIndex);
+    const completed = list
+      .filter((p) => p.status === BuildStatus.SUCCESS || p.status === BuildStatus.SKIPPED)
+      .sort((a, b) => a.originalIndex - b.originalIndex);
     if (completed.length > 0) groups.push({ name: 'Completed', projects: completed });
 
     return groups;
   });
-  
+
   private eventsSubscription?: Subscription;
   private logLinesSubscription?: Subscription;
 
@@ -111,7 +148,7 @@ export class MavenBuildModalComponent implements OnInit, AfterViewInit, OnDestro
           project: r,
           status: BuildStatus.PENDING,
           selected: true,
-          originalIndex: index
+          originalIndex: index,
         }));
         this.projects.set(all);
         this.isLoading.set(false);
@@ -120,29 +157,33 @@ export class MavenBuildModalComponent implements OnInit, AfterViewInit, OnDestro
         this.isLoading.set(false);
         this.errorMessage.set('Failed to load projects.');
         console.error(err);
-      }
+      },
     });
     this.destroyRef.onDestroy(() => subscription.unsubscribe());
   }
 
   toggleSelectAll(event: Event): void {
     const checked = (event.target as HTMLInputElement).checked;
-    this.projects.update(list => list.map(p => ({ ...p, selected: checked })));
+    this.projects.update((list) => list.map((p) => ({ ...p, selected: checked })));
   }
 
   isAllSelected(): boolean {
-    return this.projects().every(p => p.selected);
+    return this.projects().every((p) => p.selected);
   }
 
   startBuild(): void {
-    const selectedPaths = this.projects().filter(p => p.selected).map(p => p.project.path);
+    const selectedPaths = this.projects()
+      .filter((p) => p.selected)
+      .map((p) => p.project.path);
     if (selectedPaths.length === 0) return;
 
     this.isBuilding.set(true);
     this.showOptions.set(false);
     this.projectLogs.set({});
     this.followLog.set(true);
-    this.projects.update(list => list.map(p => ({ ...p, status: p.selected ? BuildStatus.PENDING : BuildStatus.SKIPPED })));
+    this.projects.update((list) =>
+      list.map((p) => ({ ...p, status: p.selected ? BuildStatus.PENDING : BuildStatus.SKIPPED })),
+    );
 
     if (this.eventsSubscription) {
       this.eventsSubscription.unsubscribe();
@@ -154,21 +195,21 @@ export class MavenBuildModalComponent implements OnInit, AfterViewInit, OnDestro
       },
       error: (err) => {
         console.error('SSE Error:', err);
-      }
+      },
     });
 
     const options: BuildOptions = {
       skipUTs: this.skipUTs(),
       skipITs: this.skipITs(),
       parallel: this.parallel(),
-      maxParallel: this.maxParallel()
+      maxParallel: this.maxParallel(),
     };
 
     this.mavenBuildService.startBuild(selectedPaths, options).subscribe({
       next: () => {
         // If no project is selected for logs, select the first one that is selected for build
         if (!this.selectedProjectPath()) {
-          const firstSelected = this.projects().find(p => p.selected);
+          const firstSelected = this.projects().find((p) => p.selected);
           if (firstSelected) {
             this.selectedProjectPath.set(firstSelected.project.path);
           }
@@ -177,20 +218,22 @@ export class MavenBuildModalComponent implements OnInit, AfterViewInit, OnDestro
       error: (err) => {
         this.errorMessage.set('Failed to start build.');
         this.isBuilding.set(false);
-      }
+      },
     });
   }
 
   handleBuildEvent(event: ProjectProgress): void {
-    this.projects.update(list => list.map(p => {
-      if (p.project.path === event.projectPath) {
-        return { ...p, status: event.status };
-      }
-      return p;
-    }));
+    this.projects.update((list) =>
+      list.map((p) => {
+        if (p.project.path === event.projectPath) {
+          return { ...p, status: event.status };
+        }
+        return p;
+      }),
+    );
 
     if (event.logLine) {
-      this.projectLogs.update(logs => {
+      this.projectLogs.update((logs) => {
         const projectLogs = logs[event.projectPath] || [];
         const newLine: LogLine = { id: ++this.logIdCounter, text: event.logLine! };
         return { ...logs, [event.projectPath]: [...projectLogs, newLine].slice(-1000) };
@@ -199,9 +242,9 @@ export class MavenBuildModalComponent implements OnInit, AfterViewInit, OnDestro
 
     // Check if all selected projects are finished
     const allFinished = this.projects()
-      .filter(p => p.selected)
-      .every(p => p.status === BuildStatus.SUCCESS || p.status === BuildStatus.FAILED);
-    
+      .filter((p) => p.selected)
+      .every((p) => p.status === BuildStatus.SUCCESS || p.status === BuildStatus.FAILED);
+
     if (allFinished && this.isBuilding()) {
       this.isBuilding.set(false);
       this.showOptions.set(true);
@@ -222,7 +265,7 @@ export class MavenBuildModalComponent implements OnInit, AfterViewInit, OnDestro
 
   getSelectedProjectLogs(): LogLine[] {
     const path = this.selectedProjectPath();
-    return path ? (this.projectLogs()[path] || []) : [];
+    return path ? this.projectLogs()[path] || [] : [];
   }
 
   private scrollToBottom(): void {
@@ -231,7 +274,7 @@ export class MavenBuildModalComponent implements OnInit, AfterViewInit, OnDestro
       this.isAutoScrolling = true;
       element.scrollTop = element.scrollHeight;
       this.lastScrollTop = element.scrollTop;
-      
+
       // Reset isAutoScrolling after a short delay to allow the scroll event to be processed
       setTimeout(() => {
         this.isAutoScrolling = false;
@@ -243,23 +286,24 @@ export class MavenBuildModalComponent implements OnInit, AfterViewInit, OnDestro
     if (this.logContainer && !this.isAutoScrolling) {
       const element = this.logContainer.nativeElement;
       const currentScrollTop = element.scrollTop;
-      
+
       // Use Math.ceil and a small tolerance to handle sub-pixel issues and zoom
-      const atBottom = Math.ceil(element.scrollTop + element.clientHeight) >= element.scrollHeight - 10;
-      
+      const atBottom =
+        Math.ceil(element.scrollTop + element.clientHeight) >= element.scrollHeight - 10;
+
       // If user scrolls UP and is not at bottom, stop following
       if (currentScrollTop < this.lastScrollTop && !atBottom) {
         if (this.followLog()) {
           this.followLog.set(false);
         }
-      } 
+      }
       // If they reach the bottom manually, resume following
       else if (atBottom) {
         if (!this.followLog()) {
           this.followLog.set(true);
         }
       }
-      
+
       this.lastScrollTop = currentScrollTop;
     }
   }
@@ -292,6 +336,6 @@ export class MavenBuildModalComponent implements OnInit, AfterViewInit, OnDestro
   }
 
   toggleOptions(): void {
-    this.showOptions.update(v => !v);
+    this.showOptions.update((v) => !v);
   }
 }

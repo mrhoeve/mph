@@ -1,4 +1,12 @@
-import { Component, EventEmitter, OnInit, Output, input, signal } from '@angular/core';
+import {
+  Component,
+  EventEmitter,
+  OnInit,
+  Output,
+  input,
+  signal,
+  ChangeDetectionStrategy,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ProjectAnalysis, ManagedProperty } from '../../../services/maven-project-service';
@@ -7,7 +15,8 @@ import { ProjectAnalysis, ManagedProperty } from '../../../services/maven-projec
   selector: 'app-property-override-modal',
   standalone: true,
   imports: [CommonModule, FormsModule],
-  templateUrl: './property-override-modal.component.html'
+  changeDetection: ChangeDetectionStrategy.Eager,
+  templateUrl: './property-override-modal.component.html',
 })
 export class PropertyOverrideModalComponent implements OnInit {
   project = input.required<ProjectAnalysis>();
@@ -17,7 +26,7 @@ export class PropertyOverrideModalComponent implements OnInit {
   readonly overrideRemark = signal('');
 
   @Output() dismissed = new EventEmitter<void>();
-  @Output() execute = new EventEmitter<{newValue: string, remark: string}>();
+  @Output() execute = new EventEmitter<{ newValue: string; remark: string }>();
 
   constructor() {
     // We need to initialize signals from inputs if they are available
@@ -33,7 +42,7 @@ export class PropertyOverrideModalComponent implements OnInit {
   onExecute(): void {
     this.execute.emit({
       newValue: this.overrideNewValue(),
-      remark: this.overrideRemark()
+      remark: this.overrideRemark(),
     });
   }
 }

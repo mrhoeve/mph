@@ -1,13 +1,24 @@
 import { CommonModule } from '@angular/common';
-import { Component, EventEmitter, Input, Output, signal } from '@angular/core';
-import { NexusIqReportViolation, NexusIqScanResponse } from '../../../services/maven-project-service';
+import {
+  Component,
+  EventEmitter,
+  Input,
+  Output,
+  signal,
+  ChangeDetectionStrategy,
+} from '@angular/core';
+import {
+  NexusIqReportViolation,
+  NexusIqScanResponse,
+} from '../../../services/maven-project-service';
 
 @Component({
   selector: 'app-nexus-iq-report-modal',
   standalone: true,
   imports: [CommonModule],
   templateUrl: './nexus-iq-report-modal.component.html',
-  styleUrl: './nexus-iq-report-modal.component.css'
+  changeDetection: ChangeDetectionStrategy.Eager,
+  styleUrl: './nexus-iq-report-modal.component.css',
 })
 export class NexusIqReportModalComponent {
   @Input({ required: true }) result!: NexusIqScanResponse;
@@ -48,6 +59,9 @@ export class NexusIqReportModalComponent {
   }
 
   get allExpanded(): boolean {
-    return this.result.violations.length > 0 && this.expandedItems().size === this.result.violations.length;
+    return (
+      this.result.violations.length > 0 &&
+      this.expandedItems().size === this.result.violations.length
+    );
   }
 }
