@@ -4,8 +4,8 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     java
-    kotlin("jvm") version "2.3.20"
-    id("org.jetbrains.kotlinx.kover") version "0.9.8"
+    kotlin("jvm") version "2.4.10"
+    id("org.jetbrains.kotlinx.kover") version "0.9.9"
     id("org.jetbrains.intellij.platform") version "2.18.1"
 }
 
@@ -68,7 +68,7 @@ intellijPlatform {
     pluginVerification {
         ides {
             current()
-            create(IntelliJPlatformType.IntellijIdea, "2026.2.0.1")
+            create(IntelliJPlatformType.IntellijIdea, "2026.2.2")
         }
     }
 }
