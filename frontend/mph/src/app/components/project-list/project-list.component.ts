@@ -1,4 +1,11 @@
-import { Component, inject, Output, EventEmitter, signal } from '@angular/core';
+import {
+  Component,
+  inject,
+  Output,
+  EventEmitter,
+  signal,
+  ChangeDetectionStrategy,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ProjectStateService } from '../../services/project-state-service';
 import { ProjectAnalysis } from '../../services/maven-project-service';
@@ -8,7 +15,8 @@ import { ProjectAnalysis } from '../../services/maven-project-service';
   standalone: true,
   imports: [CommonModule],
   templateUrl: './project-list.component.html',
-  styleUrl: './project-list.component.css'
+  changeDetection: ChangeDetectionStrategy.Eager,
+  styleUrl: './project-list.component.css',
 })
 export class ProjectListComponent {
   protected readonly projectState = inject(ProjectStateService);

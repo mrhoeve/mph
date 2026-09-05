@@ -220,6 +220,9 @@ class GitServiceTest {
             val info = gitService.getLatestTagInfo(pomFile)
             assertEquals("1.2.3", info?.version)
             assertEquals("v1.2.3", info?.tagName)
+
+            val cachedInfo = gitService.getLatestTagInfo(pomFile)
+            assertEquals(info, cachedInfo)
         }
     }
 
@@ -243,6 +246,9 @@ class GitServiceTest {
 
             val info = gitService.getLatestTagInfo(pomFile)
             assertTrue(info == null, "Expected null info when no tags exist, but got $info")
+
+            val cachedInfo = gitService.getLatestTagInfo(pomFile)
+            assertTrue(cachedInfo == null, "Expected cached lookup without tags to remain null, but got $cachedInfo")
         }
     }
 

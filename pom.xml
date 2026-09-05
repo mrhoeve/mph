@@ -9,7 +9,7 @@
 	<parent>
 		<groupId>org.springframework.boot</groupId>
 		<artifactId>spring-boot-starter-parent</artifactId>
-		<version>4.1.0</version>
+		<version>4.1.1</version>
 		<relativePath/> <!-- lookup parent from repository -->
 	</parent>
 	<groupId>nl.hicts</groupId>
@@ -50,11 +50,11 @@
 		<maven.version>3.9.16</maven.version>
 		<maven-resolver.version>1.9.27</maven-resolver.version>
 		<poi.version>5.5.1</poi.version>
-		<cyclonedx.version>12.2.0</cyclonedx.version>
+		<cyclonedx.version>13.2.0</cyclonedx.version>
 		<mockk.version>1.14.11</mockk.version>
 		<exec-maven-plugin.version>3.6.3</exec-maven-plugin.version>
 		<jacoco.version>0.8.15</jacoco.version>
-		<jgit.version>7.7.0.202606012155-r</jgit.version>
+		<jgit.version>7.7.1.202607240634-r</jgit.version>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 		<project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 		<sonar.sources>src/main/kotlin,frontend/mph/src</sonar.sources>

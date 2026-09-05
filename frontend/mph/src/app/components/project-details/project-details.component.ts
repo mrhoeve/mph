@@ -1,4 +1,11 @@
-import { Component, inject, Output, EventEmitter, signal } from '@angular/core';
+import {
+  Component,
+  inject,
+  Output,
+  EventEmitter,
+  signal,
+  ChangeDetectionStrategy,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ProjectStateService } from '../../services/project-state-service';
 import { ProjectAnalysis } from '../../services/maven-project-service';
@@ -9,7 +16,8 @@ import { SbomViewComponent } from './sbom-view.component';
   standalone: true,
   imports: [CommonModule, SbomViewComponent],
   templateUrl: './project-details.component.html',
-  styleUrl: './project-details.component.css'
+  changeDetection: ChangeDetectionStrategy.Eager,
+  styleUrl: './project-details.component.css',
 })
 export class ProjectDetailsComponent {
   protected readonly projectState = inject(ProjectStateService);
@@ -21,5 +29,4 @@ export class ProjectDetailsComponent {
   @Output() scanNexusIq = new EventEmitter<ProjectAnalysis>();
 
   protected readonly activeTab = signal<'analysis' | 'sbom'>('analysis');
-
 }

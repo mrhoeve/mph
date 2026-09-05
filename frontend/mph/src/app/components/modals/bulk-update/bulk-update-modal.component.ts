@@ -1,4 +1,11 @@
-import { Component, EventEmitter, Output, signal, inject } from '@angular/core';
+import {
+  Component,
+  EventEmitter,
+  Output,
+  signal,
+  inject,
+  ChangeDetectionStrategy,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ProjectStateService } from '../../../services/project-state-service';
@@ -7,7 +14,8 @@ import { ProjectStateService } from '../../../services/project-state-service';
   selector: 'app-bulk-update-modal',
   standalone: true,
   imports: [CommonModule, FormsModule],
-  templateUrl: './bulk-update-modal.component.html'
+  changeDetection: ChangeDetectionStrategy.Eager,
+  templateUrl: './bulk-update-modal.component.html',
 })
 export class BulkUpdateModalComponent {
   protected readonly projectState = inject(ProjectStateService);
@@ -18,7 +26,13 @@ export class BulkUpdateModalComponent {
   readonly gitBranchName = signal('');
 
   @Output() dismissed = new EventEmitter<void>();
-  @Output() execute = new EventEmitter<{paths: string[], prefix: string, updateDependents: boolean, mode: string, branchName: string}>();
+  @Output() execute = new EventEmitter<{
+    paths: string[];
+    prefix: string;
+    updateDependents: boolean;
+    mode: string;
+    branchName: string;
+  }>();
 
   onExecute(): void {
     this.execute.emit({
@@ -26,7 +40,7 @@ export class BulkUpdateModalComponent {
       prefix: this.bulkPrefix(),
       updateDependents: this.bulkUpdateDependents(),
       mode: this.bulkMode(),
-      branchName: this.gitBranchName()
+      branchName: this.gitBranchName(),
     });
   }
 }

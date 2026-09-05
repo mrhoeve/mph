@@ -41,7 +41,9 @@ async function openAnalyzedWorkspace(page: Page): Promise<void> {
   await configureFixtureWorkspace(page.request);
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Projects' })).toBeVisible();
-  await expect(page.getByText('sample-parent', { exact: true })).toBeVisible();
+  await expect(
+    page.locator('.project-select-button').filter({ hasText: 'sample-parent' }),
+  ).toBeVisible();
 }
 
 async function openSampleAppDetails(page: Page): Promise<void> {
@@ -62,7 +64,9 @@ test.describe.serial('MPH full-stack journeys', () => {
     await page.getByRole('button', { name: 'Use this folder' }).click();
 
     await expect(page.getByRole('heading', { name: 'Projects' })).toBeVisible();
-    await expect(page.getByText('sample-parent', { exact: true })).toBeVisible();
+    await expect(
+      page.locator('.project-select-button').filter({ hasText: 'sample-parent' }),
+    ).toBeVisible();
     await expect(page.getByRole('button', { name: 'Show Build Order' })).toBeEnabled();
     await expect(page.getByRole('button', { name: /Bulk Update \(0\)/ })).toBeDisabled();
     await expect(page.locator('.error-toast')).toHaveCount(0);

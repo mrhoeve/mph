@@ -1,12 +1,20 @@
 import { CommonModule } from '@angular/common';
-import { Component, EventEmitter, inject, OnDestroy, Output, signal } from '@angular/core';
+import {
+  Component,
+  EventEmitter,
+  inject,
+  OnDestroy,
+  Output,
+  signal,
+  ChangeDetectionStrategy,
+} from '@angular/core';
 import { Subscription } from 'rxjs';
 import { ProjectStateService } from '../../../services/project-state-service';
 import {
   RebaseProgress,
   RebaseProgressStatus,
   RebaseRepositoryPlan,
-  RebaseWorkflowService
+  RebaseWorkflowService,
 } from '../../../services/rebase-workflow.service';
 
 interface RepositoryView extends RebaseRepositoryPlan {
@@ -21,7 +29,8 @@ interface RepositoryView extends RebaseRepositoryPlan {
   standalone: true,
   imports: [CommonModule],
   templateUrl: './rebase-develop-modal.component.html',
-  styleUrl: './rebase-develop-modal.component.css'
+  changeDetection: ChangeDetectionStrategy.Eager,
+  styleUrl: './rebase-develop-modal.component.css',
 })
 export class RebaseDevelopModalComponent implements OnDestroy {
   protected readonly projectState = inject(ProjectStateService);
@@ -50,23 +59,26 @@ export class RebaseDevelopModalComponent implements OnDestroy {
     this.repositories.set([]);
 
     this.startSubscription = this.workflow.start(paths).subscribe({
-      next: response => {
+      next: (response) => {
         this.detectedPrefix.set(response.prefix);
         this.addMissingRepositories(response.repositories);
         this.eventsSubscription?.unsubscribe();
         this.eventsSubscription = this.workflow.events().subscribe({
-          next: event => this.handleEvent(event),
-          error: () => this.errorMessage.set(
-            'The live progress connection was interrupted. The backend operation may still be running.'
-          )
+          next: (event) => this.handleEvent(event),
+          error: () =>
+            this.errorMessage.set(
+              'The live progress connection was interrupted. The backend operation may still be running.',
+            ),
         });
       },
-      error: error => {
+      error: (error) => {
         this.running.set(false);
         this.started.set(false);
         this.eventsSubscription?.unsubscribe();
-        this.errorMessage.set(error.error?.message || error.message || 'The rebase preflight failed.');
-      }
+        this.errorMessage.set(
+          error.error?.message || error.message || 'The rebase preflight failed.',
+        );
+      },
     });
   }
 
@@ -77,15 +89,21 @@ export class RebaseDevelopModalComponent implements OnDestroy {
   handleEvent(event: RebaseProgress): void {
     if (event.overall) {
       this.overall.set(event);
-      if ([RebaseProgressStatus.COMPLETED, RebaseProgressStatus.PARTIAL, RebaseProgressStatus.FAILED].includes(event.status)) {
+      if (
+        [
+          RebaseProgressStatus.COMPLETED,
+          RebaseProgressStatus.PARTIAL,
+          RebaseProgressStatus.FAILED,
+        ].includes(event.status)
+      ) {
         this.running.set(false);
         this.finished.emit(event.status);
       }
       return;
     }
     if (!event.repositoryPath) return;
-    this.repositories.update(items => {
-      const index = items.findIndex(item => item.repositoryPath === event.repositoryPath);
+    this.repositories.update((items) => {
+      const index = items.findIndex((item) => item.repositoryPath === event.repositoryPath);
       const updated: RepositoryView = {
         projectPath: event.projectPath || items[index]?.projectPath || '',
         artifactId: event.artifactId || items[index]?.artifactId || event.repositoryPath!,
@@ -93,25 +111,27 @@ export class RebaseDevelopModalComponent implements OnDestroy {
         status: event.status,
         message: event.message,
         recoveryHint: event.recoveryHint,
-        stashPreserved: event.stashPreserved
+        stashPreserved: event.stashPreserved,
       };
       if (index < 0) return [...items, updated];
-      return items.map((item, itemIndex) => itemIndex === index ? updated : item);
+      return items.map((item, itemIndex) => (itemIndex === index ? updated : item));
     });
   }
 
   private addMissingRepositories(plans: RebaseRepositoryPlan[]): void {
-    this.repositories.update(items => {
-      const known = new Set(items.map(item => item.repositoryPath));
+    this.repositories.update((items) => {
+      const known = new Set(items.map((item) => item.repositoryPath));
       return [
         ...items,
-        ...plans.filter(plan => !known.has(plan.repositoryPath)).map(plan => ({
-          ...plan,
-          status: RebaseProgressStatus.PENDING,
-          message: 'Waiting to be rebased.',
-          recoveryHint: null,
-          stashPreserved: false
-        }))
+        ...plans
+          .filter((plan) => !known.has(plan.repositoryPath))
+          .map((plan) => ({
+            ...plan,
+            status: RebaseProgressStatus.PENDING,
+            message: 'Waiting to be rebased.',
+            recoveryHint: null,
+            stashPreserved: false,
+          })),
       ];
     });
   }

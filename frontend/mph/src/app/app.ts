@@ -1,8 +1,20 @@
-import { Component, DestroyRef, inject, OnInit, signal } from '@angular/core';
+import {
+  Component,
+  DestroyRef,
+  inject,
+  OnInit,
+  signal,
+  ChangeDetectionStrategy,
+} from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { FolderSelector } from './components/folder-selector/folder-selector';
 import { FileSystemService } from './services/file-system-service';
-import { MavenProjectService, ProjectAnalysis, ManagedProperty, NexusIqScanResponse } from './services/maven-project-service';
+import {
+  MavenProjectService,
+  ProjectAnalysis,
+  ManagedProperty,
+  NexusIqScanResponse,
+} from './services/maven-project-service';
 import { SystemService, SystemInfo } from './services/system-service';
 import { ProjectStateService } from './services/project-state-service';
 import { CommonModule } from '@angular/common';
@@ -26,9 +38,9 @@ import { RebaseProgressStatus } from './services/rebase-workflow.service';
   selector: 'app-root',
   standalone: true,
   imports: [
-    RouterOutlet, 
-    FolderSelector, 
-    CommonModule, 
+    RouterOutlet,
+    FolderSelector,
+    CommonModule,
     FormsModule,
     ProjectListComponent,
     ProjectDetailsComponent,
@@ -40,9 +52,10 @@ import { RebaseProgressStatus } from './services/rebase-workflow.service';
     MavenBuildModalComponent,
     UpdateModulesModalComponent,
     NexusIqReportModalComponent,
-    RebaseDevelopModalComponent
+    RebaseDevelopModalComponent,
   ],
   templateUrl: './app.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './app.css',
 })
 export class App implements OnInit {
@@ -50,17 +63,23 @@ export class App implements OnInit {
   protected readonly selectedBasePath = signal<string | null>(null);
   protected readonly isSelectingFolder = signal(true);
   protected readonly isLoadingBaseFolder = signal(true);
-  
+
   protected readonly isBulkModalOpen = signal(false);
   protected readonly isSpringBootModalOpen = signal(false);
   protected readonly isVersionsModalOpen = signal(false);
   protected readonly isRebaseModalOpen = signal(false);
   protected readonly isOverrideModalOpen = signal(false);
   protected readonly systemInfo = signal<SystemInfo | null>(null);
-  protected readonly nexusIqReport = signal<{ result: NexusIqScanResponse, projectName: string } | null>(null);
+  protected readonly nexusIqReport = signal<{
+    result: NexusIqScanResponse;
+    projectName: string;
+  } | null>(null);
 
   protected readonly versionsModalProject = signal<ProjectAnalysis | null>(null);
-  protected readonly overridePropertyData = signal<{project: ProjectAnalysis, prop: ManagedProperty} | null>(null);
+  protected readonly overridePropertyData = signal<{
+    project: ProjectAnalysis;
+    prop: ManagedProperty;
+  } | null>(null);
 
   private readonly fileSystemService = inject(FileSystemService);
   private readonly mavenProjectService = inject(MavenProjectService);
@@ -69,11 +88,11 @@ export class App implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
 
   ngOnInit(): void {
-    mermaid.initialize({ 
-      startOnLoad: false, 
+    mermaid.initialize({
+      startOnLoad: false,
       theme: 'neutral',
       maxTextSize: 100000,
-      flowchart: { useMaxWidth: false }
+      flowchart: { useMaxWidth: false },
     });
 
     this.loadSystemInfo();
@@ -104,7 +123,7 @@ export class App implements OnInit {
   private loadSystemInfo(): void {
     const subscription = this.systemService.getInfo().subscribe({
       next: (info) => this.systemInfo.set(info),
-      error: (err) => console.error('Failed to load system info', err)
+      error: (err) => console.error('Failed to load system info', err),
     });
     this.destroyRef.onDestroy(() => subscription.unsubscribe());
   }
@@ -119,22 +138,37 @@ export class App implements OnInit {
     this.isSelectingFolder.set(true);
   }
 
-  protected executeBulkUpdate(data: {paths: string[], prefix: string, updateDependents: boolean, mode: string, branchName: string}): void {
+  protected executeBulkUpdate(data: {
+    paths: string[];
+    prefix: string;
+    updateDependents: boolean;
+    mode: string;
+    branchName: string;
+  }): void {
     this.isBulkModalOpen.set(false);
     this.projectState.scanningMessage.set('Bulk updating versions...');
     this.projectState.isScanning.set(true);
 
-    const subscription = this.mavenProjectService.bulkUpdateVersion(data.paths, data.prefix, data.updateDependents, data.mode, data.branchName, true).subscribe({
-      next: (projects) => {
-        this.projectState.updateProjectsData(projects);
-        this.projectState.isScanning.set(false);
-        this.projectState.selectedRootProjects.set(new Set());
-      },
-      error: () => {
-        this.projectState.setError('Bulk update failed.');
-        this.projectState.isScanning.set(false);
-      }
-    });
+    const subscription = this.mavenProjectService
+      .bulkUpdateVersion(
+        data.paths,
+        data.prefix,
+        data.updateDependents,
+        data.mode,
+        data.branchName,
+        true,
+      )
+      .subscribe({
+        next: (projects) => {
+          this.projectState.updateProjectsData(projects);
+          this.projectState.isScanning.set(false);
+          this.projectState.selectedRootProjects.set(new Set());
+        },
+        error: () => {
+          this.projectState.setError('Bulk update failed.');
+          this.projectState.isScanning.set(false);
+        },
+      });
     this.destroyRef.onDestroy(() => subscription.unsubscribe());
   }
 
@@ -142,31 +176,37 @@ export class App implements OnInit {
     const selectedPaths = Array.from(this.projectState.selectedRootProjects());
     if (selectedPaths.length === 0) return;
 
-    const mergeDevelop = window.confirm('Do you also want to merge develop into the current branch?');
+    const mergeDevelop = window.confirm(
+      'Do you also want to merge develop into the current branch?',
+    );
 
     this.projectState.scanningMessage.set('Syncing develop branch...');
     this.projectState.isScanning.set(true);
-    const subscription = this.mavenProjectService.syncDevelop(selectedPaths, mergeDevelop).subscribe({
-      next: (response) => {
-        this.projectState.updateProjectsData(response.projects);
-        this.projectState.isScanning.set(false);
-        this.projectState.selectedRootProjects.set(new Set());
-        if (response.messages && response.messages.length > 0) {
-          this.projectState.setInfo(response.messages.join('\n'));
-        }
-      },
-      error: (err) => {
-        this.projectState.setError(`Sync develop failed: ${err.error?.message || err.message}`);
-        this.projectState.isScanning.set(false);
-      }
-    });
+    const subscription = this.mavenProjectService
+      .syncDevelop(selectedPaths, mergeDevelop)
+      .subscribe({
+        next: (response) => {
+          this.projectState.updateProjectsData(response.projects);
+          this.projectState.isScanning.set(false);
+          this.projectState.selectedRootProjects.set(new Set());
+          if (response.messages && response.messages.length > 0) {
+            this.projectState.setInfo(response.messages.join('\n'));
+          }
+        },
+        error: (err) => {
+          this.projectState.setError(`Sync develop failed: ${err.error?.message || err.message}`);
+          this.projectState.isScanning.set(false);
+        },
+      });
     this.destroyRef.onDestroy(() => subscription.unsubscribe());
   }
 
   protected handleRebaseFinished(status: RebaseProgressStatus): void {
     if (status === RebaseProgressStatus.COMPLETED) {
       this.projectState.selectedRootProjects.set(new Set());
-      this.projectState.setInfo('Repositories rebased and versions realigned. Changes remain uncommitted.');
+      this.projectState.setInfo(
+        'Repositories rebased and versions realigned. Changes remain uncommitted.',
+      );
       this.projectState.scan();
     }
   }
@@ -177,24 +217,21 @@ export class App implements OnInit {
 
     this.projectState.scanningMessage.set('Updating versions...');
     this.projectState.isScanning.set(true);
-    const subscription = this.mavenProjectService.bulkUpdateVersion(
-      selectedPaths,
-      '',
-      true,
-      'CURRENT',
-      null,
-      false
-    ).subscribe({
-      next: (projects) => {
-        this.projectState.updateProjectsData(projects);
-        this.projectState.isScanning.set(false);
-        this.projectState.setInfo(`Updated versions for ${selectedPaths.length} projects and their dependents.`);
-      },
-      error: (err) => {
-        this.projectState.setError(`Version update failed: ${err.error?.message || err.message}`);
-        this.projectState.isScanning.set(false);
-      }
-    });
+    const subscription = this.mavenProjectService
+      .bulkUpdateVersion(selectedPaths, '', true, 'CURRENT', null, false)
+      .subscribe({
+        next: (projects) => {
+          this.projectState.updateProjectsData(projects);
+          this.projectState.isScanning.set(false);
+          this.projectState.setInfo(
+            `Updated versions for ${selectedPaths.length} projects and their dependents.`,
+          );
+        },
+        error: (err) => {
+          this.projectState.setError(`Version update failed: ${err.error?.message || err.message}`);
+          this.projectState.isScanning.set(false);
+        },
+      });
     this.destroyRef.onDestroy(() => subscription.unsubscribe());
   }
 
@@ -208,20 +245,22 @@ export class App implements OnInit {
     this.projectState.isUpdateModulesModalOpen.set(true);
   }
 
-  protected executeUpdateModulesAndUsages(data: {path: string, version: string}): void {
+  protected executeUpdateModulesAndUsages(data: { path: string; version: string }): void {
     this.projectState.isUpdateModulesModalOpen.set(false);
     this.projectState.scanningMessage.set('Updating modules and usages...');
     this.projectState.isScanning.set(true);
-    const subscription = this.mavenProjectService.bulkUpdateVersion([data.path], data.version, true, 'MANUAL', null, false).subscribe({
-      next: (projects) => {
-        this.projectState.updateProjectsData(projects);
-        this.projectState.isScanning.set(false);
-      },
-      error: (err) => {
-        this.projectState.setError(`Update failed: ${err.error?.message || err.message}`);
-        this.projectState.isScanning.set(false);
-      }
-    });
+    const subscription = this.mavenProjectService
+      .bulkUpdateVersion([data.path], data.version, true, 'MANUAL', null, false)
+      .subscribe({
+        next: (projects) => {
+          this.projectState.updateProjectsData(projects);
+          this.projectState.isScanning.set(false);
+        },
+        error: (err) => {
+          this.projectState.setError(`Update failed: ${err.error?.message || err.message}`);
+          this.projectState.isScanning.set(false);
+        },
+      });
     this.destroyRef.onDestroy(() => subscription.unsubscribe());
   }
 
@@ -233,16 +272,18 @@ export class App implements OnInit {
     this.projectState.scanningMessage.set('Upgrading Spring Boot...');
     this.projectState.isScanning.set(true);
 
-    const subscription = this.mavenProjectService.upgradeSpringBoot(project.path, newVersion).subscribe({
-      next: (projects) => {
-        this.projectState.updateProjectsData(projects);
-        this.projectState.isScanning.set(false);
-      },
-      error: () => {
-        this.projectState.setError('Spring Boot upgrade failed.');
-        this.projectState.isScanning.set(false);
-      }
-    });
+    const subscription = this.mavenProjectService
+      .upgradeSpringBoot(project.path, newVersion)
+      .subscribe({
+        next: (projects) => {
+          this.projectState.updateProjectsData(projects);
+          this.projectState.isScanning.set(false);
+        },
+        error: () => {
+          this.projectState.setError('Spring Boot upgrade failed.');
+          this.projectState.isScanning.set(false);
+        },
+      });
     this.destroyRef.onDestroy(() => subscription.unsubscribe());
   }
 
@@ -251,7 +292,7 @@ export class App implements OnInit {
     this.isVersionsModalOpen.set(true);
   }
 
-  protected openOverrideModal(data: {prop: ManagedProperty}): void {
+  protected openOverrideModal(data: { prop: ManagedProperty }): void {
     const project = this.versionsModalProject();
     if (project) {
       this.overridePropertyData.set({ project, prop: data.prop });
@@ -259,7 +300,7 @@ export class App implements OnInit {
     }
   }
 
-  protected executeOverride(data: {newValue: string, remark: string}): void {
+  protected executeOverride(data: { newValue: string; remark: string }): void {
     const overrideData = this.overridePropertyData();
     if (!overrideData) return;
 
@@ -267,33 +308,35 @@ export class App implements OnInit {
     this.projectState.scanningMessage.set('Overriding property...');
     this.projectState.isScanning.set(true);
 
-    const subscription = this.mavenProjectService.overrideProperty(
-      overrideData.project.path,
-      overrideData.prop.name,
-      data.newValue,
-      data.remark
-    ).subscribe({
-      next: (projects) => {
-        this.projectState.updateProjectsData(projects);
-        this.projectState.isScanning.set(false);
-        // Refresh properties in the modal if it's still open
-        if (this.isVersionsModalOpen()) {
-           // The ManagedPropertiesModalComponent handles its own refresh on init, 
-           // but since it's already open, we might need a way to trigger refresh.
-           // For now, let's just close it or assume the user will re-open if needed, 
-           // but actually it's better if it updates.
-           // Since properties is a signal in that component, and we don't have a direct handle,
-           // we can toggle the modal project to trigger ngOnInit or similar.
-           const p = this.versionsModalProject();
-           this.versionsModalProject.set(null);
-           setTimeout(() => this.versionsModalProject.set(p), 0);
-        }
-      },
-      error: () => {
-        this.projectState.setError('Property override failed.');
-        this.projectState.isScanning.set(false);
-      }
-    });
+    const subscription = this.mavenProjectService
+      .overrideProperty(
+        overrideData.project.path,
+        overrideData.prop.name,
+        data.newValue,
+        data.remark,
+      )
+      .subscribe({
+        next: (projects) => {
+          this.projectState.updateProjectsData(projects);
+          this.projectState.isScanning.set(false);
+          // Refresh properties in the modal if it's still open
+          if (this.isVersionsModalOpen()) {
+            // The ManagedPropertiesModalComponent handles its own refresh on init,
+            // but since it's already open, we might need a way to trigger refresh.
+            // For now, let's just close it or assume the user will re-open if needed,
+            // but actually it's better if it updates.
+            // Since properties is a signal in that component, and we don't have a direct handle,
+            // we can toggle the modal project to trigger ngOnInit or similar.
+            const p = this.versionsModalProject();
+            this.versionsModalProject.set(null);
+            setTimeout(() => this.versionsModalProject.set(p), 0);
+          }
+        },
+        error: () => {
+          this.projectState.setError('Property override failed.');
+          this.projectState.isScanning.set(false);
+        },
+      });
     this.destroyRef.onDestroy(() => subscription.unsubscribe());
   }
 
@@ -307,23 +350,22 @@ export class App implements OnInit {
 
     this.projectState.scanningMessage.set('Removing property override...');
     this.projectState.isScanning.set(true);
-    const subscription = this.mavenProjectService.removePropertyOverride(
-      project.path,
-      prop.name
-    ).subscribe({
-      next: (projects) => {
-        this.projectState.updateProjectsData(projects);
-        this.projectState.isScanning.set(false);
-        // Refresh properties
-        const p = this.versionsModalProject();
-        this.versionsModalProject.set(null);
-        setTimeout(() => this.versionsModalProject.set(p), 0);
-      },
-      error: () => {
-        this.projectState.setError('Failed to remove property override.');
-        this.projectState.isScanning.set(false);
-      }
-    });
+    const subscription = this.mavenProjectService
+      .removePropertyOverride(project.path, prop.name)
+      .subscribe({
+        next: (projects) => {
+          this.projectState.updateProjectsData(projects);
+          this.projectState.isScanning.set(false);
+          // Refresh properties
+          const p = this.versionsModalProject();
+          this.versionsModalProject.set(null);
+          setTimeout(() => this.versionsModalProject.set(p), 0);
+        },
+        error: () => {
+          this.projectState.setError('Failed to remove property override.');
+          this.projectState.isScanning.set(false);
+        },
+      });
     this.destroyRef.onDestroy(() => subscription.unsubscribe());
   }
 
@@ -339,7 +381,7 @@ export class App implements OnInit {
         this.projectState.setError(`Failed to trigger Nexus IQ scan: ${err.message || err}`);
         this.projectState.isScanning.set(false);
       },
-      complete: () => this.projectState.isScanning.set(false)
+      complete: () => this.projectState.isScanning.set(false),
     });
     this.destroyRef.onDestroy(() => subscription.unsubscribe());
   }

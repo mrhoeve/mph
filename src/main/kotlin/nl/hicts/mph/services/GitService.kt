@@ -64,8 +64,12 @@ class GitService {
         }
     }
     
-    private val noTag = Any()
-    private val tagCache = ConcurrentHashMap<String, Any>() // TagInfo or noTag sentinel
+    private sealed interface CachedTag {
+        data class Found(val tag: TagInfo) : CachedTag
+        data object Missing : CachedTag
+    }
+
+    private val tagCache = ConcurrentHashMap<String, CachedTag>()
     private val repoTagsCache = ConcurrentHashMap<File, List<org.eclipse.jgit.lib.Ref>>()
     private val fetchedRepos = ConcurrentHashMap.newKeySet<File>()
 
@@ -536,8 +540,10 @@ class GitService {
     fun getLatestTagInfo(projectPath: File): TagInfo? {
         val repoDir = findGitRoot(projectPath) ?: return null
         val normalizedProjectPath = projectPath.toPath().toAbsolutePath().normalize().toString()
-        if (tagCache.containsKey(normalizedProjectPath)) {
-            return tagCache[normalizedProjectPath].let { if (it === noTag) null else it as TagInfo }
+        when (val cached = tagCache[normalizedProjectPath]) {
+            is CachedTag.Found -> return cached.tag
+            CachedTag.Missing -> return null
+            null -> Unit
         }
         val gitRootPath = repoDir.toPath().toAbsolutePath().normalize()
         val pomPath = projectPath.toPath().toAbsolutePath().normalize()
@@ -551,7 +557,7 @@ class GitService {
             logger.warn("Failed to get latest tag version for $projectPath: ${e.message}")
             null
         }
-        tagCache[normalizedProjectPath] = result ?: noTag
+        tagCache[normalizedProjectPath] = result?.let { CachedTag.Found(it) } ?: CachedTag.Missing
         return result
     }
 

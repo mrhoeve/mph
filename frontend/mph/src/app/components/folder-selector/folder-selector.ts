@@ -1,4 +1,12 @@
-import { Component, DestroyRef, inject, OnInit, output, signal } from '@angular/core';
+import {
+  Component,
+  DestroyRef,
+  inject,
+  OnInit,
+  output,
+  signal,
+  ChangeDetectionStrategy,
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { FileSystemService, FolderItem } from '../../services/file-system-service';
 import { ProjectStateService } from '../../services/project-state-service';
@@ -8,6 +16,7 @@ import { ProjectStateService } from '../../services/project-state-service';
   standalone: true,
   imports: [FormsModule],
   templateUrl: './folder-selector.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './folder-selector.css',
 })
 export class FolderSelector implements OnInit {
@@ -57,16 +66,18 @@ export class FolderSelector implements OnInit {
     this.isLoading.set(true);
     this.projectState.clearError();
 
-    const subscription = this.fileSystemService.saveBase(path, depth, iqUrl, iqUser, iqPass, iqAppIdPrefix, iqAppIdSuffix).subscribe({
-      next: (folder) => {
-        this.updateState(folder);
-        this.folderSelected.emit(folder.path);
-      },
-      error: () => {
-        this.projectState.setError('Could not save the selected folder.');
-        this.isLoading.set(false);
-      },
-    });
+    const subscription = this.fileSystemService
+      .saveBase(path, depth, iqUrl, iqUser, iqPass, iqAppIdPrefix, iqAppIdSuffix)
+      .subscribe({
+        next: (folder) => {
+          this.updateState(folder);
+          this.folderSelected.emit(folder.path);
+        },
+        error: () => {
+          this.projectState.setError('Could not save the selected folder.');
+          this.isLoading.set(false);
+        },
+      });
 
     this.destroyRef.onDestroy(() => subscription.unsubscribe());
   }
