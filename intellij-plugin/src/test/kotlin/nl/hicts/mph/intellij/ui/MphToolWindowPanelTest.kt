@@ -13,6 +13,33 @@ import javax.swing.tree.TreePath
 import javax.swing.JTree
 
 class MphToolWindowPanelTest : BasePlatformTestCase() {
+    fun testToolbarAndContextMenuGroupActionsAndExposeVersionAndRecoveryCommands() {
+        val panel = MphToolWindowPanel(project, refreshOnCreate = false)
+        val toolbar = panel.toolbarActions.getChildren(null)
+        assertEquals(4, toolbar.count { it is com.intellij.openapi.actionSystem.Separator })
+        val context = panel.contextActions.getChildren(null).mapNotNull { it.templatePresentation.text }
+        for (name in listOf("Open POM", "Dependencies", "Update Version", "Align Versions", "Realign Versions", "Build", "Sync with develop", "Recovery Copies")) {
+            assertTrue(name, name in context)
+        }
+        assertNotNull(panel.projectTree.getInputMap(javax.swing.JComponent.WHEN_FOCUSED).get(javax.swing.KeyStroke.getKeyStroke("shift F10")))
+    }
+
+    fun testContextMenuPreservesExistingMultipleSelection() {
+        val panel = MphToolWindowPanel(project, refreshOnCreate = false)
+        panel.render(ProjectSnapshot(listOf(GitProjectGroup("/workspace", listOf(
+            projectInfo("first", "/workspace/first/pom.xml"), projectInfo("second", "/workspace/second/pom.xml"),
+        )))))
+        val root = panel.projectTree.model.root as DefaultMutableTreeNode
+        val repository = root.getChildAt(0) as DefaultMutableTreeNode
+        val first = TreePath((repository.getChildAt(0) as DefaultMutableTreeNode).path)
+        val second = TreePath((repository.getChildAt(1) as DefaultMutableTreeNode).path)
+        panel.projectTree.selectionPaths = arrayOf(first, second)
+        panel.selectContextTarget(first)
+        assertEquals(2, panel.projectTree.selectionCount)
+        panel.selectContextTarget(TreePath(repository.path))
+        assertEquals(1, panel.projectTree.selectionCount)
+    }
+
     fun testRendersRepositoriesAndProjects() {
         val snapshot = snapshot(
             MavenProjectInfo(

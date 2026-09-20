@@ -93,6 +93,8 @@ class MphToolWindowPanel(
     private val tree = Tree(treeModel)
     private var snapshot = ProjectSnapshot(emptyList())
     private var reloadInProgress = false
+    internal val toolbarActions = DefaultActionGroup()
+    internal val contextActions = DefaultActionGroup()
 
     init {
         val refreshAction = object : DumbAwareAction(
@@ -301,24 +303,17 @@ class MphToolWindowPanel(
         }
         val toolbar = ActionManager.getInstance().createActionToolbar(
             ActionPlaces.TOOLWINDOW_TOOLBAR_BAR,
-            DefaultActionGroup(
-                dependenciesAction,
-                buildOrderAction,
-                managedVersionsAction,
-                sbomAction,
-                nexusIqAction,
-                updateVersionAction,
-                alignVersionsAction,
-                realignVersionsAction,
-                buildAction,
-                rebaseAction,
-                recoveryAction,
-                aboutAction,
-                settingsAction,
-                expandAllAction,
-                collapseAllAction,
-                refreshAction,
-            ),
+            toolbarActions.apply {
+                addAll(dependenciesAction, buildOrderAction, managedVersionsAction, sbomAction, nexusIqAction)
+                addSeparator()
+                addAll(updateVersionAction, alignVersionsAction, realignVersionsAction)
+                addSeparator()
+                addAll(buildAction, rebaseAction, recoveryAction)
+                addSeparator()
+                addAll(aboutAction, settingsAction)
+                addSeparator()
+                addAll(expandAllAction, collapseAllAction, refreshAction)
+            },
             true,
         )
         toolbar.targetComponent = this
@@ -332,7 +327,15 @@ class MphToolWindowPanel(
         TreeSpeedSearch.installOn(tree, true) { path -> path.lastPathComponent.toString() }
         val contextMenu = ActionManager.getInstance().createActionPopupMenu(
             ActionPlaces.TOOLWINDOW_POPUP,
-            DefaultActionGroup(openPomAction, buildAction),
+            contextActions.apply {
+                add(openPomAction)
+                addSeparator("Inspect")
+                addAll(dependenciesAction, buildOrderAction, managedVersionsAction, sbomAction, nexusIqAction)
+                addSeparator("Versions")
+                addAll(updateVersionAction, alignVersionsAction, realignVersionsAction)
+                addSeparator("Build and Git")
+                addAll(buildAction, rebaseAction, recoveryAction)
+            },
         )
         tree.addMouseListener(object : MouseAdapter() {
             override fun mousePressed(event: MouseEvent) = showContextMenu(event)
@@ -348,10 +351,22 @@ class MphToolWindowPanel(
             private fun showContextMenu(event: MouseEvent) {
                 if (!event.isPopupTrigger) return
                 val path = tree.getPathForLocation(event.x, event.y) ?: return
-                tree.selectionPath = path
+                selectContextTarget(path)
                 contextMenu.component.show(tree, event.x, event.y)
             }
         })
+
+        val contextKey = "mph.contextMenu"
+        tree.getInputMap(JComponent.WHEN_FOCUSED).put(javax.swing.KeyStroke.getKeyStroke("shift F10"), contextKey)
+        tree.getInputMap(JComponent.WHEN_FOCUSED).put(javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_CONTEXT_MENU, 0), contextKey)
+        tree.actionMap.put(contextKey, object : javax.swing.AbstractAction() {
+            override fun actionPerformed(event: java.awt.event.ActionEvent) {
+                val path = tree.selectionPath ?: return
+                val bounds = tree.getPathBounds(path) ?: return
+                contextMenu.component.show(tree, bounds.x, bounds.y + bounds.height)
+            }
+        })
+        tree.accessibleContext.accessibleName = "Maven projects and repositories"
 
         val body = JPanel(BorderLayout())
         body.add(createHeader(), BorderLayout.NORTH)
@@ -541,6 +556,10 @@ class MphToolWindowPanel(
             return
         }
         MavenBuildDialog(project, order.entries.map { it.project }, steps, order.entries.associate { it.project.pomPath to it.prerequisitePomPaths }).show()
+    }
+
+    internal fun selectContextTarget(path: javax.swing.tree.TreePath) {
+        if (!tree.isPathSelected(path)) tree.selectionPath = path
     }
 
     internal fun selectedProjects(): List<MavenProjectInfo> = tree.selectionPaths.orEmpty()
