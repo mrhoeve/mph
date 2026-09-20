@@ -52,12 +52,8 @@ The first three priorities have now been implemented:
 - A shared, nonblocking workspace lease coordinates MPH builds, synchronization, branch checkout, tag fetches, Maven refresh, and version edits across IDE projects. Stop/Close cancels the dialog's own progress indicator. Synchronization retains ownership through Maven refresh and alignment, and build workers retain it until their processes stop.
 - After a successful rebase, Maven is refreshed before rediscovery, recovery snapshots, and alignment. Added modules and changed coordinates come from the refreshed model. Refresh failures, missing repositories, model-reading errors, Stop/Close, and unsaved edits prevent alignment.
 
-Remaining suggestions:
-
-1. **Preview and validate alignment edits.** Compute all POM changes before saving, with a review of existing local version edits and explicit handling of partial saves. Recovery snapshots remain available in the meantime.
-2. **Group the large toolbar and expand context actions.** Group inspection, version, Git/build and view actions with separators, and offer the relevant commands in the project context menu. Preserve the current ordering until a grouping is agreed; icons alone should not carry the navigation burden.
-3. **Exercise the dialogs in both IDE themes.** In particular, inspect spinner repainting, narrow windows, keyboard navigation, screen-reader labels, and Stop/Close timing in a running IntelliJ instance. Static icon sheets cannot validate those interactions.
+The subsequent completion series implements alignment previews, grouped toolbar/context actions, and automated dialog layout/accessibility checks. See [plugin completion review](plugin-completion-review.md) for the implementation details and the remaining **live IDE** validation checklist.
 
 ## Validation
 
-The current full plugin suite passes all 124 tests on Windows, including build failure propagation, module selection and cycles, cross-thread operation ownership, refresh failure/cancellation, and post-rebase rediscovery. `git diff --check` passes. The earlier icon audit verified all 18 custom/branding SVG files and matching light/dark variants. An interactive IDE check of animated repainting, narrow-window layout, and live Maven refresh remains recommended.
+The current full plugin suite passes all 139 tests on Windows, including build failure propagation, module selection and cycles, cross-thread operation ownership, refresh failure/cancellation, and post-rebase rediscovery. `git diff --check` passes. The earlier icon audit verified all 18 custom/branding SVG files and matching light/dark variants. An interactive IDE check of animated repainting, narrow-window layout, and live Maven refresh remains recommended.

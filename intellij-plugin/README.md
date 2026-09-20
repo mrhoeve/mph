@@ -28,7 +28,7 @@ This module provides Maven Project Helper as a native IntelliJ IDEA plugin for m
 - Inspects the resolved direct and transitive dependency tree and exports CycloneDX 1.5 JSON or XML SBOMs.
 - Runs Nexus IQ evaluations, retrieves security-policy results, and links directly to the generated report.
 
-After an update, IntelliJ refreshes its linked Maven model automatically. All changes remain uncommitted and can be reverted together with **Undo**.
+After a version update, IntelliJ refreshes its linked Maven model automatically. POM edits remain uncommitted and each alignment can be reverted with **Undo**. Git rebases have separate recovery instructions and retained backups.
 
 ## Using the tool window
 
@@ -39,6 +39,7 @@ Open **View -> Tool Windows -> MPH**. Select modules with Ctrl-click (Cmd-click 
 - **Realign Versions** repairs linked references using every selected project's current version.
 - **Build** runs `clean install` by default. Unit and integration tests can be enabled in the dialog. Selecting a repository row builds its root POM; selecting individual modules builds those POMs.
 - **Sync with develop** is available for projects in Git repositories. It refuses protected branches (`main`, `master`, and `develop`), detached heads, active Git operations, divergent local `develop` branches, and repositories without `origin/develop`.
+- **Recovery Copies** lists saved POM copies and synchronization instructions. Reviewed cleanup removes only the selected copy/instruction files; Git recovery refs and stashes are retained.
 - **Dependencies** shows what the selected module uses and which linked modules use it. Double-click a linked module to open its POM.
 - **Build Order** groups repositories into safe build stages, offers a focusable graph with zoom, pan, POM navigation and PNG export, can pass the calculated order to the Maven build dialog, and exports an `.xlsx` plan.
 - **Managed Versions** searches effective version properties, optionally shows only local overrides, and offers a Spring Boot upgrade when a parent or BOM is detected.
@@ -54,6 +55,10 @@ The application ID is derived from the selected repository's `Jenkinsfile`, matc
 Repositories are processed sequentially. Committed version-only `pom.xml` conflicts are resolved from the updated `develop` version. Source-code and structural POM conflicts remain available for manual resolution. Conflicts while restoring uncommitted work are never resolved automatically, including version conflicts. Processing continues with other repositories; final version alignment runs only if every repository succeeds.
 
 Before synchronization, editor changes must be saved. The plugin keeps a named backup of the original commits under `refs/mph/recovery/` and retains its tracked/untracked safety stash even after successful restoration. Staged and unstaged changes are restored with their original separation when Git can apply the index cleanly. Stop requests take effect between Git commands, so a write in progress can finish safely. No changes are pushed, and local working changes are not committed (rebase still rewrites existing commits).
+
+For a stopped conflict, select its repository row and click **Resolve Conflicts…** to open IntelliJ's normal conflict editor. After resolving, continue the rebase through IntelliJ and follow the retained instructions for local-work restoration before running **Realign Versions**. Resolving a conflict does not automatically continue the rebase or restore the stash.
+
+Version alignment presents a read-only, file-by-file preview. Applying a stale preview is refused if a source document or its disk contents changed. Alignment keeps original disk bytes and editor text under `mph-recovery` in the IDE configuration directory, accessible through **Recovery Copies**.
 
 Select a repository row to copy its recovery instructions. Instructions survive IDE restarts in `.git/mph-recovery/<id>/recovery.txt`. Before final version alignment, all known workspace POMs, including dependent projects outside the selection, are copied to `.git/mph-recovery/alignment-<id>/` in the first selected repository. Its `original-paths.properties` file maps each copy to its original path. Review these copies before restoring; subsequent edits may need to be merged. Keep backups until the synchronized work has been reviewed, then remove only the matching recovery refs, stash, and recovery directory.
 

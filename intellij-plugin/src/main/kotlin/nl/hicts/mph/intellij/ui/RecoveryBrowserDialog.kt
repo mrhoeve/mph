@@ -3,6 +3,7 @@ package nl.hicts.mph.intellij.ui
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.Messages
+import com.intellij.util.ui.JBUI
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextArea
@@ -10,7 +11,6 @@ import nl.hicts.mph.intellij.services.AlignmentRecoveryStore
 import nl.hicts.mph.intellij.services.RecoveryCatalog
 import nl.hicts.mph.intellij.services.RecoveryRun
 import java.awt.BorderLayout
-import java.awt.Dimension
 import java.nio.file.Path
 import javax.swing.*
 
@@ -41,11 +41,12 @@ class RecoveryBrowserDialog(private val project: Project, repositoryRoots: List<
         catch (error: Exception) { details.text = "Could not read recovery runs: ${error.message}" }
         if (!model.isEmpty) runs.selectedIndex = 0 else details.text = "No recovery copies found for this workspace or IDE configuration."
     }
+    override fun getPreferredFocusedComponent(): JComponent = runs
     override fun createCenterPanel(): JComponent = JPanel(BorderLayout(8, 8)).apply {
-        add(JBScrollPane(runs).apply { preferredSize = Dimension(300, 400) }, BorderLayout.WEST)
+        add(JBScrollPane(runs).apply { preferredSize = JBUI.size(260, 400) }, BorderLayout.WEST)
         add(JBScrollPane(details), BorderLayout.CENTER)
         add(delete, BorderLayout.SOUTH)
-        preferredSize = Dimension(900, 500)
+        preferredSize = JBUI.size(900, 500)
     }
     override fun createActions(): Array<Action> = arrayOf(cancelAction.apply { putValue(Action.NAME, "Close") })
 }

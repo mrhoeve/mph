@@ -64,6 +64,9 @@ class MavenBuildDialog(
 
     init {
         title = "Build Maven Projects"
+        projectList.accessibleContext.accessibleName = "Maven build progress by project"
+        startButton.mnemonic = java.awt.event.KeyEvent.VK_B
+        stopButton.mnemonic = java.awt.event.KeyEvent.VK_T
         selectedProjects.forEach { listModel.addElement(MavenBuildRow(it, MavenBuildStatus.PENDING)) }
         projectList.putClientProperty(AnimatedIcon.ANIMATION_IN_RENDERER_ALLOWED, true)
         projectList.cellRenderer = MavenBuildRowRenderer()

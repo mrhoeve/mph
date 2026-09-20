@@ -78,6 +78,11 @@ class GitRebaseDialog(
 
     init {
         title = "Synchronize Feature Branches with develop"
+        repositoryList.accessibleContext.accessibleName = "Repositories to synchronize"
+        recoveryDetails.accessibleContext.accessibleName = "Synchronization recovery instructions"
+        startButton.mnemonic = java.awt.event.KeyEvent.VK_S
+        stopButton.mnemonic = java.awt.event.KeyEvent.VK_T
+        resolveButton.mnemonic = java.awt.event.KeyEvent.VK_R
         plan.repositories.forEach { listModel.addElement(GitRebaseRow(it, GitRebaseStatus.PENDING, "Waiting")) }
         repositoryList.putClientProperty(AnimatedIcon.ANIMATION_IN_RENDERER_ALLOWED, true)
         repositoryList.cellRenderer = GitRebaseRowRenderer()
@@ -125,9 +130,13 @@ class GitRebaseDialog(
     private fun createHeader(): JComponent {
         val heading = JBLabel("Rebase on develop", MphIcons.SyncDevelop, JBLabel.LEFT)
         heading.font = heading.font.deriveFont(Font.BOLD, heading.font.size2D + 3f)
-        val explanation = JBLabel(
-            "Prefix '${plan.prefix}' will be reapplied and all dependents aligned only when every repository succeeds.",
-        )
+        val explanation = JBTextArea("Prefix '${plan.prefix}' will be reapplied and all dependents aligned only when every repository succeeds.", 2, 45).apply {
+            isEditable = false
+            isOpaque = false
+            lineWrap = true
+            wrapStyleWord = true
+            font = heading.font.deriveFont(heading.font.size2D - 3f)
+        }
         explanation.foreground = JBUI.CurrentTheme.ContextHelp.FOREGROUND
         return JPanel(BorderLayout(0, JBUI.scale(4))).apply {
             isOpaque = false

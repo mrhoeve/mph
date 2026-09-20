@@ -101,5 +101,7 @@ tasks {
 
     test {
         useJUnit()
+        // Load MPH and its dependencies, rather than unrelated bundled language plugins.
+        systemProperty("idea.load.plugins.id", "nl.hicts.mph.plugin")
     }
 }

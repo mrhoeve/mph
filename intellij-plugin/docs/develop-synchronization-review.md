@@ -27,17 +27,15 @@ Scope: IntelliJ plugin, from selection and saved editor documents through Git pr
 
 Backups are intentionally retained after success, partial completion, and cancellation. Inspect Git status before restoring anything. A failed stash apply can leave a mixture of restored and unrestored paths; blindly applying it again can compound the conflict. The recovery instructions explain how to create a separate worktree at the original commit and apply the exact stash there, preserving the current workspace for comparison. POM snapshots cover the state immediately before alignment, including unselected dependents; they are not an automatic rollback.
 
-## Remaining improvements before standalone retirement
+## Completion follow-up
 
-1. **Detect external workspace changes.** Plugin mutations now share an application-wide lease. External Git clients and another IDE process cannot participate in that lease; verify branch/HEAD/model fingerprints before alignment to detect their changes. Repository-scoped leases could later allow independent workspaces to run concurrently.
-2. **Make alignment transactional and previewable.** Durable POM copies make partial writes recoverable, but alignment is still a multi-file operation. Compute edits first, validate all targets, show changes to existing local versions, then apply as one logical operation with explicit recovery on a partial save.
-3. **Separate Git execution, recovery state, and UI orchestration.** An injectable command runner and explicit workflow stages would support deterministic tests of disk-full errors, ref races, process-launch errors, and IDE lifecycle cancellation. Keep stdout and stderr separate for machine-readable Git output.
-4. **Add backup browsing and cleanup.** Show retained runs with original branch, commit, stash, and POM copies, and offer a reviewed cleanup action. Do not delete backups merely because the Git phase succeeded.
-5. **Use shared behavioral fixtures during migration.** Run equivalent standalone/plugin scenarios for module selection, prefix normalization, dependent updates, and conflict choices. Git plumbing differs, so parity should describe user outcomes rather than identical commands.
+The [plugin completion review](plugin-completion-review.md) records the implemented external-change checks, reviewable alignment, Git execution/recovery separation, recovery browsing and cleanup, plugin-owned behavioral fixtures, and native IntelliJ conflict resolution. The deprecated application is not a plugin build or test dependency.
+
+Multi-file saves remain recoverable rather than filesystem-atomic. The coordinator intentionally serializes plugin mutations across IDE projects; it does not lock other IDE processes or external Git clients. Live interaction, animation, and screen-reader checks remain on the documented release checklist.
 
 ## Validation
 
-Verified on Windows with JDK 21: the current full plugin suite passes all 124 tests, including the existing Git safety scenarios and new operation ownership, build prerequisite, and asynchronous Maven refresh regressions. `git diff --check` passes.
+Verified on Windows with JDK 21: the current full plugin suite passes all 139 tests, including the existing Git safety scenarios and new operation ownership, build prerequisite, and asynchronous Maven refresh regressions. `git diff --check` passes.
 
 Real local Git repositories exercise committed version conflict resolution, uncommitted version conflicts, source conflicts, mixed conflicts, index/worktree separation, retained pre-existing stashes, recovery refs, ignored file collisions, active operation directories, checked-out develop worktrees, hidden index flags, narrow fetch mappings, deleted remote develop, merge topology, updateRefs configuration, cancellation at stash/restoration boundaries, concurrent starts, and exceptions after stashing. Pure tests cover strict XML conflict classification, line ending preservation, exact-byte alignment backups, dependent paths, and backup failure.
 
