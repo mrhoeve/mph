@@ -12,6 +12,7 @@ import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.JBUI
+import nl.hicts.mph.intellij.icons.MphIcons
 import nl.hicts.mph.intellij.model.BuildOrderEntry
 import nl.hicts.mph.intellij.model.DependencyGraphNode
 import nl.hicts.mph.intellij.model.MavenProjectDependencyDescriptor
@@ -20,6 +21,7 @@ import nl.hicts.mph.intellij.model.WorkspaceDependencyGraph
 import nl.hicts.mph.intellij.model.WorkspaceDependencyGraphBuilder
 import nl.hicts.mph.intellij.services.BuildOrderWorkbookExporter
 import java.awt.BorderLayout
+import java.awt.Component
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Font
@@ -35,7 +37,9 @@ import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.JTabbedPane
+import javax.swing.JTable
 import javax.swing.table.DefaultTableModel
+import javax.swing.table.DefaultTableCellRenderer
 
 class BuildOrderDialog(
     private val ideProject: Project,
@@ -62,12 +66,23 @@ class BuildOrderDialog(
         order.entries.forEach { entry ->
             tableModel.addRow(
                 arrayOf<Any>(
-                    if (entry.partOfCycle) "${entry.buildStep} ⚠" else entry.buildStep,
+                    entry.buildStep,
                     entry.project.artifactId,
                     entry.project.version.orEmpty(),
                     entry.dependsOn.joinToString(", "),
                 ),
             )
+        }
+        table.columnModel.getColumn(0).cellRenderer = object : DefaultTableCellRenderer() {
+            override fun getTableCellRendererComponent(
+                table: JTable, value: Any?, selected: Boolean, focused: Boolean, row: Int, column: Int,
+            ): Component {
+                super.getTableCellRendererComponent(table, value, selected, focused, row, column)
+                val cycle = order.entries[table.convertRowIndexToModel(row)].partOfCycle
+                icon = if (cycle) AllIcons.General.Warning else null
+                toolTipText = if (cycle) "Dependency cycle: automatic building is unavailable." else null
+                return this
+            }
         }
         table.setShowGrid(false)
         table.rowHeight = JBUI.scale(28)
@@ -91,7 +106,7 @@ class BuildOrderDialog(
     }
 
     override fun createCenterPanel(): JComponent {
-        val heading = JBLabel("Build order", AllIcons.Actions.Compile, JBLabel.LEFT)
+        val heading = JBLabel("Build order", MphIcons.BuildOrder, JBLabel.LEFT)
         heading.font = heading.font.deriveFont(Font.BOLD, heading.font.size2D + 3f)
         val summary = JBLabel(
             if (order.hasCycles) {
@@ -100,8 +115,8 @@ class BuildOrderDialog(
                 "${order.entries.size} repositories · ${order.entries.maxOfOrNull(BuildOrderEntry::buildStep) ?: 0} build steps"
             },
         )
-        summary.foreground = if (order.hasCycles) JBUI.CurrentTheme.Validator.warningBackgroundColor() else
-            JBUI.CurrentTheme.ContextHelp.FOREGROUND
+        summary.foreground = JBUI.CurrentTheme.ContextHelp.FOREGROUND
+        if (order.hasCycles) summary.icon = AllIcons.General.Warning
         val header = JPanel(BorderLayout(0, JBUI.scale(4))).apply {
             isOpaque = false
             add(heading, BorderLayout.NORTH)
@@ -144,19 +159,21 @@ class BuildOrderDialog(
             add(JLabel("Focus:"))
             focus.preferredSize = Dimension(JBUI.scale(260), focus.preferredSize.height)
             add(focus)
-            add(JButton("+").apply {
+            add(JButton(AllIcons.General.ZoomIn).apply {
                 toolTipText = "Zoom in"
+                accessibleContext.accessibleName = "Zoom in"
                 addActionListener { graphPanel.zoomIn() }
             })
-            add(JButton("−").apply {
+            add(JButton(AllIcons.General.ZoomOut).apply {
                 toolTipText = "Zoom out"
+                accessibleContext.accessibleName = "Zoom out"
                 addActionListener { graphPanel.zoomOut() }
             })
-            add(JButton("Fit", AllIcons.Actions.Preview).apply {
+            add(JButton("Fit", AllIcons.General.FitContent).apply {
                 toolTipText = "Fit the complete graph"
                 addActionListener { graphPanel.fitToView() }
             })
-            add(JButton("Save as PNG", AllIcons.Actions.MenuSaveall).apply {
+            add(JButton("Save as PNG", AllIcons.ToolbarDecorator.Export).apply {
                 addActionListener { exportGraph() }
             })
         }

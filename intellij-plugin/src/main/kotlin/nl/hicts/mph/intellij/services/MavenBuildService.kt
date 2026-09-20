@@ -70,8 +70,8 @@ class MavenBuildService {
         options: MavenBuildOptions,
     ): List<List<MavenProjectInfo>> {
         val unique = projects.distinctBy(MavenProjectInfo::pomPath)
-        if (!options.parallel) return unique.map(::listOf)
-        return unique.groupBy { options.buildSteps[it.pomPath] ?: 1 }.toSortedMap().values.toList()
+        val stages = unique.groupBy { options.buildSteps[it.pomPath] ?: 1 }.toSortedMap().values.toList()
+        return if (options.parallel) stages else stages.flatten().map(::listOf)
     }
 
     private fun runParallel(

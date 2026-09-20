@@ -13,6 +13,7 @@ import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBTextArea
 import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.JBUI
+import nl.hicts.mph.intellij.icons.MphIcons
 import nl.hicts.mph.intellij.model.MavenProjectInfo
 import nl.hicts.mph.intellij.services.IntellijNexusIqService
 import nl.hicts.mph.intellij.services.NexusIqScanResult
@@ -48,7 +49,7 @@ class NexusIqDialog(
     }
 
     override fun createCenterPanel(): JComponent {
-        val titleLabel = JBLabel(mavenProject.artifactId, AllIcons.General.InspectionsOK, JBLabel.LEFT).apply {
+        val titleLabel = JBLabel(mavenProject.artifactId, MphIcons.SecurityScan, JBLabel.LEFT).apply {
             font = font.deriveFont(Font.BOLD, font.size2D + 3f)
         }
         status.foreground = JBUI.CurrentTheme.ContextHelp.FOREGROUND

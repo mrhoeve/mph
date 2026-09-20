@@ -15,6 +15,7 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextField
 import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.JBUI
+import nl.hicts.mph.intellij.icons.MphIcons
 import nl.hicts.mph.intellij.model.MavenProjectInfo
 import nl.hicts.mph.intellij.services.ManagedPropertyFilter
 import nl.hicts.mph.intellij.services.ManagedVersionAnalysis
@@ -50,8 +51,8 @@ class ManagedVersionsDialog(
     private val table = JBTable(model)
     private val overrideButton = JButton("Override", AllIcons.Actions.Edit)
     private val removeButton = JButton("Remove Override", AllIcons.Actions.GC)
-    private val springBootButton = JButton("Upgrade Spring Boot", AllIcons.Nodes.PpLib)
-    private val nexusButton = JButton("Check Nexus IQ", AllIcons.General.InspectionsEye)
+    private val springBootButton = JButton("Upgrade Spring Boot", MphIcons.VersionTag)
+    private val nexusButton = JButton("Check Nexus IQ", MphIcons.SecurityScan)
 
     init {
         title = "Managed Component Versions"

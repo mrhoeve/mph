@@ -67,6 +67,21 @@ class MavenBuildServiceTest {
         assertEquals(3, service.executionStages(listOf(first, second, third), MavenBuildOptions()).size)
     }
 
+    @Test
+    fun `sequential builds install prerequisites before dependents regardless of selection order`() {
+        val library = project("C:/workspace/library/pom.xml").copy(artifactId = "library")
+        val application = project("C:/workspace/application/pom.xml").copy(artifactId = "application")
+
+        val stages = MavenBuildService().executionStages(
+            listOf(application, library, application),
+            MavenBuildOptions(parallel = false, buildSteps = mapOf(
+                library.pomPath to 1, application.pomPath to 2,
+            )),
+        )
+
+        assertEquals(listOf(listOf(library), listOf(application)), stages)
+    }
+
     private fun project(pomPath: String) = MavenProjectInfo(
         groupId = "org.example",
         artifactId = "sample-service",

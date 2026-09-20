@@ -9,6 +9,7 @@ import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
+import com.intellij.ui.AnimatedIcon
 import com.intellij.ui.ColoredListCellRenderer
 import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.components.JBCheckBox
@@ -18,6 +19,7 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.FormBuilder
 import com.intellij.util.ui.JBUI
+import nl.hicts.mph.intellij.icons.MphIcons
 import nl.hicts.mph.intellij.model.MavenProjectInfo
 import nl.hicts.mph.intellij.services.MavenBuildListener
 import nl.hicts.mph.intellij.services.MavenBuildOptions
@@ -49,7 +51,7 @@ class MavenBuildDialog(
     private val parallel = JBCheckBox("Run independent projects in parallel", projects.size > 1)
     private val maxParallel = JSpinner(SpinnerNumberModel(minOf(4, maxOf(1, projects.size)), 1, 32, 1))
     private val startButton = JButton("Run Build", AllIcons.Actions.Execute)
-    private val stopButton = JButton("Stop", AllIcons.Actions.Suspend)
+    private val stopButton = JButton("Stop", MphIcons.Stop)
     private val statusLabel = JBLabel("Ready to build ${selectedProjects.size} Maven project(s)")
     private val listModel = DefaultListModel<MavenBuildRow>()
     private val projectList = JBList(listModel)
@@ -60,6 +62,7 @@ class MavenBuildDialog(
     init {
         title = "Build Maven Projects"
         selectedProjects.forEach { listModel.addElement(MavenBuildRow(it, MavenBuildStatus.PENDING)) }
+        projectList.putClientProperty(AnimatedIcon.ANIMATION_IN_RENDERER_ALLOWED, true)
         projectList.cellRenderer = MavenBuildRowRenderer()
         stopButton.isEnabled = false
         parallel.addActionListener { maxParallel.isEnabled = parallel.isSelected }
@@ -108,13 +111,13 @@ class MavenBuildDialog(
     }
 
     override fun dispose() {
-        buildService.cancel()
+        if (building) buildService.cancel()
         console.dispose()
         super.dispose()
     }
 
     private fun createHeader(): JComponent {
-        val heading = JBLabel("Maven build", AllIcons.Nodes.PpLibFolder, JBLabel.LEFT)
+        val heading = JBLabel("Maven build", MphIcons.Build, JBLabel.LEFT)
         heading.font = heading.font.deriveFont(Font.BOLD, heading.font.size2D + 3f)
         val header = JPanel(BorderLayout())
         header.isOpaque = false
@@ -149,7 +152,14 @@ class MavenBuildDialog(
             maxParallel = maxParallel.value as Int,
             buildSteps = buildSteps,
         )
+        createBuildTask(options).queue()
+    }
+
+    internal val statusText: String get() = statusLabel.text
+
+    internal fun createBuildTask(options: MavenBuildOptions): Task.Backgroundable =
         object : Task.Backgroundable(ideProject, "Building Maven projects", true) {
+            private var failureMessage: String? = null
             private var failed = 0
             private var cancelled = false
 
@@ -173,6 +183,14 @@ class MavenBuildDialog(
                 cancelled = indicator.isCanceled || results.any { it.status == MavenBuildStatus.CANCELLED }
             }
 
+            override fun onThrowable(error: Throwable) {
+                failureMessage = error.message ?: error.javaClass.simpleName
+            }
+
+            override fun onCancel() {
+                cancelled = true
+            }
+
             override fun onFinished() {
                 building = false
                 startButton.isEnabled = true
@@ -183,13 +201,13 @@ class MavenBuildDialog(
                 parallel.isEnabled = true
                 maxParallel.isEnabled = parallel.isSelected
                 statusLabel.text = when {
+                    failureMessage != null -> "Build failed: $failureMessage"
                     cancelled -> "Build cancelled"
                     failed > 0 -> "$failed project(s) failed"
                     else -> "Build completed successfully"
                 }
             }
-        }.queue()
-    }
+        }
 
     private fun stopBuild() {
         buildService.cancel()
@@ -214,8 +232,8 @@ private class MavenBuildRowRenderer : ColoredListCellRenderer<MavenBuildRow>() {
         hasFocus: Boolean,
     ) {
         icon = when (value.status) {
-            MavenBuildStatus.PENDING -> AllIcons.General.InspectionsPause
-            MavenBuildStatus.RUNNING -> AllIcons.Process.Step_1
+            MavenBuildStatus.PENDING -> MphIcons.Waiting
+            MavenBuildStatus.RUNNING -> MphIcons.Running
             MavenBuildStatus.SUCCESS -> AllIcons.General.InspectionsOK
             MavenBuildStatus.FAILED -> AllIcons.General.Error
             MavenBuildStatus.CANCELLED -> AllIcons.Actions.Cancel

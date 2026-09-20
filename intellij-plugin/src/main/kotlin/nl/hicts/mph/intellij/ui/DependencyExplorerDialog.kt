@@ -98,7 +98,7 @@ private class RelationshipRenderer : ColoredTreeCellRenderer() {
     ) {
         when (val entry = (value as? DefaultMutableTreeNode)?.userObject) {
             is RelationshipGroup -> {
-                icon = if (entry.label == "Depends on") AllIcons.Actions.Download else AllIcons.Actions.Upload
+                icon = if (entry.label == "Depends on") AllIcons.General.ArrowDown else AllIcons.General.ArrowUp
                 append(entry.label, SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES)
                 append("  ${entry.count}", SimpleTextAttributes.GRAYED_ATTRIBUTES)
             }

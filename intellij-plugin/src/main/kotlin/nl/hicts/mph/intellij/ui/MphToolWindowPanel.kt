@@ -159,7 +159,7 @@ class MphToolWindowPanel(
         val buildAction = object : DumbAwareAction(
             "Build",
             "Run Maven for the selected projects",
-            AllIcons.Actions.Compile,
+            MphIcons.Build,
         ) {
             override fun actionPerformed(event: AnActionEvent) = buildSelectedProjects()
 
@@ -185,7 +185,7 @@ class MphToolWindowPanel(
         val rebaseAction = object : DumbAwareAction(
             "Sync with develop",
             "Stash changes, rebase selected repositories on develop, restore work, and realign versions",
-            AllIcons.Vcs.Branch,
+            MphIcons.SyncDevelop,
         ) {
             override fun actionPerformed(event: AnActionEvent) = openRebaseDialog()
 
@@ -198,7 +198,7 @@ class MphToolWindowPanel(
         val dependenciesAction = object : DumbAwareAction(
             "Dependencies",
             "Explore direct Maven dependencies and workspace dependents",
-            AllIcons.Nodes.PpLib,
+            MphIcons.Dependencies,
         ) {
             override fun actionPerformed(event: AnActionEvent) = openDependencyExplorer()
 
@@ -239,7 +239,7 @@ class MphToolWindowPanel(
         val sbomAction = object : DumbAwareAction(
             "SBOM",
             "Inspect the resolved dependency tree and export a CycloneDX SBOM",
-            AllIcons.Nodes.PpLibFolder,
+            MphIcons.Sbom,
         ) {
             override fun actionPerformed(event: AnActionEvent) {
                 selectedBuildProjects().singleOrNull()?.let { selected ->
@@ -260,7 +260,7 @@ class MphToolWindowPanel(
         val nexusIqAction = object : DumbAwareAction(
             "Nexus IQ",
             "Evaluate the selected Maven project and inspect policy violations",
-            AllIcons.General.InspectionsEye,
+            MphIcons.SecurityScan,
         ) {
             override fun actionPerformed(event: AnActionEvent) {
                 if (!ApplicationManager.getApplication().service<NexusIqSettings>().configured()) {

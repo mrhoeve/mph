@@ -1,7 +1,5 @@
 package nl.hicts.mph.intellij.ui
 
-import com.intellij.icons.AllIcons
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.service
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.Task
@@ -12,6 +10,7 @@ import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.FormBuilder
 import com.intellij.util.ui.JBUI
+import nl.hicts.mph.intellij.icons.MphIcons
 import nl.hicts.mph.intellij.model.MavenProjectInfo
 import nl.hicts.mph.intellij.services.GitWorkspaceService
 import nl.hicts.mph.intellij.services.LatestTagVersion
@@ -27,7 +26,7 @@ class ProjectVersionUpdateDialog(
     private val projectInfo: MavenProjectInfo,
 ) : DialogWrapper(ideProject) {
     private val versionField = JBTextField(projectInfo.version.orEmpty())
-    private val latestTag = JButton("Use latest Git tag", AllIcons.Vcs.Branch)
+    private val latestTag = JButton("Use latest Git tag", MphIcons.GitTag)
     private val tagStatus = JBLabel(" ")
 
     val selectedVersion: String get() = versionField.text.trim()
@@ -83,14 +82,18 @@ class ProjectVersionUpdateDialog(
                     versionField.text = found.version
                     tagStatus.text = "${found.version} from ${found.tagName}"
                 }
-                latestTag.isEnabled = true
             }
 
             override fun onThrowable(error: Throwable) {
-                ApplicationManager.getApplication().invokeLater {
-                    tagStatus.text = "Could not retrieve tags: ${error.message ?: error.javaClass.simpleName}"
-                    latestTag.isEnabled = true
-                }
+                tagStatus.text = "Could not retrieve tags: ${error.message ?: error.javaClass.simpleName}"
+            }
+
+            override fun onCancel() {
+                tagStatus.text = "Git tag lookup cancelled."
+            }
+
+            override fun onFinished() {
+                latestTag.isEnabled = !ideProject.isDisposed
             }
         }.queue()
     }

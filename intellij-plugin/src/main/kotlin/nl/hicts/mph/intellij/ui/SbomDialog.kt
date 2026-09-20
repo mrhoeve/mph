@@ -13,6 +13,7 @@ import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBTextField
 import com.intellij.ui.treeStructure.Tree
 import com.intellij.util.ui.JBUI
+import nl.hicts.mph.intellij.icons.MphIcons
 import nl.hicts.mph.intellij.services.CycloneDxExporter
 import nl.hicts.mph.intellij.services.SbomAnalysis
 import nl.hicts.mph.intellij.services.SbomComponent
@@ -56,7 +57,7 @@ class SbomDialog(
     }
 
     override fun createCenterPanel(): JComponent {
-        val titleLabel = JBLabel(analysis.project.artifactId, AllIcons.Nodes.Module, JBLabel.LEFT).apply {
+        val titleLabel = JBLabel(analysis.project.artifactId, MphIcons.Sbom, JBLabel.LEFT).apply {
             font = font.deriveFont(Font.BOLD, font.size2D + 3f)
         }
         summary.foreground = JBUI.CurrentTheme.ContextHelp.FOREGROUND

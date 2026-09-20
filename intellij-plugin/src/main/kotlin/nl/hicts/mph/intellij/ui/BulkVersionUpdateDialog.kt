@@ -76,7 +76,7 @@ class BulkVersionUpdateDialog(
     }
 
     private fun createHeader(): JComponent {
-        val heading = JBLabel("Bulk version alignment", MphIcons.Mph, JBLabel.LEFT)
+        val heading = JBLabel("Bulk version alignment", MphIcons.VersionsAlign, JBLabel.LEFT)
         heading.font = heading.font.deriveFont(Font.BOLD, heading.font.size2D + 3f)
         heading.iconTextGap = JBUI.scale(12)
 

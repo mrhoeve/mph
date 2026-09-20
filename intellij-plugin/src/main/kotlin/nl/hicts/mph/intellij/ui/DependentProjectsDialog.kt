@@ -82,7 +82,7 @@ class DependentProjectsDialog(
 
         val header = JPanel(BorderLayout(JBUI.scale(14), 0))
         header.isOpaque = false
-        header.add(JBLabel(MphIcons.Mph), BorderLayout.WEST)
+        header.add(JBLabel(MphIcons.Dependencies), BorderLayout.WEST)
         header.add(text, BorderLayout.CENTER)
         return header
     }

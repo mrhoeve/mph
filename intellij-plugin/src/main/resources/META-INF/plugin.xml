@@ -88,7 +88,7 @@
                 class="nl.hicts.mph.intellij.actions.UpdateDependentProjectsAction"
                 text="Update Dependent Maven Projects…"
                 description="Find linked Maven projects that reference this project"
-                icon="nl.hicts.mph.intellij.icons.MphIcons.Mph">
+                icon="nl.hicts.mph.intellij.icons.MphIcons.Dependencies">
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>

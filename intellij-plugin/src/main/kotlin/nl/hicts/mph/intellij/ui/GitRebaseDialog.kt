@@ -9,6 +9,7 @@ import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
+import com.intellij.ui.AnimatedIcon
 import com.intellij.ui.ColoredListCellRenderer
 import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.components.JBLabel
@@ -16,6 +17,7 @@ import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextArea
 import com.intellij.util.ui.JBUI
+import nl.hicts.mph.intellij.icons.MphIcons
 import nl.hicts.mph.intellij.model.MavenProjectInfo
 import nl.hicts.mph.intellij.services.BulkVersionMode
 import nl.hicts.mph.intellij.services.BulkVersionUpdateRequest
@@ -52,8 +54,8 @@ class GitRebaseDialog(
         lineWrap = true
         wrapStyleWord = true
     }
-    private val startButton = JButton("Stash and Rebase", AllIcons.Vcs.Branch)
-    private val stopButton = JButton("Stop", AllIcons.Actions.Suspend)
+    private val startButton = JButton("Stash and Rebase", MphIcons.SyncDevelop)
+    private val stopButton = JButton("Stop", MphIcons.Stop)
     @Volatile
     private var running = false
     private var stopRequested = false
@@ -61,6 +63,7 @@ class GitRebaseDialog(
     init {
         title = "Synchronize Feature Branches with develop"
         plan.repositories.forEach { listModel.addElement(GitRebaseRow(it, GitRebaseStatus.PENDING, "Waiting")) }
+        repositoryList.putClientProperty(AnimatedIcon.ANIMATION_IN_RENDERER_ALLOWED, true)
         repositoryList.cellRenderer = GitRebaseRowRenderer()
         repositoryList.addListSelectionListener { showRecoveryDetails() }
         if (!listModel.isEmpty) repositoryList.selectedIndex = 0
@@ -101,7 +104,7 @@ class GitRebaseDialog(
     }
 
     private fun createHeader(): JComponent {
-        val heading = JBLabel("Rebase on develop", AllIcons.Vcs.Branch, JBLabel.LEFT)
+        val heading = JBLabel("Rebase on develop", MphIcons.SyncDevelop, JBLabel.LEFT)
         heading.font = heading.font.deriveFont(Font.BOLD, heading.font.size2D + 3f)
         val explanation = JBLabel(
             "Prefix '${plan.prefix}' will be reapplied and all dependents aligned only when every repository succeeds.",
@@ -266,8 +269,8 @@ private class GitRebaseRowRenderer : ColoredListCellRenderer<GitRebaseRow>() {
         hasFocus: Boolean,
     ) {
         icon = when (value.status) {
-            GitRebaseStatus.PENDING -> AllIcons.General.InspectionsPause
-            GitRebaseStatus.RUNNING -> AllIcons.Process.Step_1
+            GitRebaseStatus.PENDING -> MphIcons.Waiting
+            GitRebaseStatus.RUNNING -> MphIcons.Running
             GitRebaseStatus.SUCCESS -> AllIcons.General.InspectionsOK
             GitRebaseStatus.CONFLICT -> AllIcons.General.Warning
             GitRebaseStatus.SKIPPED -> AllIcons.General.Warning
