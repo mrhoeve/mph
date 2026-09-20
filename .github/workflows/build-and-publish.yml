@@ -20,7 +20,7 @@ on:
         required: true
     outputs:
       version:
-        description: Release version derived from the Maven project version
+        description: Release version derived from the plugin version
         value: ${{ jobs.build.outputs.version }}
 
 concurrency:
@@ -105,7 +105,8 @@ jobs:
         RELEASE_BUILD: ${{ inputs.release_build || false }}
       run: |
         chmod +x mvnw
-        VERSION=$(./mvnw help:evaluate -Dexpression=project.version -q -DforceStdout)
+        VERSION=$(sed -n 's/^pluginVersion=//p' intellij-plugin/gradle.properties | tr -d '\r')
+        test -n "$VERSION"
         if [[ -n "$REQUESTED_RELEASE_VERSION" ]]; then
           RELEASE_VERSION=$REQUESTED_RELEASE_VERSION
         elif [[ "$RELEASE_BUILD" == "true" && $VERSION == *"-SNAPSHOT" ]]; then

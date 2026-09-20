@@ -156,20 +156,22 @@ jobs:
 
         git switch --detach "$VERIFIED_DEVELOP_SHA"
         chmod +x mvnw
-        CURRENT_VERSION=$(./mvnw help:evaluate -Dexpression=project.version -q -DforceStdout)
+        CURRENT_VERSION=$(sed -n 's/^pluginVersion=//p' intellij-plugin/gradle.properties | tr -d '\r')
         if [[ "$CURRENT_VERSION" != *-SNAPSHOT ]]; then
           echo "::error::develop must contain a -SNAPSHOT version before releasing: $CURRENT_VERSION"
           exit 1
         fi
 
         ./mvnw versions:set -DnewVersion="$RELEASE_VERSION" -DgenerateBackupPoms=false
-        git add pom.xml
+        sed -i "s/^pluginVersion=.*/pluginVersion=$RELEASE_VERSION/" intellij-plugin/gradle.properties
+        git add pom.xml intellij-plugin/gradle.properties
         git commit -m "Release $RELEASE_VERSION"
         RELEASE_COMMIT=$(git rev-parse HEAD)
         git tag -a "$TAG_NAME" -m "Release $RELEASE_VERSION"
 
         ./mvnw versions:set -DnewVersion="$NEXT_VERSION" -DgenerateBackupPoms=false
-        git add pom.xml
+        sed -i "s/^pluginVersion=.*/pluginVersion=$NEXT_VERSION/" intellij-plugin/gradle.properties
+        git add pom.xml intellij-plugin/gradle.properties
         git commit -m "Prepare for next development iteration: $NEXT_VERSION"
         DEVELOPMENT_COMMIT=$(git rev-parse HEAD)
 

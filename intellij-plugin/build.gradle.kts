@@ -11,13 +11,11 @@ plugins {
 
 group = "nl.hicts.mph"
 
-val pomVersion = Regex(
-    """<artifactId>\s*mph\s*</artifactId>\s*<version>\s*([^<]+)\s*</version>""",
-).find(file("../pom.xml").readText())?.groupValues?.get(1)?.trim()
-    ?: error("Could not determine the MPH version from ../pom.xml")
+val pluginVersion = providers.gradleProperty("pluginVersion").get().trim()
+require(pluginVersion.isNotEmpty()) { "Set pluginVersion in the plugin's gradle.properties." }
 val requestedVersion = providers.gradleProperty("mphVersion").orNull?.trim()?.takeIf(String::isNotEmpty)
 val releaseBuild = providers.gradleProperty("releaseBuild").map(String::toBoolean).getOrElse(false)
-version = requestedVersion ?: if (releaseBuild) pomVersion.removeSuffix("-SNAPSHOT") else pomVersion
+version = requestedVersion ?: if (releaseBuild) pluginVersion.removeSuffix("-SNAPSHOT") else pluginVersion
 
 repositories {
     mavenCentral()
