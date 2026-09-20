@@ -467,6 +467,33 @@ class GitRebaseServiceTest {
         assertEquals("preserved", Files.readString(root.resolve("notes.txt")))
     }
 
+    @Test
+    fun `injected ref race stops before stashing local work`() = withRepository { root, _ ->
+        advanceDevelop(root)
+        Files.writeString(root.resolve("notes.txt"), "local notes")
+        val native = NativeGitCommandRunner()
+        val workflow = GitRebaseWorkflow(GitCommandRunner { directory, arguments, progress, environment ->
+            if (arguments.take(2) == listOf("update-ref", "refs/heads/develop")) GitCommandResult(1, "", "Test ref race")
+            else native.execute(directory, arguments, progress, environment)
+        })
+        val result = workflow.rebase(GitRebasePlan("PREFIX-", listOf(GitRepositoryPlan(root.toString(), "service")), emptyList()), notCancelledIndicator(), GitRebaseListener { _, _, _ -> }).single()
+        assertEquals(GitRebaseStatus.FAILED, result.status)
+        assertTrue(result.message.contains("Test ref race"))
+        assertEquals("local notes", Files.readString(root.resolve("notes.txt")))
+        assertEquals("", git(root, "stash", "list"))
+    }
+
+    @Test
+    fun `recovery write failure leaves local files untouched`() = withRepository { root, _ ->
+        Files.writeString(root.resolve("notes.txt"), "local notes")
+        val workflow = GitRebaseWorkflow(recoveryWriter = { _, _ -> error("Test disk full") })
+        val result = workflow.rebase(GitRebasePlan("PREFIX-", listOf(GitRepositoryPlan(root.toString(), "service")), emptyList()), notCancelledIndicator(), GitRebaseListener { _, _, _ -> }).single()
+        assertEquals(GitRebaseStatus.FAILED, result.status)
+        assertTrue(result.message.contains("Test disk full"))
+        assertEquals("local notes", Files.readString(root.resolve("notes.txt")))
+        assertEquals("", git(root, "stash", "list"))
+    }
+
     private fun synchronize(
         root: Path,
         service: GitRebaseService = GitRebaseService(),
