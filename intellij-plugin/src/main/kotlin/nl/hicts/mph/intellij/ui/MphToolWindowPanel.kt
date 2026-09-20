@@ -294,6 +294,11 @@ class MphToolWindowPanel(
         ) {
             override fun actionPerformed(event: AnActionEvent) = AboutMphDialog(project).show()
         }
+        val recoveryAction = object : DumbAwareAction("Recovery Copies", "Browse retained Git instructions and POM copies", AllIcons.Actions.Rollback) {
+            override fun actionPerformed(event: AnActionEvent) {
+                RecoveryBrowserDialog(project, snapshot.groups.mapNotNull { it.rootPath }).show()
+            }
+        }
         val toolbar = ActionManager.getInstance().createActionToolbar(
             ActionPlaces.TOOLWINDOW_TOOLBAR_BAR,
             DefaultActionGroup(
@@ -307,6 +312,7 @@ class MphToolWindowPanel(
                 realignVersionsAction,
                 buildAction,
                 rebaseAction,
+                recoveryAction,
                 aboutAction,
                 settingsAction,
                 expandAllAction,
