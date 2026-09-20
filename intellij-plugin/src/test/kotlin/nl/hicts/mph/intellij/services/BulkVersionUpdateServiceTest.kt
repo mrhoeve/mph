@@ -183,6 +183,22 @@ class BulkVersionUpdateServiceTest : BasePlatformTestCase() {
         assertTrue(FileDocumentManager.getInstance().isDocumentUnsaved(document(dependent)))
     }
 
+    fun testPreviewRejectsDoctypeBeforeChangingPoms() = withAlignmentFiles { service, request, target, dependent ->
+        val targetDisk = Files.readString(target)
+        val dependentDisk = Files.readString(dependent)
+        val source = """<!DOCTYPE project [<!ENTITY local SYSTEM "file:///mph-test-missing-entity">]>""" + "\n" +
+            targetDisk.replace("</project>", "<description>&local;</description></project>")
+        WriteCommandAction.runWriteCommandAction(project) { document(target).setText(source) }
+
+        val failure = expectFailure { service.prepare(request) }
+
+        assertTrue(failure is org.xml.sax.SAXParseException)
+        assertTrue(failure.message.orEmpty().contains("DOCTYPE"))
+        assertEquals(source, document(target).text)
+        assertEquals(targetDisk, Files.readString(target))
+        assertEquals(dependentDisk, Files.readString(dependent))
+    }
+
     private fun expectFailure(action: () -> Unit): Exception {
         try { action() } catch (error: Exception) { return error }
         throw AssertionError("Expected alignment to stop")

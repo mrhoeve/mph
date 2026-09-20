@@ -134,6 +134,8 @@ class BulkVersionUpdateService(
         return plan.result
     }
 
+    // These HTTP URIs identify parser features; they are never fetched. HTTPS would be an unrecognized feature name.
+    @Suppress("kotlin:S5332")
     private fun validatePom(content: String) {
         val factory = javax.xml.parsers.DocumentBuilderFactory.newInstance()
         factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
