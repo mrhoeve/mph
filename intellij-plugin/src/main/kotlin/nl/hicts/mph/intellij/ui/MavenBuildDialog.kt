@@ -42,6 +42,7 @@ class MavenBuildDialog(
     private val ideProject: Project,
     projects: List<MavenProjectInfo>,
     private val buildSteps: Map<String, Int> = emptyMap(),
+    private val prerequisites: Map<String, Set<String>> = emptyMap(),
 ) : DialogWrapper(ideProject) {
     private val buildService = ideProject.service<MavenBuildService>()
     private val selectedProjects = projects.distinctBy(MavenProjectInfo::pomPath)
@@ -58,6 +59,8 @@ class MavenBuildDialog(
     private val console = TextConsoleBuilderFactory.getInstance().createBuilder(ideProject).console
     @Volatile
     private var building = false
+    @Volatile private var buildIndicator: ProgressIndicator? = null
+    @Volatile private var stopRequested = false
 
     init {
         title = "Build Maven Projects"
@@ -111,7 +114,7 @@ class MavenBuildDialog(
     }
 
     override fun dispose() {
-        if (building) buildService.cancel()
+        if (building) stopBuild()
         console.dispose()
         super.dispose()
     }
@@ -133,6 +136,7 @@ class MavenBuildDialog(
             statusLabel.text = "Enter at least one Maven goal"
             return
         }
+        stopRequested = false
         building = true
         startButton.isEnabled = false
         stopButton.isEnabled = true
@@ -151,6 +155,7 @@ class MavenBuildDialog(
             parallel = parallel.isSelected,
             maxParallel = maxParallel.value as Int,
             buildSteps = buildSteps,
+            prerequisites = prerequisites,
         )
         createBuildTask(options).queue()
     }
@@ -161,11 +166,15 @@ class MavenBuildDialog(
         object : Task.Backgroundable(ideProject, "Building Maven projects", true) {
             private var failureMessage: String? = null
             private var failed = 0
+            private var skipped = 0
             private var cancelled = false
 
             override fun run(indicator: ProgressIndicator) {
+                buildIndicator = indicator
+                if (stopRequested) indicator.cancel()
                 val listener = MavenBuildListener { project, status, text ->
                     ApplicationManager.getApplication().invokeLater {
+                        if (isDisposed) return@invokeLater
                         val index = selectedProjects.indexOfFirst { it.pomPath == project.pomPath }
                         if (index >= 0) updateRow(index, status)
                         text?.let { output ->
@@ -179,6 +188,7 @@ class MavenBuildDialog(
                     }
                 }
                 val results = buildService.build(selectedProjects, options, indicator, listener)
+                skipped = results.count { it.status == MavenBuildStatus.SKIPPED }
                 failed = results.count { it.status == MavenBuildStatus.FAILED }
                 cancelled = indicator.isCanceled || results.any { it.status == MavenBuildStatus.CANCELLED }
             }
@@ -192,6 +202,7 @@ class MavenBuildDialog(
             }
 
             override fun onFinished() {
+                buildIndicator = null
                 building = false
                 startButton.isEnabled = true
                 stopButton.isEnabled = false
@@ -203,14 +214,15 @@ class MavenBuildDialog(
                 statusLabel.text = when {
                     failureMessage != null -> "Build failed: $failureMessage"
                     cancelled -> "Build cancelled"
-                    failed > 0 -> "$failed project(s) failed"
+                    failed > 0 || skipped > 0 -> "$failed project(s) failed, $skipped skipped"
                     else -> "Build completed successfully"
                 }
             }
         }
 
     private fun stopBuild() {
-        buildService.cancel()
+        stopRequested = true
+        buildIndicator?.cancel()
         statusLabel.text = "Stopping build…"
         stopButton.isEnabled = false
     }
@@ -235,6 +247,7 @@ private class MavenBuildRowRenderer : ColoredListCellRenderer<MavenBuildRow>() {
             MavenBuildStatus.PENDING -> MphIcons.Waiting
             MavenBuildStatus.RUNNING -> MphIcons.Running
             MavenBuildStatus.SUCCESS -> AllIcons.General.InspectionsOK
+            MavenBuildStatus.SKIPPED -> AllIcons.General.Warning
             MavenBuildStatus.FAILED -> AllIcons.General.Error
             MavenBuildStatus.CANCELLED -> AllIcons.Actions.Cancel
         }

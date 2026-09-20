@@ -7,6 +7,7 @@ import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
+import nl.hicts.mph.intellij.services.WorkspaceOperationBusyException
 import com.intellij.openapi.ui.Messages
 import com.intellij.ui.DocumentAdapter
 import com.intellij.ui.components.JBCheckBox
@@ -139,6 +140,14 @@ class ManagedVersionsDialog(
         ?.let(displayed::getOrNull)
 
     private fun overrideSelected() {
+        try {
+            overrideSelectedOwned()
+        } catch (error: WorkspaceOperationBusyException) {
+            Messages.showWarningDialog(ideProject, error.message.orEmpty(), "Workspace Operation In Progress")
+        }
+    }
+
+    private fun overrideSelectedOwned() {
         val property = selectedProperty() ?: return
         val dialog = PropertyOverrideDialog(ideProject, property)
         if (!dialog.showAndGet()) return
@@ -147,6 +156,14 @@ class ManagedVersionsDialog(
     }
 
     private fun removeSelected() {
+        try {
+            removeSelectedOwned()
+        } catch (error: WorkspaceOperationBusyException) {
+            Messages.showWarningDialog(ideProject, error.message.orEmpty(), "Workspace Operation In Progress")
+        }
+    }
+
+    private fun removeSelectedOwned() {
         val property = selectedProperty()?.takeIf(ManagedVersionProperty::isOverridden) ?: return
         if (Messages.showYesNoDialog(
                 ideProject,
@@ -160,6 +177,14 @@ class ManagedVersionsDialog(
     }
 
     private fun upgradeSpringBoot() {
+        try {
+            upgradeSpringBootOwned()
+        } catch (error: WorkspaceOperationBusyException) {
+            Messages.showWarningDialog(ideProject, error.message.orEmpty(), "Workspace Operation In Progress")
+        }
+    }
+
+    private fun upgradeSpringBootOwned() {
         val springBoot = analysis.springBoot ?: return
         val dialog = SpringBootUpgradeDialog(ideProject, springBoot)
         if (!dialog.showAndGet()) return

@@ -2,7 +2,6 @@ package nl.hicts.mph.intellij.ui
 
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.ActionPlaces
 import com.intellij.openapi.actionSystem.AnActionEvent
@@ -21,6 +20,9 @@ import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.SimpleToolWindowPanel
+import nl.hicts.mph.intellij.services.MavenModelRefreshService
+import nl.hicts.mph.intellij.services.WorkspaceOperationCoordinator
+import nl.hicts.mph.intellij.services.WorkspaceOperationBusyException
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFileManager
@@ -46,7 +48,6 @@ import nl.hicts.mph.intellij.services.GitWorkspaceService
 import nl.hicts.mph.intellij.services.IntellijSbomService
 import nl.hicts.mph.intellij.services.NexusIqSettings
 import nl.hicts.mph.intellij.model.WorkspaceDependencyAnalyzer
-import org.jetbrains.idea.maven.project.MavenProjectsManager
 import java.awt.BorderLayout
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
@@ -402,24 +403,22 @@ class MphToolWindowPanel(
     }
 
     private fun reloadMavenModel(onSuccess: () -> Unit, onFailure: (Throwable) -> Unit) {
-        val manager = MavenProjectsManager.getInstance(project)
-        FileDocumentManager.getInstance().saveAllDocuments()
-        val listenerDisposable = Disposer.newDisposable("MPH Maven reload listener")
-        Disposer.register(this, listenerDisposable)
-        manager.addManagerListener(
-            object : MavenProjectsManager.Listener {
-                override fun projectImportCompleted() {
-                    Disposer.dispose(listenerDisposable)
-                    onSuccess()
-                }
-            },
-            listenerDisposable,
-        )
-        runCatching(manager::forceUpdateAllProjectsOrFindAllAvailablePomFiles)
-            .onFailure { error ->
-                Disposer.dispose(listenerDisposable)
-                onFailure(error)
-            }
+        val owner = try {
+            WorkspaceOperationCoordinator.acquire("Maven refresh")
+        } catch (error: WorkspaceOperationBusyException) {
+            onFailure(error)
+            return
+        }
+        try {
+            FileDocumentManager.getInstance().saveAllDocuments()
+            project.service<MavenModelRefreshService>().reload(
+                { owner.close(); onSuccess() },
+                { error -> owner.close(); onFailure(error) },
+            )
+        } catch (error: Exception) {
+            owner.close()
+            onFailure(error)
+        }
     }
 
     internal fun createRefreshTask(): Task.Backgroundable =
@@ -527,11 +526,15 @@ class MphToolWindowPanel(
     private fun buildSelectedProjects() {
         val selected = selectedBuildProjects()
         if (selected.isEmpty()) return
-        val order = WorkspaceDependencyAnalyzer().buildOrder(
-            project.service<IdeaProjectDiscoveryService>().dependencyDescriptors(),
+        val order = WorkspaceDependencyAnalyzer().buildOrderForSelection(
+            selected, project.service<IdeaProjectDiscoveryService>().dependencyDescriptors(),
         )
         val steps = order.entries.associate { it.project.pomPath to it.buildStep }
-        MavenBuildDialog(project, selected, steps).show()
+        if (order.hasCycles) {
+            Messages.showWarningDialog(project, "Resolve workspace dependency cycles before building.", "Cannot Build Projects")
+            return
+        }
+        MavenBuildDialog(project, order.entries.map { it.project }, steps, order.entries.associate { it.project.pomPath to it.prerequisitePomPaths }).show()
     }
 
     internal fun selectedProjects(): List<MavenProjectInfo> = tree.selectionPaths.orEmpty()
@@ -555,6 +558,14 @@ class MphToolWindowPanel(
         .distinctBy(MavenProjectInfo::pomPath)
 
     private fun alignSelectedVersions() {
+        try {
+            alignSelectedVersionsOwned()
+        } catch (error: WorkspaceOperationBusyException) {
+            Messages.showWarningDialog(project, error.message.orEmpty(), "Workspace Operation In Progress")
+        }
+    }
+
+    private fun alignSelectedVersionsOwned() {
         val selected = selectedProjects()
         if (selected.isEmpty()) return
         val dialog = BulkVersionUpdateDialog(project, selected)
@@ -614,6 +625,14 @@ class MphToolWindowPanel(
     }
 
     private fun updateSelectedProjectVersion() {
+        try {
+            updateSelectedProjectVersionOwned()
+        } catch (error: WorkspaceOperationBusyException) {
+            Messages.showWarningDialog(project, error.message.orEmpty(), "Workspace Operation In Progress")
+        }
+    }
+
+    private fun updateSelectedProjectVersionOwned() {
         val selected = selectedBuildProjects().singleOrNull() ?: return
         val dialog = ProjectVersionUpdateDialog(project, selected)
         if (!dialog.showAndGet()) return
@@ -672,9 +691,13 @@ class MphToolWindowPanel(
                     summary.text = "The selected Maven projects were not found after reloading."
                     return
                 }
-                val result = realignVersions(selected, workspace)
-                notifyVersionResult("Maven references realigned", result)
-                refresh()
+                try {
+                    val result = realignVersions(selected, workspace)
+                    notifyVersionResult("Maven references realigned", result)
+                    refresh()
+                } catch (error: WorkspaceOperationBusyException) {
+                    summary.text = error.message
+                }
             }
 
             override fun onThrowable(error: Throwable) {
@@ -714,7 +737,7 @@ class MphToolWindowPanel(
             )
             return
         }
-        GitRebaseDialog(project, plan, workspaceProjects).show()
+        GitRebaseDialog(project, plan).show()
     }
 
     private fun openDependencyExplorer() {

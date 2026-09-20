@@ -45,7 +45,10 @@ data class BulkVersionUpdateResult(
 class BulkVersionUpdateService(
     private val project: Project,
 ) {
-    fun update(request: BulkVersionUpdateRequest): BulkVersionUpdateResult {
+    fun update(request: BulkVersionUpdateRequest, owner: WorkspaceOperationCoordinator.Lease? = null): BulkVersionUpdateResult =
+        WorkspaceOperationCoordinator.run("Version update", owner) { updateOwned(request) }
+
+    private fun updateOwned(request: BulkVersionUpdateRequest): BulkVersionUpdateResult {
         require(request.selectedProjects.isNotEmpty()) { "Select at least one Maven project." }
         require(request.mode == BulkVersionMode.KEEP_CURRENT || request.prefix.isNotBlank()) {
             if (request.mode == BulkVersionMode.SET_VERSION) "Enter a target version." else "Enter a version prefix."

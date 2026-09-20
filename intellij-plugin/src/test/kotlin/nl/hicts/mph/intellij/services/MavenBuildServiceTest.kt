@@ -82,6 +82,58 @@ class MavenBuildServiceTest {
         assertEquals(listOf(listOf(library), listOf(application)), stages)
     }
 
+    @Test
+    fun `failed prerequisites skip direct and transitive dependents but not independent builds`() {
+        for (parallel in listOf(false, true)) {
+            val library = project("library/pom.xml")
+            val application = project("application/pom.xml")
+            val distribution = project("distribution/pom.xml")
+            val independent = project("independent/pom.xml")
+            val started = mutableListOf<String>()
+            val options = MavenBuildOptions(parallel = parallel, buildSteps = mapOf(
+                library.pomPath to 1, application.pomPath to 2, distribution.pomPath to 3, independent.pomPath to 2,
+            ), prerequisites = mapOf(application.pomPath to setOf(library.pomPath), distribution.pomPath to setOf(application.pomPath)))
+            val results = MavenBuildService().executeBuild(
+                listOf(distribution, independent, application, library), options, MavenBuildListener { _, _, _ -> },
+            ) { stage ->
+                stage.map {
+                    started += it.pomPath
+                    MavenProjectBuildResult(it, if (it == library) MavenBuildStatus.FAILED else MavenBuildStatus.SUCCESS, 1)
+                }
+            }.associate { it.project.pomPath to it.status }
+            assertEquals(listOf(library.pomPath, independent.pomPath), started)
+            assertEquals(MavenBuildStatus.SKIPPED, results[application.pomPath])
+            assertEquals(MavenBuildStatus.SKIPPED, results[distribution.pomPath])
+            assertEquals(MavenBuildStatus.SUCCESS, results[independent.pomPath])
+        }
+    }
+
+    @Test
+    fun `cycles are rejected before any build starts in either mode`() {
+        val first = project("first/pom.xml")
+        val second = project("second/pom.xml")
+        for (parallel in listOf(false, true)) {
+            assertThrows(IllegalStateException::class.java) {
+                MavenBuildService().executeBuild(listOf(first, second), MavenBuildOptions(
+                    parallel = parallel,
+                    prerequisites = mapOf(first.pomPath to setOf(second.pomPath), second.pomPath to setOf(first.pomPath)),
+                ), MavenBuildListener { _, _, _ -> }) { error("No process should start") }
+            }
+        }
+    }
+
+    @Test
+    fun `successful and unselected prerequisites do not block builds`() {
+        val library = project("library/pom.xml")
+        val application = project("application/pom.xml")
+        val result = MavenBuildService().executeBuild(listOf(application, library), MavenBuildOptions(
+            buildSteps = mapOf(library.pomPath to 1, application.pomPath to 2),
+            prerequisites = mapOf(application.pomPath to setOf(library.pomPath, "unselected/pom.xml")),
+        ), MavenBuildListener { _, _, _ -> }) { stage -> stage.map { MavenProjectBuildResult(it, MavenBuildStatus.SUCCESS, 0) } }
+        assertEquals(listOf(library, application), result.map { it.project })
+        assertTrue(result.all { it.status == MavenBuildStatus.SUCCESS })
+    }
+
     private fun project(pomPath: String) = MavenProjectInfo(
         groupId = "org.example",
         artifactId = "sample-service",

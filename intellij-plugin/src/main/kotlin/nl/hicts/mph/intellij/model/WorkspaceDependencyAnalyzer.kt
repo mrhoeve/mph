@@ -19,6 +19,7 @@ data class BuildOrderEntry(
     val buildStep: Int,
     val dependsOn: List<String>,
     val partOfCycle: Boolean = false,
+    val prerequisitePomPaths: Set<String> = emptySet(),
 )
 
 data class WorkspaceBuildOrder(
@@ -117,8 +118,56 @@ class WorkspaceDependencyAnalyzer {
                             ?.artifactId
                     }.sorted(),
                     partOfCycle = repository in remaining,
+                    prerequisitePomPaths = dependencies.getValue(repository).map { dependencyRoot ->
+                        rootProject(repositories.getValue(dependencyRoot).map(MavenProjectDependencyDescriptor::project), dependencyRoot).pomPath
+                    }.toSet(),
                 )
             }
+        }
+        return WorkspaceBuildOrder(entries)
+    }
+
+    /** Build only the selected reactors/modules, preserving dependencies within a repository too. */
+    fun buildOrderForSelection(
+        selected: List<MavenProjectInfo>,
+        descriptors: Collection<MavenProjectDependencyDescriptor>,
+    ): WorkspaceBuildOrder {
+        val unique = selected.distinctBy { normalized(it.pomPath) }
+        fun includes(root: MavenProjectInfo, module: MavenProjectInfo): Boolean =
+            root.gitRootPath == module.gitRootPath && normalized(module.pomPath).startsWith(normalized(root.pomPath).parent)
+        // A selected reactor already builds its nested modules; do not run those twice or concurrently.
+        val builds = unique.filter { candidate -> unique.none { it != candidate && includes(it, candidate) } }
+        val byCoordinates = descriptors.associateBy { MavenCoordinates(it.project.groupId.orEmpty(), it.project.artifactId) }
+        val prerequisites = builds.associate { build ->
+            val visited = mutableSetOf<String>()
+            val required = linkedSetOf<String>()
+            fun visit(descriptor: MavenProjectDependencyDescriptor) {
+                if (!visited.add(descriptor.project.pomPath)) return
+                relationshipCoordinates(descriptor).keys.mapNotNull(byCoordinates::get).forEach { dependency ->
+                    builds.firstOrNull { includes(it, dependency.project) }?.takeIf { it != build }?.let {
+                        required += it.pomPath
+                    }
+                    visit(dependency)
+                }
+            }
+            descriptors.filter { includes(build, it.project) }.forEach(::visit)
+            build.pomPath to required
+        }
+        val remaining = builds.toMutableList()
+        val resolved = mutableSetOf<String>()
+        val entries = mutableListOf<BuildOrderEntry>()
+        var step = 1
+        while (remaining.isNotEmpty()) {
+            val ready = remaining.filter { prerequisites.getValue(it.pomPath).all(resolved::contains) }
+            val cycle = ready.isEmpty()
+            val stage = if (cycle) remaining.toList() else ready
+            stage.forEach { project ->
+                val paths = prerequisites.getValue(project.pomPath)
+                entries += BuildOrderEntry(project, step, builds.filter { it.pomPath in paths }.map { it.artifactId }, cycle, paths)
+            }
+            remaining.removeAll(stage.toSet())
+            resolved += stage.map { it.pomPath }
+            step++
         }
         return WorkspaceBuildOrder(entries)
     }

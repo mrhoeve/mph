@@ -6,21 +6,22 @@ import com.intellij.execution.process.ProcessEvent
 import com.intellij.execution.process.ProcessListener
 import com.intellij.execution.process.ProcessOutputTypes
 import com.intellij.openapi.components.Service
+import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.util.Key
 import nl.hicts.mph.intellij.model.MavenProjectInfo
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.TimeUnit
 
 enum class MavenBuildStatus {
     PENDING,
     RUNNING,
     SUCCESS,
     FAILED,
+    SKIPPED,
     CANCELLED,
 }
 
@@ -31,6 +32,7 @@ data class MavenBuildOptions(
     val parallel: Boolean = false,
     val maxParallel: Int = 1,
     val buildSteps: Map<String, Int> = emptyMap(),
+    val prerequisites: Map<String, Set<String>> = emptyMap(),
 )
 
 data class MavenProjectBuildResult(
@@ -45,8 +47,6 @@ fun interface MavenBuildListener {
 
 @Service(Service.Level.PROJECT)
 class MavenBuildService {
-    private val activeHandlers = ConcurrentHashMap.newKeySet<OSProcessHandler>()
-    private val cancelRequested = AtomicBoolean(false)
 
     fun build(
         projects: List<MavenProjectInfo>,
@@ -54,15 +54,47 @@ class MavenBuildService {
         indicator: ProgressIndicator,
         listener: MavenBuildListener,
     ): List<MavenProjectBuildResult> {
-        cancelRequested.set(false)
-        return try {
-            executionStages(projects, options).flatMap { stage ->
+        return WorkspaceOperationCoordinator.run("Maven build") {
+            executeBuild(projects, options, listener) { stage ->
                 if (options.parallel && stage.size > 1) runParallel(stage, options, indicator, listener)
                 else stage.map { project -> runOrCancel(project, options, indicator, listener) }
             }
-        } finally {
-            cancelRequested.set(false)
         }
+    }
+
+    internal fun executeBuild(
+        projects: List<MavenProjectInfo>,
+        options: MavenBuildOptions,
+        listener: MavenBuildListener,
+        runStage: (List<MavenProjectInfo>) -> List<MavenProjectBuildResult>,
+    ): List<MavenProjectBuildResult> {
+        val results = linkedMapOf<String, MavenProjectBuildResult>()
+        val selected = projects.map { it.pomPath }.toSet()
+        // Validate the full selected graph before starting any process, including sequential runs.
+        val stages = executionStages(projects, options)
+        val visited = mutableSetOf<String>()
+        stages.forEach { stage ->
+            stage.forEach { project ->
+                check(options.prerequisites[project.pomPath].orEmpty().filter { it in selected }.all { it in visited }) {
+                    "Build prerequisites contain a cycle or an invalid build order. Refresh the build order before running."
+                }
+            }
+            visited += stage.map { it.pomPath }
+        }
+        stages.forEach { stage ->
+            val ready = stage.filter { project ->
+                val blocked = options.prerequisites[project.pomPath].orEmpty().any {
+                    it in selected && results[it]?.status != MavenBuildStatus.SUCCESS
+                }
+                if (blocked) {
+                    results[project.pomPath] = MavenProjectBuildResult(project, MavenBuildStatus.SKIPPED, null)
+                    listener.onEvent(project, MavenBuildStatus.SKIPPED, "Skipping ${project.artifactId}: a prerequisite did not succeed.\n")
+                }
+                !blocked
+            }
+            if (ready.isNotEmpty()) runStage(ready).forEach { results[it.project.pomPath] = it }
+        }
+        return results.values.toList()
     }
 
     internal fun executionStages(
@@ -87,6 +119,16 @@ class MavenBuildService {
             }).map { it.get() }
         } finally {
             executor.shutdownNow()
+            // Keep the workspace lease until every worker has stopped its process.
+            var interrupted = false
+            while (!executor.isTerminated) {
+                try {
+                    executor.awaitTermination(200, TimeUnit.MILLISECONDS)
+                } catch (_: InterruptedException) {
+                    interrupted = true
+                }
+            }
+            if (interrupted) Thread.currentThread().interrupt()
         }
     }
 
@@ -95,16 +137,11 @@ class MavenBuildService {
         options: MavenBuildOptions,
         indicator: ProgressIndicator,
         listener: MavenBuildListener,
-    ): MavenProjectBuildResult = if (indicator.isCanceled || cancelRequested.get()) {
+    ): MavenProjectBuildResult = if (indicator.isCanceled) {
         listener.onEvent(project, MavenBuildStatus.CANCELLED, "Build cancelled before it started.\n")
         MavenProjectBuildResult(project, MavenBuildStatus.CANCELLED, null)
     } else {
         runProject(project, options, indicator, listener)
-    }
-
-    fun cancel() {
-        cancelRequested.set(true)
-        activeHandlers.forEach(OSProcessHandler::destroyProcess)
     }
 
     internal fun commandLine(
@@ -168,22 +205,29 @@ class MavenBuildService {
                 listener.onEvent(project, MavenBuildStatus.RUNNING, text)
             }
         })
-        activeHandlers += handler
         return try {
             handler.startNotify()
             while (!handler.waitFor(200)) {
-                if (indicator.isCanceled || cancelRequested.get()) handler.destroyProcess()
+                if (indicator.isCanceled || Thread.currentThread().isInterrupted) handler.destroyProcess()
             }
             val exitCode = handler.exitCode
             val status = when {
-                indicator.isCanceled || cancelRequested.get() -> MavenBuildStatus.CANCELLED
+                indicator.isCanceled -> MavenBuildStatus.CANCELLED
                 exitCode == 0 -> MavenBuildStatus.SUCCESS
                 else -> MavenBuildStatus.FAILED
             }
             listener.onEvent(project, status, "■ ${project.artifactId}: ${status.name.lowercase()}\n")
             MavenProjectBuildResult(project, status, exitCode)
         } finally {
-            activeHandlers -= handler
+            if (!handler.isProcessTerminated) {
+                handler.destroyProcess()
+                val interrupted = Thread.interrupted()
+                try {
+                    ProgressManager.getInstance().executeNonCancelableSection(Runnable { handler.waitFor() })
+                } finally {
+                    if (interrupted) Thread.currentThread().interrupt()
+                }
+            }
         }
     }
 

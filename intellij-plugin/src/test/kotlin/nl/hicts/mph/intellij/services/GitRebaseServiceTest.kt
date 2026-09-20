@@ -330,8 +330,9 @@ class GitRebaseServiceTest {
         Files.writeString(root.resolve("notes.txt"), "keep my notes")
         val service = GitRebaseService()
         val original = git(root, "rev-parse", "HEAD")
-        val result = synchronize(root, service) { _, _, message ->
-            if (message == "Stashing tracked and untracked work") service.cancel()
+        val indicator = notCancelledIndicator()
+        val result = synchronize(root, service, indicator) { _, _, message ->
+            if (message == "Stashing tracked and untracked work") indicator.cancel()
         }
         assertEquals(GitRebaseStatus.CANCELLED, result.status)
         assertTrue(result.stashPreserved)
@@ -457,8 +458,9 @@ class GitRebaseServiceTest {
     fun `stop during restoration reports cancellation while retaining restored work and backup`() = withRepository { root, _ ->
         Files.writeString(root.resolve("notes.txt"), "preserved")
         val service = GitRebaseService()
-        val result = synchronize(root, service) { _, _, message ->
-            if (message == "Restoring uncommitted work") service.cancel()
+        val indicator = notCancelledIndicator()
+        val result = synchronize(root, service, indicator) { _, _, message ->
+            if (message == "Restoring uncommitted work") indicator.cancel()
         }
         assertEquals(GitRebaseStatus.CANCELLED, result.status)
         assertTrue(result.stashPreserved)
@@ -468,10 +470,11 @@ class GitRebaseServiceTest {
     private fun synchronize(
         root: Path,
         service: GitRebaseService = GitRebaseService(),
+        indicator: ProgressIndicator = notCancelledIndicator(),
         listener: GitRebaseListener = GitRebaseListener { _, _, _ -> },
     ): GitRepositoryResult = service.rebase(
         GitRebasePlan("PREFIX-", listOf(GitRepositoryPlan(root.toString(), "service")), emptyList()),
-        notCancelledIndicator(), listener,
+        indicator, listener,
     ).single()
 
     private fun advanceDevelop(root: Path) {
@@ -540,15 +543,22 @@ class GitRebaseServiceTest {
         .apply { inputStream.bufferedReader().use { it.readText() } }
         .waitFor()
 
-    private fun notCancelledIndicator(): ProgressIndicator = Proxy.newProxyInstance(
+    private fun notCancelledIndicator(): ProgressIndicator {
+        var cancelled = false
+        return Proxy.newProxyInstance(
         ProgressIndicator::class.java.classLoader,
         arrayOf(ProgressIndicator::class.java),
     ) { _, method, _ ->
-        when (method.returnType) {
+        when {
+            method.name == "cancel" -> { cancelled = true; null }
+            method.name == "isCanceled" -> cancelled
+            else -> when (method.returnType) {
             java.lang.Boolean.TYPE -> false
             java.lang.Double.TYPE -> 0.0
             java.lang.Integer.TYPE -> 0
             else -> null
         }
-    } as ProgressIndicator
+            }
+        } as ProgressIndicator
+    }
 }

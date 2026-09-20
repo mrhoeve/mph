@@ -46,12 +46,18 @@ Sequential Maven builds now honor the dependency stages supplied by the toolbar 
 
 ## Recommended next work
 
-1. **Stop downstream work on prerequisite failure and reject cycles consistently.** Both build modes now respect supplied dependency order, but the stage runner still continues after failures. Skip dependent builds whose prerequisites failed, and apply Build Order's cycle checks to the normal Build action too. Otherwise dependents can compile against older locally installed artifacts.
-2. **Give background operations ownership and a shared coordinator.** Build/rebase services use shared cancellation state. Prevent overlapping build runs and make each dialog cancel only its own operation. Use the same coordinator for branch and version changes; the idle-dialog fix does not solve every overlap.
-3. **Reload Maven discovery before post-rebase alignment.** Reuse the tool window's refresh/realign flow so newly added modules and renamed coordinates are reflected in the synchronization plan. Keep the existing recovery snapshots and add an edit preview/transaction for dependent changes.
-4. **Group the large toolbar and expand context actions.** Group inspection, version, Git/build and view actions with separators, and offer the relevant commands in the project context menu. Preserve the current ordering until a grouping is agreed; icons alone should not carry the navigation burden.
-5. **Exercise the dialogs in both IDE themes.** In particular, inspect spinner repainting, narrow windows, keyboard navigation, screen-reader labels, and Stop/Close timing in a running IntelliJ instance. Static icon sheets cannot validate those interactions.
+The first three priorities have now been implemented:
+
+- Build prerequisite failures skip dependent projects in both build modes; independent projects continue. Prerequisites use POM identities and include indirect dependencies and dependencies between selected modules in the same repository. Selecting a reactor and its child module schedules one build. Both entry points reject dependency cycles.
+- A shared, nonblocking workspace lease coordinates MPH builds, synchronization, branch checkout, tag fetches, Maven refresh, and version edits across IDE projects. Stop/Close cancels the dialog's own progress indicator. Synchronization retains ownership through Maven refresh and alignment, and build workers retain it until their processes stop.
+- After a successful rebase, Maven is refreshed before rediscovery, recovery snapshots, and alignment. Added modules and changed coordinates come from the refreshed model. Refresh failures, missing repositories, model-reading errors, Stop/Close, and unsaved edits prevent alignment.
+
+Remaining suggestions:
+
+1. **Preview and validate alignment edits.** Compute all POM changes before saving, with a review of existing local version edits and explicit handling of partial saves. Recovery snapshots remain available in the meantime.
+2. **Group the large toolbar and expand context actions.** Group inspection, version, Git/build and view actions with separators, and offer the relevant commands in the project context menu. Preserve the current ordering until a grouping is agreed; icons alone should not carry the navigation burden.
+3. **Exercise the dialogs in both IDE themes.** In particular, inspect spinner repainting, narrow windows, keyboard navigation, screen-reader labels, and Stop/Close timing in a running IntelliJ instance. Static icon sheets cannot validate those interactions.
 
 ## Validation
 
-The full plugin suite passed 107 tests before the final sequential-order fix. The final focused build/UI run passed 24 tests, including the new ordering regression. All 18 custom/branding SVG files parse and have matching light/dark variants. The icon contact sheets were visually inspected, and `git diff --check` passed. An interactive IDE check of animated repainting and narrow-window layout remains recommended.
+The current full plugin suite passes all 124 tests on Windows, including build failure propagation, module selection and cycles, cross-thread operation ownership, refresh failure/cancellation, and post-rebase rediscovery. `git diff --check` passes. The earlier icon audit verified all 18 custom/branding SVG files and matching light/dark variants. An interactive IDE check of animated repainting, narrow-window layout, and live Maven refresh remains recommended.

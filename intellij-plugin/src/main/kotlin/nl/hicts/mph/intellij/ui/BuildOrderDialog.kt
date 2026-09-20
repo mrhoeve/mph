@@ -129,6 +129,7 @@ class BuildOrderDialog(
                     ideProject,
                     order.entries.map(BuildOrderEntry::project),
                     order.entries.associate { it.project.pomPath to it.buildStep },
+                    order.entries.associate { it.project.pomPath to it.prerequisitePomPaths },
                 ).show()
             }
         }

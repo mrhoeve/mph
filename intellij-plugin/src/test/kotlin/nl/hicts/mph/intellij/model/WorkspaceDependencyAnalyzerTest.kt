@@ -52,6 +52,32 @@ class WorkspaceDependencyAnalyzerTest {
         assertTrue(order.entries.all(BuildOrderEntry::partOfCycle))
     }
 
+    @Test
+    fun `selected modules retain indirect prerequisites even within the same repository`() {
+        val base = descriptor("base", repository = "reactor")
+        val middle = descriptor("middle", repository = "reactor", dependencies = setOf(coordinates("base")))
+        val top = descriptor("top", repository = "reactor", dependencies = setOf(coordinates("middle")))
+        val order = analyzer.buildOrderForSelection(listOf(top.project, base.project), listOf(top, base, middle))
+        assertFalse(order.hasCycles)
+        assertEquals(listOf(base.project, top.project), order.entries.map { it.project })
+        assertEquals(setOf(base.project.pomPath), order.entries.last().prerequisitePomPaths)
+    }
+
+    @Test
+    fun `selected module cycles are rejected`() {
+        val first = descriptor("first", repository = "reactor", dependencies = setOf(coordinates("second")))
+        val second = descriptor("second", repository = "reactor", dependencies = setOf(coordinates("first")))
+        assertTrue(analyzer.buildOrderForSelection(listOf(first.project, second.project), listOf(first, second)).hasCycles)
+    }
+
+    @Test
+    fun `selected parent reactor subsumes its selected child module`() {
+        val module = descriptor("module", repository = "reactor")
+        val root = module.project.copy(artifactId = "reactor", pomPath = workspace.resolve("reactor/pom.xml").toString())
+        val order = analyzer.buildOrderForSelection(listOf(module.project, root), listOf(module))
+        assertEquals(listOf(root), order.entries.map { it.project })
+    }
+
     private fun descriptor(
         artifactId: String,
         repository: String = artifactId,

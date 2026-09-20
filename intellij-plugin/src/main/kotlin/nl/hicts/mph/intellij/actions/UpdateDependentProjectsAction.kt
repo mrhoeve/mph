@@ -15,6 +15,7 @@ import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.vfs.VirtualFile
 import nl.hicts.mph.intellij.model.DependentProjectsAnalysis
 import nl.hicts.mph.intellij.services.IdeaProjectDiscoveryService
+import nl.hicts.mph.intellij.services.WorkspaceOperationBusyException
 import nl.hicts.mph.intellij.services.DependentProjectVersionUpdateService
 import nl.hicts.mph.intellij.services.DependentProjectsUpdateResult
 import nl.hicts.mph.intellij.ui.DependentProjectsDialog
@@ -59,8 +60,12 @@ class UpdateDependentProjectsAction : AnAction(), DumbAware {
         val dialog = DependentProjectsDialog(project, analysis)
         if (!dialog.showAndGet() || !dialog.canApplyUpdate) return
 
-        val result = project.service<DependentProjectVersionUpdateService>().update(analysis)
-        showUpdateResult(project, result)
+        try {
+            val result = project.service<DependentProjectVersionUpdateService>().update(analysis)
+            showUpdateResult(project, result)
+        } catch (error: WorkspaceOperationBusyException) {
+            Messages.showWarningDialog(project, error.message.orEmpty(), "Workspace Operation In Progress")
+        }
     }
 
     private fun showUpdateResult(project: Project, result: DependentProjectsUpdateResult) {

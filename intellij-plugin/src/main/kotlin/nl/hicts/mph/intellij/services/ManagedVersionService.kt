@@ -140,7 +140,10 @@ class ManagedVersionService(
         }
     }
 
-    private fun updateDocument(pomPath: String, commandName: String, transform: (String) -> String) {
+    private fun updateDocument(pomPath: String, commandName: String, transform: (String) -> String) =
+        WorkspaceOperationCoordinator.run(commandName) { updateDocumentOwned(pomPath, commandName, transform) }
+
+    private fun updateDocumentOwned(pomPath: String, commandName: String, transform: (String) -> String) {
         val virtualFile = LocalFileSystem.getInstance().refreshAndFindFileByPath(pomPath)
             ?: throw IllegalArgumentException("pom.xml is unavailable: $pomPath")
         val manager = FileDocumentManager.getInstance()

@@ -21,13 +21,19 @@ class GitWorkspaceService {
         return GitWorkspaceStatus(branch, ahead, behind)
     }
 
-    fun createOrCheckoutBranch(rootPaths: Collection<String>, branchName: String): List<GitBranchResult> {
+    fun createOrCheckoutBranch(rootPaths: Collection<String>, branchName: String): List<GitBranchResult> =
+        WorkspaceOperationCoordinator.run("Branch checkout") { checkoutOwned(rootPaths, branchName) }
+
+    private fun checkoutOwned(rootPaths: Collection<String>, branchName: String): List<GitBranchResult> {
         require(branchName.isNotBlank()) { "Enter a Git branch name." }
         require(GitOutputParser.validBranchName(branchName)) { "'$branchName' is not a safe Git branch name." }
         return rootPaths.distinct().map { root -> createOrCheckoutBranch(root, branchName) }
     }
 
-    fun latestVersion(project: MavenProjectInfo): LatestTagVersion? {
+    fun latestVersion(project: MavenProjectInfo): LatestTagVersion? =
+        WorkspaceOperationCoordinator.run("Git tag fetch") { latestVersionOwned(project) }
+
+    private fun latestVersionOwned(project: MavenProjectInfo): LatestTagVersion? {
         val root = project.gitRootPath ?: return null
         run(root, "fetch", "origin", "--tags", "--prune") // Local tags remain usable when the network is unavailable.
         val tags = run(root, "for-each-ref", "--sort=-creatordate", "--format=%(refname:short)", "refs/tags")

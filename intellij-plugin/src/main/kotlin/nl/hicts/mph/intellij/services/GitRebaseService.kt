@@ -54,7 +54,6 @@ fun interface GitRebaseListener {
 
 @Service(Service.Level.PROJECT)
 class GitRebaseService {
-    private val cancelRequested = AtomicBoolean(false)
 
     fun createPlan(
         selectedProjects: List<MavenProjectInfo>,
@@ -87,20 +86,27 @@ class GitRebaseService {
         return GitRebasePlan(prefixes.single(), repositories, alignmentProjects)
     }
 
+    fun rebase(plan: GitRebasePlan, indicator: ProgressIndicator, listener: GitRebaseListener): List<GitRepositoryResult> =
+        rebase(plan, indicator, listener, null)
+
     fun rebase(
         plan: GitRebasePlan,
         indicator: ProgressIndicator,
         listener: GitRebaseListener,
-    ): List<GitRepositoryResult> {
+        owner: WorkspaceOperationCoordinator.Lease?,
+    ): List<GitRepositoryResult> = WorkspaceOperationCoordinator.run("Synchronization", owner) {
+        rebaseOwned(plan, indicator, listener)
+    }
+
+    private fun rebaseOwned(plan: GitRebasePlan, indicator: ProgressIndicator, listener: GitRebaseListener): List<GitRepositoryResult> {
         check(running.compareAndSet(false, true)) { "A synchronization is already running." }
-        cancelRequested.set(false)
         return try {
             plan.repositories.map { repository ->
-                if (indicator.isCanceled || cancelRequested.get()) {
+                if (indicator.isCanceled) {
                     GitRepositoryResult(repository, GitRebaseStatus.CANCELLED, "Cancelled before processing started.")
                 } else {
                     val result = rebaseRepository(repository, indicator, listener)
-                    if ((indicator.isCanceled || cancelRequested.get()) && result.status == GitRebaseStatus.FAILED) {
+                    if (indicator.isCanceled && result.status == GitRebaseStatus.FAILED) {
                         result.copy(status = GitRebaseStatus.CANCELLED)
                     } else {
                         result
@@ -116,10 +122,6 @@ class GitRebaseService {
         } finally {
             running.set(false)
         }
-    }
-
-    fun cancel() {
-        cancelRequested.set(true)
     }
 
     private fun rebaseRepository(
@@ -518,7 +520,7 @@ class GitRebaseService {
             stashPreserved = result.stashPreserved || stashId != null,
         )
 
-        fun cancelled(): GitRepositoryResult? = if (indicator.isCanceled || cancelRequested.get()) {
+        fun cancelled(): GitRepositoryResult? = if (indicator.isCanceled) {
             GitRepositoryResult(repository, GitRebaseStatus.CANCELLED, "Stopped between Git commands. Version alignment was skipped.")
         } else null
 

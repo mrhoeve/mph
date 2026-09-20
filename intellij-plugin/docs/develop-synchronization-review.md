@@ -20,7 +20,8 @@ Scope: IntelliJ plugin, from selection and saved editor documents through Git pr
 | Git configuration could rewrite other branches, autosquash commits, or apply remembered resolutions. | Override updateRefs, autosquash, autostash and rerere for this operation. Retain merge topology and empty commits explicitly. |
 | The version regex accepted multiple XML elements on one line; mixed conflict sets could be partially rewritten before failing. | Match plain version element text only, require the same element names and counts on both sides, validate every conflicting file before writing any, preserve line endings, and parse conflict paths with NUL delimiters. |
 | Recovery hints were returned but omitted from the dialog. | Add selectable, copyable repository recovery details and alignment backup information. |
-| A second synchronization could clear the first operation's cancellation flag. | Guard concurrent synchronization runs before resetting cancellation state. |
+| One dialog could cancel another run, or a different MPH action could mutate files during synchronization. | Use per-run progress indicators and a shared lease across plugin mutations, held through post-rebase Maven refresh and alignment. |
+| Alignment used Maven projects and coordinates captured before rebase. | Await Maven refresh and rediscover the workspace before selecting projects, taking POM snapshots, and applying versions. Skip on refresh/model failures, missing repositories, cancellation, or unsaved edits. |
 
 ## Recovery contract
 
@@ -28,16 +29,15 @@ Backups are intentionally retained after success, partial completion, and cancel
 
 ## Remaining improvements before standalone retirement
 
-1. **Refresh Maven discovery after Git changes.** Alignment still uses the projects/coordinates captured when the dialog opened. A rebase can add modules or change coordinates. Reload Maven and rebuild the alignment plan before writing versions, then show a preview based on the refreshed model. File refresh alone does not refresh Maven's model.
-2. **Coordinate all workspace mutations.** The guard prevents overlapping synchronization runs, but branch actions, version actions, builds that edit POMs, external Git clients, and another IDE process do not share one transaction. Introduce a repository-scoped operation coordinator across plugin services and verify branch/HEAD/model fingerprints immediately before alignment. Avoid simultaneous external edits during synchronization.
-3. **Make alignment transactional and previewable.** Durable POM copies make partial writes recoverable, but alignment is still a multi-file operation. Compute edits first, validate all targets, show changes to existing local versions, then apply as one logical operation with explicit recovery on a partial save.
-4. **Separate Git execution, recovery state, and UI orchestration.** An injectable command runner and explicit workflow stages would support deterministic tests of disk-full errors, ref races, process-launch errors, and IDE lifecycle cancellation. Keep stdout and stderr separate for machine-readable Git output.
-5. **Add backup browsing and cleanup.** Show retained runs with original branch, commit, stash, and POM copies, and offer a reviewed cleanup action. Do not delete backups merely because the Git phase succeeded.
-6. **Use shared behavioral fixtures during migration.** Run equivalent standalone/plugin scenarios for module selection, prefix normalization, dependent updates, and conflict choices. Git plumbing differs, so parity should describe user outcomes rather than identical commands.
+1. **Detect external workspace changes.** Plugin mutations now share an application-wide lease. External Git clients and another IDE process cannot participate in that lease; verify branch/HEAD/model fingerprints before alignment to detect their changes. Repository-scoped leases could later allow independent workspaces to run concurrently.
+2. **Make alignment transactional and previewable.** Durable POM copies make partial writes recoverable, but alignment is still a multi-file operation. Compute edits first, validate all targets, show changes to existing local versions, then apply as one logical operation with explicit recovery on a partial save.
+3. **Separate Git execution, recovery state, and UI orchestration.** An injectable command runner and explicit workflow stages would support deterministic tests of disk-full errors, ref races, process-launch errors, and IDE lifecycle cancellation. Keep stdout and stderr separate for machine-readable Git output.
+4. **Add backup browsing and cleanup.** Show retained runs with original branch, commit, stash, and POM copies, and offer a reviewed cleanup action. Do not delete backups merely because the Git phase succeeded.
+5. **Use shared behavioral fixtures during migration.** Run equivalent standalone/plugin scenarios for module selection, prefix normalization, dependent updates, and conflict choices. Git plumbing differs, so parity should describe user outcomes rather than identical commands.
 
 ## Validation
 
-Verified on Windows with JDK 21: the full plugin suite passed 105 tests (18 added regressions). After the final resolver tightening, the focused Git synchronization and recovery suites passed all 24 tests. `git diff --check` passed.
+Verified on Windows with JDK 21: the current full plugin suite passes all 124 tests, including the existing Git safety scenarios and new operation ownership, build prerequisite, and asynchronous Maven refresh regressions. `git diff --check` passes.
 
 Real local Git repositories exercise committed version conflict resolution, uncommitted version conflicts, source conflicts, mixed conflicts, index/worktree separation, retained pre-existing stashes, recovery refs, ignored file collisions, active operation directories, checked-out develop worktrees, hidden index flags, narrow fetch mappings, deleted remote develop, merge topology, updateRefs configuration, cancellation at stash/restoration boundaries, concurrent starts, and exceptions after stashing. Pure tests cover strict XML conflict classification, line ending preservation, exact-byte alignment backups, dependent paths, and backup failure.
 

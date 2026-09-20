@@ -19,7 +19,10 @@ data class DependentProjectsUpdateResult(
 class DependentProjectVersionUpdateService(
     private val project: Project,
 ) {
-    fun update(analysis: DependentProjectsAnalysis): DependentProjectsUpdateResult {
+    fun update(analysis: DependentProjectsAnalysis): DependentProjectsUpdateResult =
+        WorkspaceOperationCoordinator.run("Dependent version update") { updateOwned(analysis) }
+
+    private fun updateOwned(analysis: DependentProjectsAnalysis): DependentProjectsUpdateResult {
         val groupId = analysis.target.groupId?.takeIf(String::isNotBlank)
             ?: return failedResult(analysis, "The selected project has no resolved groupId.")
         val newVersion = analysis.target.version?.takeIf(String::isNotBlank)
