@@ -101,7 +101,7 @@ class GitRebaseServiceTest {
     }
 
     @Test
-    fun `rebases a real repository and restores uncommitted work`() {
+    fun `rebases a local-only feature branch and restores uncommitted work without disturbing existing stashes`() {
         val testRoot = Files.createTempDirectory("mph-rebase-integration-")
         val origin = testRoot.resolve("origin.git")
         val repository = Files.createDirectory(testRoot.resolve("workspace"))
@@ -121,6 +121,8 @@ class GitRebaseServiceTest {
             Files.writeString(repository.resolve("feature.txt"), "feature work\n")
             git(repository, "add", "feature.txt")
             git(repository, "commit", "-m", "Add feature work")
+            Files.writeString(repository.resolve("earlier-notes.txt"), "keep this existing stash\n")
+            git(repository, "stash", "push", "--include-untracked", "--message", "pre-existing test stash")
             git(repository, "switch", "develop")
             Files.writeString(pom, pom("service", "2.0-SNAPSHOT"))
             git(repository, "add", "pom.xml")
@@ -130,6 +132,17 @@ class GitRebaseServiceTest {
 
             Files.writeString(pom, pom("service", "PREFIX-1234-1.0-SNAPSHOT"))
             Files.writeString(repository.resolve("notes.txt"), "uncommitted notes\n")
+            assertEquals(
+                "The local feature branch must not require a remote counterpart",
+                1,
+                gitExitCode(
+                    repository,
+                    "show-ref",
+                    "--verify",
+                    "--quiet",
+                    "refs/remotes/origin/feature/upgrade",
+                ),
+            )
             val project = project("service", pom.toString(), repository.toString())
             val service = GitRebaseService()
             val plan = service.createPlan(listOf(project), listOf(project))
@@ -144,8 +157,65 @@ class GitRebaseServiceTest {
             assertEquals("feature/upgrade", git(repository, "branch", "--show-current").trim())
             assertEquals("2.0-SNAPSHOT", PomReferenceVersionEditor.findProjectVersion(Files.readString(pom)))
             assertTrue(Files.exists(repository.resolve("notes.txt")))
-            assertTrue(git(repository, "stash", "list").isBlank())
+            val remainingStashes = git(repository, "stash", "list")
+            assertTrue(remainingStashes.contains("pre-existing test stash"))
+            assertFalse(remainingStashes.contains("mph: rebase"))
             git(repository, "merge-base", "--is-ancestor", "origin/develop", "HEAD")
+        } finally {
+            testRoot.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `preserves all uncommitted work when a rebase requires manual conflict resolution`() {
+        val testRoot = Files.createTempDirectory("mph-rebase-conflict-")
+        val origin = testRoot.resolve("origin.git")
+        val repository = Files.createDirectory(testRoot.resolve("workspace"))
+        try {
+            git(testRoot, "init", "--bare", origin.toString())
+            git(repository, "init", "--initial-branch=develop")
+            git(repository, "config", "user.name", "Test User")
+            git(repository, "config", "user.email", "test.user@example.org")
+            git(repository, "config", "commit.gpgSign", "false")
+            val pom = Files.writeString(repository.resolve("pom.xml"), pom("service", "1.0-SNAPSHOT"))
+            val source = Files.writeString(repository.resolve("application.txt"), "value=initial\n")
+            git(repository, "add", "pom.xml", "application.txt")
+            git(repository, "commit", "-m", "Initial project")
+            git(repository, "remote", "add", "origin", origin.toString())
+            git(repository, "push", "--set-upstream", "origin", "develop")
+
+            git(repository, "switch", "--create", "feature/upgrade")
+            Files.writeString(source, "value=feature\n")
+            git(repository, "add", "application.txt")
+            git(repository, "commit", "-m", "Change feature value")
+            git(repository, "switch", "develop")
+            Files.writeString(source, "value=develop\n")
+            git(repository, "add", "application.txt")
+            git(repository, "commit", "-m", "Change development value")
+            git(repository, "push", "origin", "develop")
+            git(repository, "switch", "feature/upgrade")
+
+            Files.writeString(pom, pom("service", "PREFIX-1234-1.0-SNAPSHOT"))
+            val notes = Files.writeString(repository.resolve("notes.txt"), "uncommitted notes\n")
+            val project = project("service", pom.toString(), repository.toString())
+            val service = GitRebaseService()
+            val result = service
+                .rebase(
+                    service.createPlan(listOf(project), listOf(project)),
+                    notCancelledIndicator(),
+                ) { _, _, _ -> }
+                .single()
+
+            assertEquals(GitRebaseStatus.CONFLICT, result.status)
+            assertTrue(result.stashPreserved)
+            assertFalse(Files.exists(notes))
+            val stashId = git(repository, "stash", "list", "--format=%H").lineSequence().first()
+            assertTrue(stashId.isNotBlank())
+
+            git(repository, "rebase", "--abort")
+            git(repository, "stash", "apply", stashId)
+            assertEquals("PREFIX-1234-1.0-SNAPSHOT", PomReferenceVersionEditor.findProjectVersion(Files.readString(pom)))
+            assertEquals("uncommitted notes\n", Files.readString(notes))
         } finally {
             testRoot.toFile().deleteRecursively()
         }
@@ -178,6 +248,13 @@ class GitRebaseServiceTest {
         check(exitCode == 0) { "git ${arguments.joinToString(" ")} failed ($exitCode): $output" }
         return output
     }
+
+    private fun gitExitCode(directory: Path, vararg arguments: String): Int = ProcessBuilder(listOf("git") + arguments)
+        .directory(directory.toFile())
+        .redirectErrorStream(true)
+        .start()
+        .apply { inputStream.bufferedReader().use { it.readText() } }
+        .waitFor()
 
     private fun notCancelledIndicator(): ProgressIndicator = Proxy.newProxyInstance(
         ProgressIndicator::class.java.classLoader,

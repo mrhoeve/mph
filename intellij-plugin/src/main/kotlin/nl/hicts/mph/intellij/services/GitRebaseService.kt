@@ -15,6 +15,7 @@ import nl.hicts.mph.intellij.model.MavenProjectInfo
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -188,17 +189,63 @@ class GitRebaseService {
     }
 
     private fun stashWorkingTree(context: RepositoryCommandContext): StashResult {
-        if (context.command("status", "--porcelain").output.isBlank()) return StashResult()
+        val status = context.command("status", "--porcelain", "--untracked-files=all")
+        if (status.exitCode != 0) {
+            return StashResult(
+                failure = failed(context.repository, "The working tree could not be inspected.", status.output),
+            )
+        }
+        if (status.output.isBlank()) return StashResult()
+
         context.emit("Stashing tracked and untracked work")
+        val marker = "mph: rebase ${context.root.fileName} on develop (${UUID.randomUUID()})"
         val stash = context.command(
             "stash", "push", "--include-untracked", "--message",
-            "mph: rebase ${context.root.fileName} on develop", stream = true,
+            marker, stream = true,
         )
+        val stashId = findStashByMarker(context, marker)
         if (stash.exitCode != 0) {
-            return StashResult(failure = failed(context.repository, "Uncommitted work could not be stashed.", stash.output))
+            return StashResult(
+                failure = failed(
+                    context.repository,
+                    "Uncommitted work could not be stashed.",
+                    stash.output,
+                    stashPreserved = stashId != null,
+                ),
+            )
         }
-        return StashResult(context.command("rev-parse", "refs/stash").output.trim().takeIf(String::isNotBlank))
+        if (stashId == null) {
+            return StashResult(
+                failure = failed(
+                    context.repository,
+                    "Git did not create an identifiable safety stash. The rebase was not started.",
+                    stash.output,
+                    stashPreserved = true,
+                ),
+            )
+        }
+
+        val remainingStatus = context.command("status", "--porcelain", "--untracked-files=all")
+        if (remainingStatus.exitCode != 0 || remainingStatus.output.isNotBlank()) {
+            return StashResult(
+                failure = failed(
+                    context.repository,
+                    "Not all working-tree changes could be stored safely. The rebase was not started.",
+                    remainingStatus.output,
+                    stashPreserved = true,
+                ),
+            )
+        }
+        return StashResult(stashId)
     }
+
+    private fun findStashByMarker(context: RepositoryCommandContext, marker: String): String? =
+        context.command("stash", "list", "--format=%H%x00%gs").output
+            .lineSequence()
+            .map { line -> line.substringBefore('\u0000') to line.substringAfter('\u0000', "") }
+            .firstOrNull { (_, subject) -> marker in subject }
+            ?.first
+            ?.takeIf(String::isNotBlank)
 
     private fun performRebase(
         context: RepositoryCommandContext,
@@ -255,7 +302,15 @@ class GitRebaseService {
                 return failed(context.repository, "Resolved stash conflicts could not be staged.", add.output, true)
             }
         }
-        context.command("reset")
+        val reset = context.command("reset")
+        if (reset.exitCode != 0) {
+            return failed(
+                context.repository,
+                "Restored work could not be returned to an unstaged state.",
+                reset.output,
+                stashPreserved = true,
+            )
+        }
         dropStash(context.root, stashId, context.indicator)
         return null
     }
