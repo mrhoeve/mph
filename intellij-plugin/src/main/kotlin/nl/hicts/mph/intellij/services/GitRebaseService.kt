@@ -8,6 +8,7 @@ import com.intellij.execution.process.ProcessOutputTypes
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.fileEditor.FileDocumentManager
+import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.util.Key
 import com.intellij.openapi.vfs.LocalFileSystem
@@ -16,7 +17,6 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
 enum class GitRebaseStatus {
@@ -54,7 +54,6 @@ fun interface GitRebaseListener {
 
 @Service(Service.Level.PROJECT)
 class GitRebaseService {
-    private val activeHandlers = ConcurrentHashMap.newKeySet<OSProcessHandler>()
     private val cancelRequested = AtomicBoolean(false)
 
     fun createPlan(
@@ -93,6 +92,7 @@ class GitRebaseService {
         indicator: ProgressIndicator,
         listener: GitRebaseListener,
     ): List<GitRepositoryResult> {
+        check(running.compareAndSet(false, true)) { "A synchronization is already running." }
         cancelRequested.set(false)
         return try {
             plan.repositories.map { repository ->
@@ -101,7 +101,7 @@ class GitRebaseService {
                 } else {
                     val result = rebaseRepository(repository, indicator, listener)
                     if ((indicator.isCanceled || cancelRequested.get()) && result.status == GitRebaseStatus.FAILED) {
-                        GitRepositoryResult(repository, GitRebaseStatus.CANCELLED, "Cancelled while processing the repository.")
+                        result.copy(status = GitRebaseStatus.CANCELLED)
                     } else {
                         result
                     }
@@ -114,13 +114,12 @@ class GitRebaseService {
                 }
             }
         } finally {
-            cancelRequested.set(false)
+            running.set(false)
         }
     }
 
     fun cancel() {
         cancelRequested.set(true)
-        activeHandlers.forEach(OSProcessHandler::destroyProcess)
     }
 
     private fun rebaseRepository(
@@ -129,20 +128,30 @@ class GitRebaseService {
         listener: GitRebaseListener,
     ): GitRepositoryResult {
         val context = RepositoryCommandContext(repository, indicator, listener)
-        val preflight = preflight(context)
-        preflight.failure?.let { return it }
-        val branchName = requireNotNull(preflight.branchName)
-        val stash = stashWorkingTree(context)
-        stash.failure?.let { return it }
-        performRebase(context, branchName, stash.stashId)?.let { return it }
-        restoreStash(context, stash.stashId)?.let { return it }
-
-        listener.onEvent(repository, GitRebaseStatus.SUCCESS, "Rebase completed and uncommitted work was restored")
-        return GitRepositoryResult(
-            repository,
-            GitRebaseStatus.SUCCESS,
-            "Rebased $branchName onto origin/develop and restored uncommitted work.",
-        )
+        return try {
+            val preflight = preflight(context)
+            preflight.failure?.let { return it }
+            val branchName = requireNotNull(preflight.branchName)
+            context.cancelled()?.let { return it }
+            context.createRecovery(branchName)
+            context.cancelled()?.let { return context.withRecovery(it) }
+            val stash = stashWorkingTree(context)
+            context.stashId = stash.stashId ?: context.stashId
+            context.recordRecovery()
+            stash.failure?.let { return context.withRecovery(it) }
+            context.cancelled()?.let { return context.withRecovery(it) }
+            performRebase(context, branchName, stash.stashId)?.let { return context.withRecovery(it) }
+            context.cancelled()?.let { return context.withRecovery(it) }
+            restoreStash(context, stash.stashId)?.let { return context.withRecovery(it) }
+            context.cancelled()?.let { return context.withRecovery(it) }
+            context.withRecovery(GitRepositoryResult(
+                repository,
+                GitRebaseStatus.SUCCESS,
+                "Rebased $branchName onto origin/develop and restored uncommitted work. Recovery backups retained.",
+            ))
+        } catch (error: Exception) {
+            context.withRecovery(failed(repository, "Synchronization stopped.", error.message ?: error.javaClass.simpleName))
+        }
     }
 
     private fun preflight(context: RepositoryCommandContext): PreflightResult {
@@ -162,7 +171,17 @@ class GitRebaseService {
             return PreflightResult(failure = skipped(context.repository, "The current branch '$branchName' is protected from this operation."))
         }
         context.emit("Fetching origin/develop")
-        val fetch = context.command("fetch", "origin", "develop", stream = true)
+        val hidden = context.command("ls-files", "-v", "-z")
+        if (hidden.exitCode != 0 || hidden.output.split('\u0000').any {
+                it.isNotEmpty() && (it[0] == 'S' || it[0].isLowerCase())
+            }) {
+            return PreflightResult(failure = skipped(context.repository, "Sparse checkout or hidden index changes require manual synchronization."))
+        }
+        if (Files.exists(context.root.resolve(".gitmodules")) ||
+            context.requireCommand("ls-files", "--stage", "-z").split('\u0000').any { it.startsWith("160000 ") }) {
+            return PreflightResult(failure = skipped(context.repository, "Repositories with submodules require manual synchronization."))
+        }
+        val fetch = context.command("fetch", "--no-tags", "origin", "+refs/heads/develop:$REMOTE_DEVELOP", stream = true)
         if (fetch.exitCode != 0) {
             return PreflightResult(failure = failed(context.repository, "Fetching origin/develop failed.", fetch.output))
         }
@@ -170,19 +189,49 @@ class GitRebaseService {
         if (remoteDevelop.exitCode != 0) {
             return PreflightResult(failure = skipped(context.repository, "Remote branch origin/develop was not found."))
         }
+        context.upstream = context.requireCommand("rev-parse", "--verify", "$REMOTE_DEVELOP^{commit}").trim()
+        val ignored = context.requireCommand("ls-files", "--others", "--ignored", "--exclude-standard", "-z")
+            .split('\u0000').filter(String::isNotEmpty)
+        if (ignored.isNotEmpty()) {
+            // Include intermediate replayed trees: an ignored file may have been tracked and later deleted.
+            val commits = listOf(context.upstream) + context.requireCommand("rev-list", "${context.upstream}..HEAD")
+                .lineSequence().filter(String::isNotBlank).toList()
+            val ignoredPaths = ignored.map { context.root.resolve(it).normalize() }.toSet()
+            val ignoredAncestors = ignoredPaths.flatMap { path ->
+                generateSequence(path.parent) { it.parent }.takeWhile { it.startsWith(context.root) }.toList()
+            }.toSet()
+            for (commit in commits) {
+                context.cancelled()?.let { return PreflightResult(failure = it) }
+                val incoming = context.requireCommand("ls-tree", "-r", "--name-only", "-z", commit)
+                    .split('\u0000').filter(String::isNotEmpty).map { context.root.resolve(it).normalize() }
+                if (incoming.any { remote ->
+                        remote in ignoredAncestors || generateSequence(remote) { it.parent }
+                            .takeWhile { it.startsWith(context.root) }.any { it in ignoredPaths }
+                    }) {
+                    return PreflightResult(failure = skipped(context.repository, "Ignored local files overlap files used by the rebase. Move or back them up first."))
+                }
+            }
+        }
+        context.cancelled()?.let { return PreflightResult(failure = it) }
         updateLocalDevelop(context)?.let { return PreflightResult(failure = it) }
         return PreflightResult(branchName)
     }
 
     private fun updateLocalDevelop(context: RepositoryCommandContext): GitRepositoryResult? {
-        val localDevelop = context.command("show-ref", VERIFY, QUIET, LOCAL_DEVELOP)
-        if (localDevelop.exitCode == 0) {
-            val fastForward = context.command("merge-base", "--is-ancestor", LOCAL_DEVELOP, REMOTE_DEVELOP)
+        val worktrees = context.requireCommand("worktree", "list", "--porcelain")
+        if (worktrees.lineSequence().any { it == "branch $LOCAL_DEVELOP" }) {
+            return skipped(context.repository, "Local develop is checked out in another worktree.")
+        }
+        val refs = context.requireCommand("for-each-ref", "--format=%(refname) %(objectname)", LOCAL_DEVELOP)
+            .lineSequence().firstOrNull { it.startsWith("$LOCAL_DEVELOP ") }?.substringAfter(' ')?.trim().orEmpty()
+        val oldId = refs.ifEmpty { "0".repeat(context.upstream.length) }
+        if (refs.isNotEmpty()) {
+            val fastForward = context.command("merge-base", "--is-ancestor", oldId, context.upstream)
             if (fastForward.exitCode != 0) {
                 return skipped(context.repository, "Local develop has commits that are not on origin/develop.")
             }
         }
-        val updateDevelop = context.command("update-ref", LOCAL_DEVELOP, REMOTE_DEVELOP)
+        val updateDevelop = context.command("update-ref", LOCAL_DEVELOP, context.upstream, oldId)
         return updateDevelop.takeIf { it.exitCode != 0 }?.let {
             failed(context.repository, "Local develop could not be updated.", it.output)
         }
@@ -198,12 +247,14 @@ class GitRebaseService {
         if (status.output.isBlank()) return StashResult()
 
         context.emit("Stashing tracked and untracked work")
-        val marker = "mph: rebase ${context.root.fileName} on develop (${UUID.randomUUID()})"
+        val marker = context.stashMarker
         val stash = context.command(
             "stash", "push", "--include-untracked", "--message",
             marker, stream = true,
         )
         val stashId = findStashByMarker(context, marker)
+        context.stashId = stashId
+        context.recordRecovery()
         if (stash.exitCode != 0) {
             return StashResult(
                 failure = failed(
@@ -253,11 +304,19 @@ class GitRebaseService {
         stashId: String?,
     ): GitRepositoryResult? {
         context.emit("Rebasing $branchName onto origin/develop")
-        var rebase = context.command("-c", "commit.gpgSign=false", "rebase", "origin/develop", stream = true)
+        var rebase = context.command(
+            "-c", "commit.gpgSign=false", "-c", "rerere.enabled=false", "rebase", "--no-autostash", "--no-update-refs", "--no-fork-point",
+            "--no-autosquash", "--rebase-merges", "--reapply-cherry-picks", "--empty=keep", "--keep-empty",
+            context.upstream, stream = true,
+        )
         var attempts = 0
         while (rebase.exitCode != 0 && attempts++ < MAX_AUTOMATIC_CONTINUES) {
+            context.cancelled()?.let { return it }
             val conflicts = conflictedFiles(context.root, context.indicator)
-            if (conflicts.isEmpty() || !resolveVersionOnlyConflicts(context.root, conflicts)) {
+            if (conflicts.isEmpty()) {
+                return failed(context.repository, "Rebase did not complete.", rebase.output, stashId != null)
+            }
+            if (!resolveVersionOnlyConflicts(context.root, conflicts)) {
                 return GitRepositoryResult(
                     context.repository,
                     GitRebaseStatus.CONFLICT,
@@ -268,10 +327,11 @@ class GitRebaseService {
             }
             val add = runGit(context.root, listOf("add", "--") + conflicts, context.indicator)
             if (add.exitCode != 0) return failed(context.repository, "Resolved POM files could not be staged.", add.output, stashId != null)
+            context.cancelled()?.let { return it }
             context.emit("Continuing after resolving version-only POM conflicts")
             rebase = runGit(
                 context.root,
-                listOf("-c", "commit.gpgSign=false", "rebase", "--continue"),
+                listOf("-c", "commit.gpgSign=false", "-c", "rerere.enabled=false", "rebase", "--continue"),
                 context.indicator,
                 context::emit,
                 mapOf("GIT_EDITOR" to "true", "GIT_SEQUENCE_EDITOR" to "true"),
@@ -285,33 +345,17 @@ class GitRebaseService {
     private fun restoreStash(context: RepositoryCommandContext, stashId: String?): GitRepositoryResult? {
         if (stashId == null) return null
         context.emit("Restoring uncommitted work")
-        val apply = context.command("stash", "apply", stashId, stream = true)
+        val apply = context.command("stash", "apply", "--index", stashId, stream = true)
         if (apply.exitCode != 0) {
-            val conflicts = conflictedFiles(context.root, context.indicator)
-            if (conflicts.isEmpty() || !resolveVersionOnlyConflicts(context.root, conflicts)) {
-                return GitRepositoryResult(
-                    context.repository,
-                    GitRebaseStatus.CONFLICT,
-                    "The branch was rebased, but restoring uncommitted work caused conflicts.",
-                    "Resolve the working-tree conflicts manually. The MPH stash was preserved.",
-                    stashPreserved = true,
-                )
-            }
-            val add = runGit(context.root, listOf("add", "--") + conflicts, context.indicator)
-            if (add.exitCode != 0) {
-                return failed(context.repository, "Resolved stash conflicts could not be staged.", add.output, true)
-            }
-        }
-        val reset = context.command("reset")
-        if (reset.exitCode != 0) {
-            return failed(
+            return GitRepositoryResult(
                 context.repository,
-                "Restored work could not be returned to an unstaged state.",
-                reset.output,
+                GitRebaseStatus.CONFLICT,
+                "The branch was rebased, but restoring uncommitted work did not complete. ${apply.output.trim()}",
+                "Inspect the working tree before applying anything again; restoration may be partial. The original index and work remain in the MPH stash.",
                 stashPreserved = true,
             )
         }
-        dropStash(context.root, stashId, context.indicator)
+        // Retain the original index/worktree snapshot through alignment and later user review.
         return null
     }
 
@@ -329,24 +373,30 @@ class GitRebaseService {
         return content?.let(PomReferenceVersionEditor::findProjectVersion) ?: project.version
     }
 
-    private fun gitOperationInProgress(command: (Array<out String>) -> GitCommandResult): Boolean =
-        listOf("REBASE_HEAD", "MERGE_HEAD", "CHERRY_PICK_HEAD").any { ref ->
-            command(arrayOf("rev-parse", QUIET, VERIFY, ref)).exitCode == 0
+    private fun gitOperationInProgress(command: (Array<out String>) -> GitCommandResult): Boolean {
+        val paths = listOf("rebase-merge", "rebase-apply", "sequencer", "MERGE_HEAD", "REBASE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG", "index.lock")
+        return paths.any { name ->
+            val result = command(arrayOf("rev-parse", "--path-format=absolute", "--git-path", name))
+            result.exitCode != 0 || Files.exists(Path.of(result.output.trim()))
         }
-
-    private fun conflictedFiles(root: Path, indicator: ProgressIndicator): List<String> =
-        runGit(root, listOf("diff", "--name-only", "--diff-filter=U"), indicator).output
-            .lineSequence().map(String::trim).filter(String::isNotBlank).toList()
-
-    private fun resolveVersionOnlyConflicts(root: Path, conflicts: List<String>): Boolean = conflicts.all { relative ->
-        val path = root.resolve(relative).normalize()
-        path.startsWith(root) && path.fileName.toString() == "pom.xml" && GitVersionConflictResolver.resolve(path)
     }
 
-    private fun dropStash(root: Path, stashId: String, indicator: ProgressIndicator) {
-        val stashes = runGit(root, listOf("stash", "list", "--format=%H"), indicator).output.lines()
-        val index = stashes.indexOfFirst { it.trim() == stashId }
-        if (index >= 0) runGit(root, listOf("stash", "drop", "stash@{$index}"), indicator)
+    private fun conflictedFiles(root: Path, indicator: ProgressIndicator): List<String> {
+        val result = runGit(root, listOf("diff", "--name-only", "-z", "--diff-filter=U"), indicator)
+        check(result.exitCode == 0) { "Could not inspect conflicts: ${result.output}" }
+        return result.output.split('\u0000').filter(String::isNotEmpty)
+    }
+
+    private fun resolveVersionOnlyConflicts(root: Path, conflicts: List<String>): Boolean {
+        // Validate every file before changing any, so a mixed conflict set stays untouched.
+        val resolved = conflicts.map { relative ->
+            val path = root.resolve(relative).normalize()
+            if (!path.startsWith(root) || path.fileName.toString() != "pom.xml" || Files.isSymbolicLink(path)) return false
+            val content = GitVersionConflictResolver.resolvedContent(Files.readString(path)) ?: return false
+            path to content
+        }
+        resolved.forEach { (path, content) -> Files.writeString(path, content) }
+        return true
     }
 
     private fun runGit(
@@ -357,10 +407,11 @@ class GitRebaseService {
         environment: Map<String, String> = emptyMap(),
     ): GitCommandResult {
         val output = StringBuilder()
+        val errors = StringBuilder()
         val command = GeneralCommandLine("git")
             .withParameters(arguments)
             .withWorkDirectory(root.toFile())
-            .withEnvironment(environment)
+            .withEnvironment(mapOf("GIT_EDITOR" to "true", "GIT_SEQUENCE_EDITOR" to "true") + environment)
         command.charset = StandardCharsets.UTF_8
         val handler = try {
             OSProcessHandler(command)
@@ -370,19 +421,22 @@ class GitRebaseService {
         handler.addProcessListener(object : ProcessListener {
             override fun onTextAvailable(event: ProcessEvent, outputType: Key<*>) {
                 if (outputType != ProcessOutputTypes.STDOUT && outputType != ProcessOutputTypes.STDERR) return
-                synchronized(output) { output.append(event.text) }
+                val target = if (outputType == ProcessOutputTypes.STDOUT) output else errors
+                synchronized(target) { target.append(event.text) }
                 progress?.invoke(event.text.trimEnd())
             }
         })
-        activeHandlers += handler
-        return try {
+        return run {
             handler.startNotify()
-            while (!handler.waitFor(200)) {
-                if (indicator.isCanceled || cancelRequested.get()) handler.destroyProcess()
+            // A stop request takes effect between commands. Never kill a stash/rebase/index write.
+            if (ApplicationManager.getApplication() == null) {
+                handler.waitFor()
+            } else {
+                ProgressManager.getInstance().executeNonCancelableSection(Runnable { handler.waitFor() })
             }
-            GitCommandResult(handler.exitCode ?: -1, synchronized(output) { output.toString() })
-        } finally {
-            activeHandlers -= handler
+            val exitCode = handler.exitCode ?: -1
+            GitCommandResult(exitCode, synchronized(output) { output.toString() } +
+                if (exitCode != 0) synchronized(errors) { errors.toString() } else "")
         }
     }
 
@@ -429,6 +483,51 @@ class GitRebaseService {
     ) {
         val root: Path = Path.of(repository.rootPath).toAbsolutePath().normalize()
 
+        var upstream = ""
+        var stashId: String? = null
+        private val recoveryId = UUID.randomUUID().toString()
+        val stashMarker = "mph: rebase ${root.fileName} on develop ($recoveryId)"
+        private var recoveryFile: Path? = null
+        private var originalBranch = ""
+        private var backupRef = ""
+
+        fun createRecovery(branch: String) {
+            originalBranch = branch
+            val gitDirectory = Path.of(requireCommand("rev-parse", "--absolute-git-dir").trim())
+            recoveryFile = Files.createDirectories(gitDirectory.resolve("mph-recovery").resolve(recoveryId)).resolve("recovery.txt")
+            backupRef = "refs/mph/recovery/$recoveryId/head"
+            requireCommand("update-ref", backupRef, "HEAD", "0".repeat(upstream.length))
+            recordRecovery()
+        }
+
+        fun recordRecovery() {
+            recoveryFile?.let { file ->
+                Files.writeString(file, "Repository: $root\nOriginal branch: $originalBranch\nOriginal commits: $backupRef\n" +
+                    "Stash marker: $stashMarker\nStash object: ${stashId ?: "Inspect git stash list for the marker if interrupted during stash creation."}\n" +
+                    "Inspect Git status first. Finish or abort an active rebase before restoring work.\n" +
+                    "A failed stash apply may have partially restored files; do not blindly apply it again.\n" +
+                    "Inspect original commits with: git log $backupRef\n" +
+                    "Recover on a separate clean worktree with: git worktree add -b recovery-branch <new-directory> $backupRef\n" +
+                    "Then, in that worktree, restore the index and files with: git stash apply --index <stash-object>\n" +
+                    "Keep the stash and backup ref until the synchronized work has been reviewed.\n")
+            }
+        }
+
+        fun withRecovery(result: GitRepositoryResult): GitRepositoryResult = result.copy(
+            recoveryHint = listOfNotNull(result.recoveryHint, recoveryFile?.let { "Recovery instructions: $it" }).joinToString(" ").ifBlank { null },
+            stashPreserved = result.stashPreserved || stashId != null,
+        )
+
+        fun cancelled(): GitRepositoryResult? = if (indicator.isCanceled || cancelRequested.get()) {
+            GitRepositoryResult(repository, GitRebaseStatus.CANCELLED, "Stopped between Git commands. Version alignment was skipped.")
+        } else null
+
+        fun requireCommand(vararg arguments: String): String {
+            val result = command(*arguments)
+            check(result.exitCode == 0) { "Git ${arguments.first()} failed: ${result.output}" }
+            return result.output
+        }
+
         fun emit(message: String) = listener.onEvent(repository, GitRebaseStatus.RUNNING, message)
 
         fun command(vararg arguments: String, stream: Boolean = false): GitCommandResult =
@@ -436,6 +535,7 @@ class GitRebaseService {
     }
 
     private companion object {
+        val running = AtomicBoolean(false)
         const val MAX_AUTOMATIC_CONTINUES = 100
         const val REMOTE_DEVELOP = "refs/remotes/origin/develop"
         const val LOCAL_DEVELOP = "refs/heads/develop"
@@ -454,15 +554,19 @@ object GitVersionPrefix {
 
 object GitVersionConflictResolver {
     private val versionElement = Regex(
-        """\s*<((?:[\w.-]*version)|revision|changelist|sha1)>.*</\1>\s*""",
+        """\s*<((?:[\w.-]*version)|revision|changelist|sha1)>[^<>]*</\1>\s*""",
         RegexOption.IGNORE_CASE,
     )
 
     fun resolve(path: Path): Boolean {
-        val lines = Files.readAllLines(path, StandardCharsets.UTF_8)
-        val resolved = resolvedConflictLines(lines) ?: return false
-        Files.write(path, resolved, StandardCharsets.UTF_8)
+        val resolved = resolvedContent(Files.readString(path)) ?: return false
+        Files.writeString(path, resolved)
         return true
+    }
+
+    internal fun resolvedContent(content: String): String? {
+        val separator = if ("\r\n" in content) "\r\n" else "\n"
+        return resolvedConflictLines(content.split(separator))?.joinToString(separator)
     }
 
     private fun resolvedConflictLines(lines: List<String>): List<String>? {
@@ -477,6 +581,7 @@ object GitVersionConflictResolver {
                 foundConflict = true
                 val conflict = readConflict(lines, index + 1) ?: return null
                 if (!isVersionOnly(conflict.current) || !isVersionOnly(conflict.incoming)) return null
+                if (versionTags(conflict.current) != versionTags(conflict.incoming)) return null
                 addAll(conflict.current)
                 index = conflict.nextIndex
             }
@@ -490,6 +595,9 @@ object GitVersionConflictResolver {
         val end = (separator + 1 until lines.size).firstOrNull { lines[it].startsWith(">>>>>>>") } ?: return null
         return ConflictBlock(lines.subList(start, separator), lines.subList(separator + 1, end), end + 1)
     }
+
+    private fun versionTags(lines: List<String>): List<String> = lines.filter(String::isNotBlank)
+        .map { requireNotNull(versionElement.matchEntire(it)).groupValues[1] }
 
     private fun isVersionOnly(lines: List<String>): Boolean {
         val meaningful = lines.filter(String::isNotBlank)

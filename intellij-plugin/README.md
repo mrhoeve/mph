@@ -51,7 +51,13 @@ Open **Settings -> Tools -> Maven Project Helper**, or use the settings button i
 
 The application ID is derived from the selected repository's `Jenkinsfile`, matching the standalone application's behavior. Maven repository mirrors, credentials, local-repository location, and environment placeholders continue to come from the developer's normal Maven configuration because the plugin invokes the repository's Maven wrapper (or `mvn`) in that project directory.
 
-Repositories are processed sequentially. Version-only `pom.xml` conflicts are resolved from the updated `develop` version. Source-code and structural POM conflicts are left in Git's rebase-conflict state for manual resolution, processing continues with the other repositories, and final version alignment is skipped. Any MPH-created stash is retained when automatic restoration cannot finish safely. Nothing is pushed or committed by the plugin.
+Repositories are processed sequentially. Committed version-only `pom.xml` conflicts are resolved from the updated `develop` version. Source-code and structural POM conflicts remain available for manual resolution. Conflicts while restoring uncommitted work are never resolved automatically, including version conflicts. Processing continues with other repositories; final version alignment runs only if every repository succeeds.
+
+Before synchronization, editor changes must be saved. The plugin keeps a named backup of the original commits under `refs/mph/recovery/` and retains its tracked/untracked safety stash even after successful restoration. Staged and unstaged changes are restored with their original separation when Git can apply the index cleanly. Stop requests take effect between Git commands, so a write in progress can finish safely. No changes are pushed, and local working changes are not committed (rebase still rewrites existing commits).
+
+Select a repository row to copy its recovery instructions. Instructions survive IDE restarts in `.git/mph-recovery/<id>/recovery.txt`. Before final version alignment, all known workspace POMs, including dependent projects outside the selection, are copied to `.git/mph-recovery/alignment-<id>/` in the first selected repository. Its `original-paths.properties` file maps each copy to its original path. Review these copies before restoring; subsequent edits may need to be merged. Keep backups until the synchronized work has been reviewed, then remove only the matching recovery refs, stash, and recovery directory.
+
+Synchronization also refuses submodules, hidden index changes, linked worktree entry points, develop checked out in another worktree, and ignored files that overlap the incoming or replayed history. Unrelated ignored build outputs stay in place. See [the synchronization review](docs/develop-synchronization-review.md) for tested scenarios and remaining migration work.
 
 ## Run the development IDE
 

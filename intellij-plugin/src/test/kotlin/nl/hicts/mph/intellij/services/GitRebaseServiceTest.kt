@@ -131,6 +131,12 @@ class GitRebaseServiceTest {
             git(repository, "switch", "feature/upgrade")
 
             Files.writeString(pom, pom("service", "PREFIX-1234-1.0-SNAPSHOT"))
+            git(repository, "add", "pom.xml")
+            git(repository, "commit", "-m", "Commit version prefix")
+            val originalHead = git(repository, "rev-parse", "HEAD").trim()
+            Files.writeString(repository.resolve("feature.txt"), "staged feature work\n")
+            git(repository, "add", "feature.txt")
+            Files.writeString(repository.resolve("feature.txt"), "unstaged feature work\n")
             Files.writeString(repository.resolve("notes.txt"), "uncommitted notes\n")
             assertEquals(
                 "The local feature branch must not require a remote counterpart",
@@ -159,7 +165,12 @@ class GitRebaseServiceTest {
             assertTrue(Files.exists(repository.resolve("notes.txt")))
             val remainingStashes = git(repository, "stash", "list")
             assertTrue(remainingStashes.contains("pre-existing test stash"))
-            assertFalse(remainingStashes.contains("mph: rebase"))
+            assertTrue(remainingStashes.contains("mph: rebase"))
+            assertTrue(results.single().stashPreserved)
+            assertEquals("staged feature work\n", git(repository, "show", ":feature.txt"))
+            assertEquals("unstaged feature work\n", Files.readString(repository.resolve("feature.txt")))
+            assertEquals(originalHead, git(repository, "for-each-ref", "--format=%(objectname)", "refs/mph/recovery").trim())
+            assertTrue(results.single().recoveryHint.orEmpty().contains("recovery.txt"))
             git(repository, "merge-base", "--is-ancestor", "origin/develop", "HEAD")
         } finally {
             testRoot.toFile().deleteRecursively()
@@ -216,6 +227,279 @@ class GitRebaseServiceTest {
             git(repository, "stash", "apply", stashId)
             assertEquals("PREFIX-1234-1.0-SNAPSHOT", PomReferenceVersionEditor.findProjectVersion(Files.readString(pom)))
             assertEquals("uncommitted notes\n", Files.readString(notes))
+        } finally {
+            testRoot.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `uncommitted version conflicts preserve the original version and index in the stash`() = withRepository { root, _ ->
+        advanceDevelop(root)
+        val localPom = pom("service", "LOCAL-7.0-SNAPSHOT")
+        Files.writeString(root.resolve("pom.xml"), localPom)
+        git(root, "add", "pom.xml")
+        val result = synchronize(root)
+        assertEquals(GitRebaseStatus.CONFLICT, result.status)
+        assertTrue(result.stashPreserved)
+        val stash = git(root, "rev-parse", "refs/stash").trim()
+        assertEquals(localPom, git(root, "show", "$stash:pom.xml"))
+        assertEquals(localPom, git(root, "show", "$stash^2:pom.xml"))
+        assertTrue(result.recoveryHint.orEmpty().contains("partial"))
+    }
+
+    @Test
+    fun `ignored files that develop would overwrite block synchronization`() = withRepository { root, _ ->
+        git(root, "switch", "develop")
+        Files.writeString(root.resolve("private.txt"), "remote content")
+        git(root, "add", "private.txt")
+        git(root, "commit", "-m", "Track incoming file")
+        git(root, "push", "origin", "develop")
+        git(root, "switch", "feature/test")
+        Files.writeString(root.resolve(".git/info/exclude"), "private.txt\n")
+        Files.writeString(root.resolve("private.txt"), "irreplaceable ignored work")
+        val before = git(root, "rev-parse", "HEAD")
+        val result = synchronize(root)
+        assertEquals(GitRebaseStatus.SKIPPED, result.status)
+        assertTrue(result.message.contains("Ignored"))
+        assertEquals("irreplaceable ignored work", Files.readString(root.resolve("private.txt")))
+        assertEquals(before, git(root, "rev-parse", "HEAD"))
+    }
+
+    @Test
+    fun `ignored file and directory collisions are both protected`() {
+        for (incomingIsDirectory in listOf(false, true)) {
+            withRepository { root, _ ->
+                git(root, "switch", "develop")
+                val obstacle = root.resolve("obstacle")
+                val incoming = if (incomingIsDirectory) Files.createDirectory(obstacle).resolve("remote.txt") else obstacle
+                Files.writeString(incoming, "remote content")
+                git(root, "add", ".")
+                git(root, "commit", "-m", "Add incoming path")
+                git(root, "push", "origin", "develop")
+                git(root, "switch", "feature/test")
+                Files.writeString(root.resolve(".git/info/exclude"), "obstacle\n")
+                val local = if (incomingIsDirectory) obstacle else Files.createDirectory(obstacle).resolve("local.txt")
+                Files.writeString(local, "local work")
+                val result = synchronize(root)
+                assertEquals(result.message, GitRebaseStatus.SKIPPED, result.status)
+                assertEquals("local work", Files.readString(local))
+            }
+        }
+    }
+
+    @Test
+    fun `active operations without a REBASE_HEAD are refused`() = withRepository { root, _ ->
+        for (state in listOf("rebase-merge", "rebase-apply", "sequencer")) {
+            val directory = Files.createDirectory(root.resolve(".git/$state"))
+            assertEquals(GitRebaseStatus.SKIPPED, synchronize(root).status)
+            Files.delete(directory)
+        }
+    }
+
+    @Test
+    fun `develop checked out in another worktree is not moved`() = withRepository { root, testRoot ->
+        git(root, "worktree", "add", testRoot.resolve("other").toString(), "develop")
+        val before = git(root, "rev-parse", "develop")
+        val result = synchronize(root)
+        assertEquals(GitRebaseStatus.SKIPPED, result.status)
+        assertTrue(result.message.contains("another worktree"))
+        assertEquals(before, git(root, "rev-parse", "develop"))
+    }
+
+    @Test
+    fun `hidden index changes are refused without stashing`() = withRepository { root, _ ->
+        git(root, "update-index", "--assume-unchanged", "pom.xml")
+        Files.writeString(root.resolve("pom.xml"), "hidden local content")
+        assertEquals(GitRebaseStatus.SKIPPED, synchronize(root).status)
+        assertEquals("hidden local content", Files.readString(root.resolve("pom.xml")))
+        assertEquals("", git(root, "stash", "list"))
+    }
+
+    @Test
+    fun `fetch updates develop explicitly even with a narrow remote mapping`() = withRepository { root, _ ->
+        advanceDevelop(root)
+        git(root, "update-ref", "refs/remotes/origin/develop", "HEAD")
+        git(root, "config", "remote.origin.fetch", "+refs/heads/other:refs/remotes/origin/other")
+        val result = synchronize(root)
+        assertEquals(result.message, GitRebaseStatus.SUCCESS, result.status)
+        assertEquals("2.0-SNAPSHOT", PomReferenceVersionEditor.findProjectVersion(Files.readString(root.resolve("pom.xml"))))
+    }
+
+    @Test
+    fun `stop during stash creation finishes the stash and reports how to recover it`() = withRepository { root, _ ->
+        Files.writeString(root.resolve("notes.txt"), "keep my notes")
+        val service = GitRebaseService()
+        val original = git(root, "rev-parse", "HEAD")
+        val result = synchronize(root, service) { _, _, message ->
+            if (message == "Stashing tracked and untracked work") service.cancel()
+        }
+        assertEquals(GitRebaseStatus.CANCELLED, result.status)
+        assertTrue(result.stashPreserved)
+        assertTrue(result.recoveryHint.orEmpty().contains("recovery.txt"))
+        assertEquals(original, git(root, "rev-parse", "HEAD"))
+        git(root, "stash", "apply", "--index")
+        assertEquals("keep my notes", Files.readString(root.resolve("notes.txt")))
+    }
+
+    @Test
+    fun `unexpected failures after stashing retain recovery details`() = withRepository { root, _ ->
+        Files.writeString(root.resolve("notes.txt"), "keep my notes")
+        val result = synchronize(root) { _, _, message ->
+            if (message.startsWith("Rebasing ")) error("Injected failure")
+        }
+        assertEquals(GitRebaseStatus.FAILED, result.status)
+        assertTrue(result.stashPreserved)
+        assertTrue(result.recoveryHint.orEmpty().contains("recovery.txt"))
+        assertTrue(git(root, "stash", "list").contains("mph: rebase"))
+    }
+
+    @Test
+    fun `a rejected rebase hook reports failure and retains stashed work`() = withRepository { root, _ ->
+        advanceDevelop(root)
+        Files.writeString(root.resolve("notes.txt"), "recoverable work")
+        val hook = Files.writeString(root.resolve(".git/hooks/pre-rebase"), "#!/bin/sh\necho 'Test hook rejected rebase' >&2\nexit 1\n")
+        hook.toFile().setExecutable(true)
+        val result = synchronize(root)
+        assertEquals(result.message, GitRebaseStatus.FAILED, result.status)
+        assertTrue(result.message.contains("Test hook rejected rebase"))
+        assertTrue(result.stashPreserved)
+        git(root, "stash", "apply", "--index")
+        assertEquals("recoverable work", Files.readString(root.resolve("notes.txt")))
+    }
+
+    @Test
+    fun `version resolver does not accept structural XML disguised as a version line`() {
+        val conflict = """
+            <<<<<<< HEAD
+            <version>2</version><artifactId>changed</artifactId><version>3</version>
+            =======
+            <version>1</version>
+            >>>>>>> feature
+        """.trimIndent()
+        assertEquals(null, GitVersionConflictResolver.resolvedContent(conflict))
+        val renamedProperty = "<<<<<<< HEAD\n<spring.version>2</spring.version>\n=======\n<other.version>1</other.version>\n>>>>>>> feature\n"
+        assertEquals(null, GitVersionConflictResolver.resolvedContent(renamedProperty))
+        val addedVersion = "<<<<<<< HEAD\n<version>2</version>\n=======\n<version>1</version>\n<version>3</version>\n>>>>>>> feature\n"
+        assertEquals(null, GitVersionConflictResolver.resolvedContent(addedVersion))
+        val crlf = "<<<<<<< HEAD\r\n<version>2</version>\r\n=======\r\n<version>1</version>\r\n>>>>>>> feature\r\n"
+        assertEquals("<version>2</version>\r\n", GitVersionConflictResolver.resolvedContent(crlf))
+    }
+
+    @Test
+    fun `mixed conflict sets leave even version-only files untouched`() = withRepository { root, _ ->
+        Files.writeString(root.resolve("pom.xml"), pom("service", "PREFIX-1.0-SNAPSHOT"))
+        Files.writeString(root.resolve("source.txt"), "base")
+        git(root, "add", ".")
+        git(root, "commit", "-m", "Feature version and source")
+        git(root, "switch", "develop")
+        Files.writeString(root.resolve("pom.xml"), pom("service", "2.0-SNAPSHOT"))
+        Files.writeString(root.resolve("source.txt"), "develop")
+        git(root, "add", ".")
+        git(root, "commit", "-m", "Develop version and source")
+        git(root, "push", "origin", "develop")
+        git(root, "switch", "feature/test")
+        val result = synchronize(root)
+        assertEquals(GitRebaseStatus.CONFLICT, result.status)
+        assertTrue(Files.readString(root.resolve("pom.xml")).contains("<<<<<<<"))
+        assertTrue(git(root, "diff", "--name-only", "--diff-filter=U").contains("pom.xml"))
+    }
+
+    @Test
+    fun `merge history is preserved and configured updateRefs cannot rewrite other branches`() = withRepository { root, _ ->
+        git(root, "switch", "-c", "side")
+        Files.writeString(root.resolve("side.txt"), "side work")
+        git(root, "add", ".")
+        git(root, "commit", "-m", "Side change")
+        git(root, "switch", "feature/test")
+        Files.writeString(root.resolve("feature.txt"), "feature work")
+        git(root, "add", ".")
+        git(root, "commit", "-m", "Feature change")
+        git(root, "merge", "--no-ff", "side", "-m", "Merge side")
+        git(root, "branch", "do-not-move")
+        val originalHead = git(root, "rev-parse", "HEAD")
+        git(root, "config", "rebase.updateRefs", "true")
+        advanceDevelop(root)
+        val result = synchronize(root)
+        assertEquals(result.message, GitRebaseStatus.SUCCESS, result.status)
+        assertEquals(originalHead, git(root, "rev-parse", "do-not-move"))
+        assertEquals(1, git(root, "rev-list", "--merges", "origin/develop..HEAD").lineSequence().filter(String::isNotBlank).count())
+        assertEquals("side work", Files.readString(root.resolve("side.txt")))
+        assertEquals("feature work", Files.readString(root.resolve("feature.txt")))
+    }
+
+    @Test
+    fun `missing remote develop cannot silently reuse a stale remote tracking ref`() = withRepository { root, _ ->
+        val original = git(root, "rev-parse", "HEAD")
+        git(root, "push", "origin", "--delete", "develop")
+        Files.writeString(root.resolve("notes.txt"), "untouched")
+        val result = synchronize(root)
+        assertEquals(GitRebaseStatus.FAILED, result.status)
+        assertEquals(original, git(root, "rev-parse", "HEAD"))
+        assertEquals("untouched", Files.readString(root.resolve("notes.txt")))
+        assertEquals("", git(root, "stash", "list"))
+    }
+
+    @Test
+    fun `a second synchronization cannot reset cancellation or touch the same repository`() = withRepository { root, _ ->
+        val service = GitRebaseService()
+        var checked = false
+        val result = synchronize(root, service) { _, _, message ->
+            if (message == "Starting Git preflight") {
+                assertThrows(IllegalStateException::class.java) { synchronize(root, service) }
+                checked = true
+            }
+        }
+        assertTrue(checked)
+        assertEquals(result.message, GitRebaseStatus.SUCCESS, result.status)
+    }
+
+    @Test
+    fun `stop during restoration reports cancellation while retaining restored work and backup`() = withRepository { root, _ ->
+        Files.writeString(root.resolve("notes.txt"), "preserved")
+        val service = GitRebaseService()
+        val result = synchronize(root, service) { _, _, message ->
+            if (message == "Restoring uncommitted work") service.cancel()
+        }
+        assertEquals(GitRebaseStatus.CANCELLED, result.status)
+        assertTrue(result.stashPreserved)
+        assertEquals("preserved", Files.readString(root.resolve("notes.txt")))
+    }
+
+    private fun synchronize(
+        root: Path,
+        service: GitRebaseService = GitRebaseService(),
+        listener: GitRebaseListener = GitRebaseListener { _, _, _ -> },
+    ): GitRepositoryResult = service.rebase(
+        GitRebasePlan("PREFIX-", listOf(GitRepositoryPlan(root.toString(), "service")), emptyList()),
+        notCancelledIndicator(), listener,
+    ).single()
+
+    private fun advanceDevelop(root: Path) {
+        git(root, "switch", "develop")
+        Files.writeString(root.resolve("pom.xml"), pom("service", "2.0-SNAPSHOT"))
+        git(root, "add", "pom.xml")
+        git(root, "commit", "-m", "Advance develop")
+        git(root, "push", "origin", "develop")
+        git(root, "switch", "feature/test")
+    }
+
+    private fun withRepository(action: (Path, Path) -> Unit) {
+        val testRoot = Files.createTempDirectory("mph-rebase-safety-")
+        val root = Files.createDirectory(testRoot.resolve("workspace"))
+        try {
+            val origin = testRoot.resolve("origin.git")
+            git(testRoot, "init", "--bare", origin.toString())
+            git(root, "init", "--initial-branch=develop")
+            git(root, "config", "user.name", "Test User")
+            git(root, "config", "user.email", "test.user@example.org")
+            git(root, "config", "commit.gpgSign", "false")
+            Files.writeString(root.resolve("pom.xml"), pom("service", "1.0-SNAPSHOT"))
+            git(root, "add", "pom.xml")
+            git(root, "commit", "-m", "Initial project")
+            git(root, "remote", "add", "origin", origin.toString())
+            git(root, "push", "origin", "develop")
+            git(root, "switch", "-c", "feature/test")
+            action(root, testRoot)
         } finally {
             testRoot.toFile().deleteRecursively()
         }
