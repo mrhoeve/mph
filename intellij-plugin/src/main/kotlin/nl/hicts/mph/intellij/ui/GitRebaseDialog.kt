@@ -25,6 +25,8 @@ import nl.hicts.mph.intellij.services.BulkVersionUpdateService
 import nl.hicts.mph.intellij.services.MavenModelRefreshService
 import nl.hicts.mph.intellij.services.IdeaProjectDiscoveryService
 import nl.hicts.mph.intellij.services.WorkspaceOperationCoordinator
+import nl.hicts.mph.intellij.services.GitWorkspaceFingerprint
+import com.intellij.openapi.progress.ProgressManager
 import nl.hicts.mph.intellij.services.GitRecoverySnapshots
 import nl.hicts.mph.intellij.services.GitRebaseListener
 import nl.hicts.mph.intellij.services.GitRebasePlan
@@ -67,6 +69,7 @@ class GitRebaseDialog(
     private var operation: WorkspaceOperationCoordinator.Lease? = null
     @Volatile private var gitIndicator: ProgressIndicator? = null
     private var refreshing = false
+    private var expectedRepositories = emptyList<GitWorkspaceFingerprint>()
     internal val statusText: String get() = statusLabel.text
 
     init {
@@ -186,6 +189,7 @@ class GitRebaseDialog(
             }
             cancelled = indicator.isCanceled || results.any { it.status == GitRebaseStatus.CANCELLED }
             allSucceeded = !cancelled && results.isNotEmpty() && results.all { it.status == GitRebaseStatus.SUCCESS }
+            if (allSucceeded) expectedRepositories = plan.repositories.map { GitWorkspaceFingerprint.capture(Path.of(it.rootPath)) }
         }
 
         override fun onSuccess() {
@@ -240,6 +244,7 @@ class GitRebaseDialog(
                     if (stopRequested || isDisposed || ideProject.isDisposed) {
                         statusLabel.text = "Cancelled. Version alignment was skipped."
                     } else {
+                        verifyRepositories()
                         val fresh = discover?.invoke() ?: ideProject.service<IdeaProjectDiscoveryService>()
                             .discover().groups.flatMap { it.projects }
                         val roots = plan.repositories.map { Path.of(it.rootPath).toAbsolutePath().normalize() }.toSet()
@@ -310,6 +315,13 @@ class GitRebaseDialog(
                     normalizePrefix = true,
                 ),
                 operation,
+                validateState = {
+                    verifyRepositories()
+                    val current = ideProject.service<IdeaProjectDiscoveryService>().discover().groups.flatMap { it.projects }
+                    check(current.map { it.copy(gitStatus = null) }.toSet() == workspaceProjects.map { it.copy(gitStatus = null) }.toSet()) {
+                        "The Maven model changed after synchronization. Refresh and review alignment again."
+                    }
+                },
             )
         } catch (error: Exception) {
             statusLabel.text = "Version alignment stopped. Recovery copies were retained."
@@ -326,6 +338,14 @@ class GitRebaseDialog(
         } else {
             "Completed with ${alignment.issues.size} version-alignment warning(s). Recovery copies retained."
         }
+    }
+
+    private fun verifyRepositories() {
+        if (expectedRepositories.isEmpty()) return
+        ProgressManager.getInstance().runProcessWithProgressSynchronously(
+            { expectedRepositories.forEach(GitWorkspaceFingerprint::verify) },
+            "Checking repository changes", false, ideProject,
+        )
     }
 
     private fun stop() {

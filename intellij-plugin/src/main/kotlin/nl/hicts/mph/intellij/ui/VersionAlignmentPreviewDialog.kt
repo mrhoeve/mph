@@ -46,12 +46,17 @@ internal fun reviewVersionAlignment(
     project: Project,
     request: BulkVersionUpdateRequest,
     owner: WorkspaceOperationCoordinator.Lease? = null,
+    validateState: () -> Unit = {},
 ): BulkVersionUpdateResult? = WorkspaceOperationCoordinator.run("Version alignment", owner) {
     try {
+        validateState()
         val service = project.service<BulkVersionUpdateService>()
         val plan = service.prepare(request)
         if (plan.edits.isEmpty()) plan.result
-        else if (VersionAlignmentPreviewDialog(project, plan).showAndGet()) service.applyOwned(plan)
+        else if (VersionAlignmentPreviewDialog(project, plan).showAndGet()) {
+            validateState()
+            service.applyOwned(plan)
+        }
         else null
     } catch (error: Exception) {
         Messages.showErrorDialog(project, error.message.orEmpty(), "Version Alignment Stopped")
