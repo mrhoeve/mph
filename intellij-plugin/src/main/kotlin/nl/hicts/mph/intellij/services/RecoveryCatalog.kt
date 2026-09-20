@@ -20,7 +20,7 @@ internal class RecoveryCatalog(roots: List<Path>) {
     private fun inspect(directory: Path): RecoveryRun? {
         val path = directory.toAbsolutePath().normalize()
         if (path.parent !in roots || !NAME.matches(path.fileName.toString()) || !Files.isDirectory(path, NOFOLLOW_LINKS) || path.toRealPath() != path) return null
-        val files = Files.list(path).use { it.toList() }
+        val files: List<Path> = Files.list(path).use { it.toList() }
         if (files.isEmpty() || files.any { !Files.isRegularFile(it, NOFOLLOW_LINKS) || !FILE.matches(it.fileName.toString()) }) return null
         val hashes = files.sorted().associate { it.fileName.toString() to sha(Files.readAllBytes(it)) }
         val details = buildString {

@@ -256,35 +256,7 @@ class GitRebaseDialog(
         refreshing = true
         statusLabel.text = "Refreshing Maven projects before version alignment…"
         val owner = operation
-        val success = {
-            if (operation === owner) {
-                try {
-                    if (stopRequested || isDisposed || ideProject.isDisposed) {
-                        statusLabel.text = "Cancelled. Version alignment was skipped."
-                    } else {
-                        verifyRepositories()
-                        val fresh = discover?.invoke() ?: ideProject.service<IdeaProjectDiscoveryService>()
-                            .discover().groups.flatMap { it.projects }
-                        val roots = plan.repositories.map { Path.of(it.rootPath).toAbsolutePath().normalize() }.toSet()
-                        val selected = fresh.filter { it.gitRootPath?.let { root -> Path.of(root).toAbsolutePath().normalize() } in roots }
-                        check(roots.all { root -> selected.any { Path.of(it.gitRootPath!!).toAbsolutePath().normalize() == root } }) {
-                            "Maven refresh did not find projects in every synchronized repository."
-                        }
-                        if (FileDocumentManager.getInstance().unsavedDocuments.isNotEmpty()) {
-                            statusLabel.text = "Editor changes appeared during synchronization. Version alignment was skipped."
-                        } else if (align != null) {
-                            align.invoke(selected, fresh)
-                        } else {
-                            alignVersions(selected, fresh)
-                        }
-                    }
-                } catch (error: Exception) {
-                    statusLabel.text = "Version alignment skipped: ${error.message}"
-                } finally {
-                    finishOperation()
-                }
-            }
-        }
+        val success = { completeMavenRefresh(owner) }
         val failure: (Throwable) -> Unit = { error ->
             if (operation === owner) {
                 statusLabel.text = "Maven refresh failed. Version alignment was skipped: ${error.message}"
@@ -302,6 +274,38 @@ class GitRebaseDialog(
         } catch (error: Exception) {
             failure(error)
         }
+    }
+
+    private fun completeMavenRefresh(owner: WorkspaceOperationCoordinator.Lease?) {
+        if (operation !== owner) return
+        try {
+            if (stopRequested || isDisposed || ideProject.isDisposed) {
+                statusLabel.text = "Cancelled. Version alignment was skipped."
+                return
+            }
+            alignRefreshedProjects()
+        } catch (error: Exception) {
+            statusLabel.text = "Version alignment skipped: ${error.message}"
+        } finally {
+            finishOperation()
+        }
+    }
+
+    private fun alignRefreshedProjects() {
+        verifyRepositories()
+        val fresh = discover?.invoke() ?: ideProject.service<IdeaProjectDiscoveryService>()
+            .discover().groups.flatMap { it.projects }
+        val roots = plan.repositories.map { Path.of(it.rootPath).toAbsolutePath().normalize() }.toSet()
+        val selected = fresh.filter { it.gitRootPath?.let { root -> Path.of(root).toAbsolutePath().normalize() } in roots }
+        val selectedRoots = selected.map { Path.of(it.gitRootPath!!).toAbsolutePath().normalize() }.toSet()
+        check(selectedRoots.containsAll(roots)) {
+            "Maven refresh did not find projects in every synchronized repository."
+        }
+        if (FileDocumentManager.getInstance().unsavedDocuments.isNotEmpty()) {
+            statusLabel.text = "Editor changes appeared during synchronization. Version alignment was skipped."
+            return
+        }
+        if (align != null) align.invoke(selected, fresh) else alignVersions(selected, fresh)
     }
 
     private fun alignVersions(selectedProjects: List<MavenProjectInfo>, workspaceProjects: List<MavenProjectInfo>) {

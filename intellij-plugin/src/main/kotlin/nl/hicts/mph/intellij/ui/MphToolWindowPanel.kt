@@ -60,6 +60,8 @@ import javax.swing.JTree
 import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.DefaultTreeModel
 
+private const val MPH_TITLE = "Maven Project Helper"
+
 class MphToolWindowPanel(
     private val project: Project,
     private val discoverProjects: () -> ProjectSnapshot = {
@@ -483,7 +485,7 @@ class MphToolWindowPanel(
     }
 
     private fun createHeader(): JComponent {
-        val title = JBLabel("Maven Project Helper", MphIcons.Mph, SwingConstants.LEFT)
+        val title = JBLabel(MPH_TITLE, MphIcons.Mph, SwingConstants.LEFT)
         title.font = title.font.deriveFont(Font.BOLD, title.font.size2D + 2f)
         title.iconTextGap = JBUI.scale(10)
 
@@ -640,7 +642,7 @@ class MphToolWindowPanel(
             }
         }
         NotificationGroupManager.getInstance()
-            .getNotificationGroup("Maven Project Helper")
+            .getNotificationGroup(MPH_TITLE)
             .createNotification(
                 "Maven version alignment completed",
                 summary,
@@ -740,7 +742,7 @@ class MphToolWindowPanel(
         val details = "Updated ${result.updatedProjectCount} project versions and " +
             "${result.updatedReferenceCount} dependent references." +
             result.issues.takeIf { it.isNotEmpty() }?.joinToString("<br>", "<br><br>").orEmpty()
-        NotificationGroupManager.getInstance().getNotificationGroup("Maven Project Helper")
+        NotificationGroupManager.getInstance().getNotificationGroup(MPH_TITLE)
             .createNotification(
                 title,
                 details,

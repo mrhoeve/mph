@@ -11,6 +11,10 @@ import java.nio.file.Path
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
+private const val LS_FILES = "ls-files"
+private const val REV_PARSE = "rev-parse"
+private const val PORCELAIN = "--porcelain"
+
 enum class GitRebaseStatus {
     PENDING,
     RUNNING,
@@ -178,14 +182,14 @@ internal class GitRebaseWorkflow(
             return PreflightResult(failure = skipped(context.repository, "The current branch '$branchName' is protected from this operation."))
         }
         context.emit("Fetching origin/develop")
-        val hidden = context.command("ls-files", "-v", "-z")
+        val hidden = context.command(LS_FILES, "-v", "-z")
         if (hidden.exitCode != 0 || hidden.output.split('\u0000').any {
                 it.isNotEmpty() && (it[0] == 'S' || it[0].isLowerCase())
             }) {
             return PreflightResult(failure = skipped(context.repository, "Sparse checkout or hidden index changes require manual synchronization."))
         }
         if (Files.exists(context.root.resolve(".gitmodules")) ||
-            context.requireCommand("ls-files", "--stage", "-z").split('\u0000').any { it.startsWith("160000 ") }) {
+            context.requireCommand(LS_FILES, "--stage", "-z").split('\u0000').any { it.startsWith("160000 ") }) {
             return PreflightResult(failure = skipped(context.repository, "Repositories with submodules require manual synchronization."))
         }
         val fetch = context.command("fetch", "--no-tags", "origin", "+refs/heads/develop:$REMOTE_DEVELOP", stream = true)
@@ -196,8 +200,15 @@ internal class GitRebaseWorkflow(
         if (remoteDevelop.exitCode != 0) {
             return PreflightResult(failure = skipped(context.repository, "Remote branch origin/develop was not found."))
         }
-        context.upstream = context.requireCommand("rev-parse", "--verify", "$REMOTE_DEVELOP^{commit}").trim()
-        val ignored = context.requireCommand("ls-files", "--others", "--ignored", "--exclude-standard", "-z")
+        context.upstream = context.requireCommand(REV_PARSE, "--verify", "$REMOTE_DEVELOP^{commit}").trim()
+        checkIgnoredFileCollisions(context)?.let { return PreflightResult(failure = it) }
+        context.cancelled()?.let { return PreflightResult(failure = it) }
+        updateLocalDevelop(context)?.let { return PreflightResult(failure = it) }
+        return PreflightResult(branchName)
+    }
+
+    private fun checkIgnoredFileCollisions(context: RepositoryCommandContext): GitRepositoryResult? {
+        val ignored = context.requireCommand(LS_FILES, "--others", "--ignored", "--exclude-standard", "-z")
             .split('\u0000').filter(String::isNotEmpty)
         if (ignored.isNotEmpty()) {
             // Include intermediate replayed trees: an ignored file may have been tracked and later deleted.
@@ -208,24 +219,22 @@ internal class GitRebaseWorkflow(
                 generateSequence(path.parent) { it.parent }.takeWhile { it.startsWith(context.root) }.toList()
             }.toSet()
             for (commit in commits) {
-                context.cancelled()?.let { return PreflightResult(failure = it) }
+                context.cancelled()?.let { return it }
                 val incoming = context.requireCommand("ls-tree", "-r", "--name-only", "-z", commit)
                     .split('\u0000').filter(String::isNotEmpty).map { context.root.resolve(it).normalize() }
                 if (incoming.any { remote ->
                         remote in ignoredAncestors || generateSequence(remote) { it.parent }
                             .takeWhile { it.startsWith(context.root) }.any { it in ignoredPaths }
                     }) {
-                    return PreflightResult(failure = skipped(context.repository, "Ignored local files overlap files used by the rebase. Move or back them up first."))
+                    return skipped(context.repository, "Ignored local files overlap files used by the rebase. Move or back them up first.")
                 }
             }
         }
-        context.cancelled()?.let { return PreflightResult(failure = it) }
-        updateLocalDevelop(context)?.let { return PreflightResult(failure = it) }
-        return PreflightResult(branchName)
+        return null
     }
 
     private fun updateLocalDevelop(context: RepositoryCommandContext): GitRepositoryResult? {
-        val worktrees = context.requireCommand("worktree", "list", "--porcelain")
+        val worktrees = context.requireCommand("worktree", "list", PORCELAIN)
         if (worktrees.lineSequence().any { it == "branch $LOCAL_DEVELOP" }) {
             return skipped(context.repository, "Local develop is checked out in another worktree.")
         }
@@ -245,7 +254,7 @@ internal class GitRebaseWorkflow(
     }
 
     private fun stashWorkingTree(context: RepositoryCommandContext): StashResult {
-        val status = context.command("status", "--porcelain", "--untracked-files=all")
+        val status = context.command("status", PORCELAIN, "--untracked-files=all")
         if (status.exitCode != 0) {
             return StashResult(
                 failure = failed(context.repository, "The working tree could not be inspected.", status.output),
@@ -283,7 +292,7 @@ internal class GitRebaseWorkflow(
             )
         }
 
-        val remainingStatus = context.command("status", "--porcelain", "--untracked-files=all")
+        val remainingStatus = context.command("status", PORCELAIN, "--untracked-files=all")
         if (remainingStatus.exitCode != 0 || remainingStatus.output.isNotBlank()) {
             return StashResult(
                 failure = failed(
@@ -319,7 +328,7 @@ internal class GitRebaseWorkflow(
         var attempts = 0
         while (rebase.exitCode != 0 && attempts++ < MAX_AUTOMATIC_CONTINUES) {
             context.cancelled()?.let { return it }
-            val conflicts = conflictedFiles(context.root, context.indicator)
+            val conflicts = conflictedFiles(context.root)
             if (conflicts.isEmpty()) {
                 return failed(context.repository, "Rebase did not complete.", rebase.diagnostic, stashId != null)
             }
@@ -332,14 +341,13 @@ internal class GitRebaseWorkflow(
                     stashPreserved = stashId != null,
                 )
             }
-            val add = runGit(context.root, listOf("add", "--") + conflicts, context.indicator)
+            val add = runGit(context.root, listOf("add", "--") + conflicts)
             if (add.exitCode != 0) return failed(context.repository, "Resolved POM files could not be staged.", add.diagnostic, stashId != null)
             context.cancelled()?.let { return it }
             context.emit("Continuing after resolving version-only POM conflicts")
             rebase = runGit(
                 context.root,
                 listOf("-c", "commit.gpgSign=false", "-c", "rerere.enabled=false", "rebase", "--continue"),
-                context.indicator,
                 context::emit,
                 mapOf("GIT_EDITOR" to "true", "GIT_SEQUENCE_EDITOR" to "true"),
             )
@@ -383,13 +391,13 @@ internal class GitRebaseWorkflow(
     private fun gitOperationInProgress(command: (Array<out String>) -> GitCommandResult): Boolean {
         val paths = listOf("rebase-merge", "rebase-apply", "sequencer", "MERGE_HEAD", "REBASE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG", "index.lock")
         return paths.any { name ->
-            val result = command(arrayOf("rev-parse", "--path-format=absolute", "--git-path", name))
+            val result = command(arrayOf(REV_PARSE, "--path-format=absolute", "--git-path", name))
             result.exitCode != 0 || Files.exists(Path.of(result.output.trim()))
         }
     }
 
-    private fun conflictedFiles(root: Path, indicator: ProgressIndicator): List<String> {
-        val result = runGit(root, listOf("diff", "--name-only", "-z", "--diff-filter=U"), indicator)
+    private fun conflictedFiles(root: Path): List<String> {
+        val result = runGit(root, listOf("diff", "--name-only", "-z", "--diff-filter=U"))
         check(result.exitCode == 0) { "Could not inspect conflicts: ${result.diagnostic}" }
         return result.output.split('\u0000').filter(String::isNotEmpty)
     }
@@ -409,7 +417,6 @@ internal class GitRebaseWorkflow(
     private fun runGit(
         root: Path,
         arguments: List<String>,
-        indicator: ProgressIndicator,
         progress: ((String) -> Unit)? = null,
         environment: Map<String, String> = emptyMap(),
     ): GitCommandResult = runner.execute(root, arguments, progress, environment)
@@ -465,7 +472,7 @@ internal class GitRebaseWorkflow(
 
         fun createRecovery(branch: String) {
             originalBranch = branch
-            val gitDirectory = Path.of(requireCommand("rev-parse", "--absolute-git-dir").trim())
+            val gitDirectory = Path.of(requireCommand(REV_PARSE, "--absolute-git-dir").trim())
             recoveryFile = Files.createDirectories(gitDirectory.resolve("mph-recovery").resolve(recoveryId)).resolve("recovery.txt")
             backupRef = "refs/mph/recovery/$recoveryId/head"
             requireCommand("update-ref", backupRef, "HEAD", "0".repeat(upstream.length))
@@ -496,7 +503,7 @@ internal class GitRebaseWorkflow(
         fun emit(message: String) = listener.onEvent(repository, GitRebaseStatus.RUNNING, message)
 
         fun command(vararg arguments: String, stream: Boolean = false): GitCommandResult =
-            runGit(root, arguments.toList(), indicator, if (stream) ::emit else null)
+            runGit(root, arguments.toList(), if (stream) ::emit else null)
     }
 
     private companion object {

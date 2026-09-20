@@ -14,6 +14,8 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.util.Base64
 
+private const val APPLICATION_JSON = "application/json"
+
 data class NexusIqScanResult(
     val applicationId: String,
     val exitCode: Int,
@@ -105,16 +107,16 @@ class IntellijNexusIqService(private val project: Project) {
                 val token = Base64.getEncoder().encodeToString("$username:$password".toByteArray(StandardCharsets.UTF_8))
                 connection.setRequestProperty("Authorization", "Basic $token")
             }
-            connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("Accept", APPLICATION_JSON)
         }.readString()
 
     private fun post(url: String, username: String, password: String?, body: String): String =
-        HttpRequests.post(url, "application/json").tuner { connection ->
+        HttpRequests.post(url, APPLICATION_JSON).tuner { connection ->
             if (username.isNotBlank() && !password.isNullOrBlank()) {
                 val token = Base64.getEncoder().encodeToString("$username:$password".toByteArray(StandardCharsets.UTF_8))
                 connection.setRequestProperty("Authorization", "Basic $token")
             }
-            connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("Accept", APPLICATION_JSON)
         }.connect { request ->
             request.write(body)
             request.readString()

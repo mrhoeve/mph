@@ -108,7 +108,7 @@ class ManagedVersionService(
             val conventional = propertiesByName["${component.artifactId}.version"]
                 ?.takeIf { it.value == component.version }
             val property = conventional ?: propertiesByValue[component.version]?.singleOrNull()
-            property?.name?.let { it to component }
+            property?.let { it.name to component }
         }.groupBy({ it.first }, { it.second })
         return ManagedVersionAnalysis(projectInfo, properties, parent ?: bom, componentsByProperty)
     }

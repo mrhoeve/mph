@@ -35,7 +35,7 @@ Multi-file saves remain recoverable rather than filesystem-atomic. The coordinat
 
 ## Validation
 
-Verified on Windows with JDK 21: the current full plugin suite passes all 139 tests, including the existing Git safety scenarios and new operation ownership, build prerequisite, and asynchronous Maven refresh regressions. `git diff --check` passes.
+Verified on Windows with JDK 21: the current full plugin suite passes all 141 tests, including the existing Git safety scenarios and new operation ownership, build prerequisite, and asynchronous Maven refresh regressions. `git diff --check` passes.
 
 Real local Git repositories exercise committed version conflict resolution, uncommitted version conflicts, source conflicts, mixed conflicts, index/worktree separation, retained pre-existing stashes, recovery refs, ignored file collisions, active operation directories, checked-out develop worktrees, hidden index flags, narrow fetch mappings, deleted remote develop, merge topology, updateRefs configuration, cancellation at stash/restoration boundaries, concurrent starts, and exceptions after stashing. Pure tests cover strict XML conflict classification, line ending preservation, exact-byte alignment backups, dependent paths, and backup failure.
 

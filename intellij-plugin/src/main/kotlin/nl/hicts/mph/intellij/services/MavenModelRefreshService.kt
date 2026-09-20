@@ -8,6 +8,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicReference
 import org.jetbrains.idea.maven.buildtool.MavenSyncSpec
 import org.jetbrains.idea.maven.project.MavenProjectsManager
 import org.jetbrains.idea.maven.project.MavenProjectsManagerEx
@@ -34,19 +35,19 @@ internal fun launchMavenRefresh(
     onSuccess: () -> Unit,
     onFailure: (Throwable) -> Unit,
 ): Job {
-    var failure: Throwable? = null
+    val failure = AtomicReference<Throwable?>()
     return scope.launch {
         try {
             refresh()
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
-            failure = error
+            failure.set(error)
         }
     }.also { job ->
         job.invokeOnCompletion { cause ->
             dispatch {
-                val error = failure ?: cause
+                val error = failure.get() ?: cause
                 if (error == null) onSuccess() else onFailure(error)
             }
         }

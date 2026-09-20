@@ -6,6 +6,25 @@ import org.junit.Test
 
 class MavenModelRefreshServiceTest {
     @Test
+    fun `background refresh failure reaches the dispatched callback`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val callbacks = java.util.concurrent.LinkedBlockingQueue<() -> Unit>()
+        val expected = IllegalStateException("Test background refresh failure")
+        var failure: Throwable? = null
+        try {
+            val job = launchMavenRefresh(scope, { throw expected }, callbacks::add,
+                { fail("Unexpected success") }, { failure = it })
+            withTimeout(5_000) { job.join() }
+            assertNull(failure)
+            callbacks.remove().invoke()
+            assertSame(expected, failure)
+            assertTrue(scope.isActive)
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
     fun `completion is dispatched only after refresh finishes`() {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val gate = CompletableDeferred<Unit>()

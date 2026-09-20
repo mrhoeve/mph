@@ -56,4 +56,4 @@ The subsequent completion series implements alignment previews, grouped toolbar/
 
 ## Validation
 
-The current full plugin suite passes all 139 tests on Windows, including build failure propagation, module selection and cycles, cross-thread operation ownership, refresh failure/cancellation, and post-rebase rediscovery. `git diff --check` passes. The earlier icon audit verified all 18 custom/branding SVG files and matching light/dark variants. An interactive IDE check of animated repainting, narrow-window layout, and live Maven refresh remains recommended.
+The current full plugin suite passes all 141 tests on Windows, including build failure propagation, module selection and cycles, cross-thread operation ownership, refresh failure/cancellation, and post-rebase rediscovery. `git diff --check` passes. The earlier icon audit verified all 18 custom/branding SVG files and matching light/dark variants. An interactive IDE check of animated repainting, narrow-window layout, and live Maven refresh remains recommended.

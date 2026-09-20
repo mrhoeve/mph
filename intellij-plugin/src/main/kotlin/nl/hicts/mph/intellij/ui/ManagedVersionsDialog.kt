@@ -33,6 +33,8 @@ import javax.swing.JPanel
 import javax.swing.event.DocumentEvent
 import javax.swing.table.DefaultTableModel
 
+private const val WORKSPACE_OPERATION_TITLE = "Workspace Operation In Progress"
+
 class ManagedVersionsDialog(
     private val ideProject: Project,
     private val projectInfo: MavenProjectInfo,
@@ -143,7 +145,7 @@ class ManagedVersionsDialog(
         try {
             overrideSelectedOwned()
         } catch (error: WorkspaceOperationBusyException) {
-            Messages.showWarningDialog(ideProject, error.message.orEmpty(), "Workspace Operation In Progress")
+            Messages.showWarningDialog(ideProject, error.message.orEmpty(), WORKSPACE_OPERATION_TITLE)
         }
     }
 
@@ -159,7 +161,7 @@ class ManagedVersionsDialog(
         try {
             removeSelectedOwned()
         } catch (error: WorkspaceOperationBusyException) {
-            Messages.showWarningDialog(ideProject, error.message.orEmpty(), "Workspace Operation In Progress")
+            Messages.showWarningDialog(ideProject, error.message.orEmpty(), WORKSPACE_OPERATION_TITLE)
         }
     }
 
@@ -180,7 +182,7 @@ class ManagedVersionsDialog(
         try {
             upgradeSpringBootOwned()
         } catch (error: WorkspaceOperationBusyException) {
-            Messages.showWarningDialog(ideProject, error.message.orEmpty(), "Workspace Operation In Progress")
+            Messages.showWarningDialog(ideProject, error.message.orEmpty(), WORKSPACE_OPERATION_TITLE)
         }
     }
 

@@ -8,7 +8,7 @@ Bulk alignment, explicit version updates, realignment, and post-rebase alignment
 
 Recovery copies preserve both exact disk bytes and original editor text in the IDE configuration directory under `mph-recovery`. A multi-file save is not filesystem-atomic: a failure names all possibly changed files and retains copies for inspection or Undo rather than silently claiming success or overwriting a concurrent edit during rollback.
 
-Validation: all 139 plugin tests pass on Windows, including stale editor/disk previews, a failure on the second save, real Git recovery failures, external-change detection, and dialog lifecycle checks. The plugin package builds successfully. Offline Plugin Verifier checks report compatibility with IntelliJ IDEA 2026.1.4 and 2026.2.2. Both report four experimental-API usages in the existing `MavenSyncSpec` refresh adapter; recheck that isolated adapter when upgrading IDE support. The online verifier stalled on Marketplace requests, so the completed check used the cached IDEs and dependencies.
+Validation: all 141 plugin tests pass on Windows, including stale editor/disk previews, a failure on the second save, real Git recovery failures, external-change detection, and dialog lifecycle checks. The plugin package builds successfully. Offline Plugin Verifier checks report compatibility with IntelliJ IDEA 2026.1.4 and 2026.2.2. Both report four experimental-API usages in the existing `MavenSyncSpec` refresh adapter; recheck that isolated adapter when upgrading IDE support. The online verifier stalled on Marketplace requests, so the completed check used the cached IDEs and dependencies.
 
 ## Completed implementation
 

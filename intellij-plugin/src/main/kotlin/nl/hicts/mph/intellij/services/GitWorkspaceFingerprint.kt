@@ -4,6 +4,8 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.security.MessageDigest
 
+private const val REV_PARSE = "rev-parse"
+
 /** A conservative check between Git completion, Maven import, and applying reviewed edits. */
 internal data class GitWorkspaceFingerprint(val root: Path, val digest: String) {
     fun verify() {
@@ -25,8 +27,8 @@ internal data class GitWorkspaceFingerprint(val root: Path, val digest: String) 
                 check(result.exitCode == 0) { "Cannot verify repository state: ${result.diagnostic}" }
                 return result.output.also { add(it.toByteArray(Charsets.UTF_8)) }
             }
-            git("rev-parse", "HEAD")
-            git("rev-parse", "--symbolic-full-name", "HEAD")
+            git(REV_PARSE, "HEAD")
+            git(REV_PARSE, "--symbolic-full-name", "HEAD")
             git("status", "--porcelain=v1", "--untracked-files=all", "-z")
             git("diff", "--no-ext-diff", "--no-textconv", "--binary")
             git("diff", "--cached", "--no-ext-diff", "--no-textconv", "--binary")
@@ -37,7 +39,7 @@ internal data class GitWorkspaceFingerprint(val root: Path, val digest: String) 
                 add(if (Files.exists(file)) Files.readAllBytes(file) else byteArrayOf())
             }
             listOf("rebase-merge", "rebase-apply", "sequencer", "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG", "index.lock").forEach {
-                val path = Path.of(git("rev-parse", "--path-format=absolute", "--git-path", it).trim())
+                val path = Path.of(git(REV_PARSE, "--path-format=absolute", "--git-path", it).trim())
                 check(!Files.exists(path)) { "Another Git operation is in progress: $root" }
             }
             return GitWorkspaceFingerprint(root.toAbsolutePath().normalize(), digest.digest().joinToString("") { "%02x".format(it) })

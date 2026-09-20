@@ -175,22 +175,7 @@ class MavenBuildDialog(
             override fun run(indicator: ProgressIndicator) {
                 buildIndicator = indicator
                 if (stopRequested) indicator.cancel()
-                val listener = MavenBuildListener { project, status, text ->
-                    ApplicationManager.getApplication().invokeLater {
-                        if (isDisposed) return@invokeLater
-                        val index = selectedProjects.indexOfFirst { it.pomPath == project.pomPath }
-                        if (index >= 0) updateRow(index, status)
-                        text?.let { output ->
-                            val type = if (output.startsWith("[error]")) {
-                                ConsoleViewContentType.ERROR_OUTPUT
-                            } else {
-                                ConsoleViewContentType.NORMAL_OUTPUT
-                            }
-                            console.print(output, type)
-                        }
-                    }
-                }
-                val results = buildService.build(selectedProjects, options, indicator, listener)
+                val results = buildService.build(selectedProjects, options, indicator, buildListener())
                 skipped = results.count { it.status == MavenBuildStatus.SKIPPED }
                 failed = results.count { it.status == MavenBuildStatus.FAILED }
                 cancelled = indicator.isCanceled || results.any { it.status == MavenBuildStatus.CANCELLED }
@@ -222,6 +207,22 @@ class MavenBuildDialog(
                 }
             }
         }
+
+    private fun buildListener() = MavenBuildListener { project, status, text ->
+        ApplicationManager.getApplication().invokeLater {
+            if (isDisposed) return@invokeLater
+            val index = selectedProjects.indexOfFirst { it.pomPath == project.pomPath }
+            if (index >= 0) updateRow(index, status)
+            text?.let { output ->
+                val type = if (output.startsWith("[error]")) {
+                    ConsoleViewContentType.ERROR_OUTPUT
+                } else {
+                    ConsoleViewContentType.NORMAL_OUTPUT
+                }
+                console.print(output, type)
+            }
+        }
+    }
 
     private fun stopBuild() {
         stopRequested = true
