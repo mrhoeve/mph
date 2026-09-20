@@ -25,6 +25,8 @@ import nl.hicts.mph.intellij.services.BulkVersionUpdateService
 import nl.hicts.mph.intellij.services.MavenModelRefreshService
 import nl.hicts.mph.intellij.services.IdeaProjectDiscoveryService
 import nl.hicts.mph.intellij.services.WorkspaceOperationCoordinator
+import nl.hicts.mph.intellij.services.IdeaConflictResolutionService
+import nl.hicts.mph.intellij.services.GitRepositoryResult
 import nl.hicts.mph.intellij.services.GitWorkspaceFingerprint
 import com.intellij.openapi.progress.ProgressManager
 import nl.hicts.mph.intellij.services.GitRecoverySnapshots
@@ -51,6 +53,7 @@ class GitRebaseDialog(
     private val reloadMaven: (((() -> Unit), (Throwable) -> Unit) -> Unit)? = null,
     private val discover: (() -> List<MavenProjectInfo>)? = null,
     private val align: ((List<MavenProjectInfo>, List<MavenProjectInfo>) -> Unit)? = null,
+    private val conflictResolver: ((String) -> String)? = null,
 ) : DialogWrapper(ideProject) {
     private val gitService = ideProject.service<GitRebaseService>()
     private val listModel = DefaultListModel<GitRebaseRow>()
@@ -62,6 +65,7 @@ class GitRebaseDialog(
         wrapStyleWord = true
     }
     private val startButton = JButton("Stash and Rebase", MphIcons.SyncDevelop)
+    private val resolveButton = JButton("Resolve Conflicts…", AllIcons.Vcs.Merge)
     private val stopButton = JButton("Stop", MphIcons.Stop)
     @Volatile
     private var running = false
@@ -80,6 +84,8 @@ class GitRebaseDialog(
         repositoryList.addListSelectionListener { showRecoveryDetails() }
         if (!listModel.isEmpty) repositoryList.selectedIndex = 0
         stopButton.isEnabled = false
+        resolveButton.isEnabled = false
+        resolveButton.addActionListener { resolveSelectedConflicts() }
         startButton.addActionListener { start() }
         stopButton.addActionListener { stop() }
         init()
@@ -93,6 +99,7 @@ class GitRebaseDialog(
         panel.add(JBScrollPane(repositoryList), BorderLayout.CENTER)
 
         val controls = JPanel(FlowLayout(FlowLayout.RIGHT, JBUI.scale(8), 0))
+        controls.add(resolveButton)
         controls.add(stopButton)
         controls.add(startButton)
         panel.add(JPanel(BorderLayout(0, JBUI.scale(8))).apply {
@@ -153,6 +160,7 @@ class GitRebaseDialog(
         }
         stopRequested = false
         running = true
+        resolveButton.isEnabled = false
         startButton.isEnabled = false
         stopButton.isEnabled = true
         statusLabel.text = "Rebasing repositories sequentially…"
@@ -230,6 +238,7 @@ class GitRebaseDialog(
         running = false
         startButton.isEnabled = true
         stopButton.isEnabled = false
+        resolveButton.isEnabled = repositoryList.selectedValue?.status == GitRebaseStatus.CONFLICT
     }
 
     internal fun refreshAndAlign() {
@@ -355,6 +364,24 @@ class GitRebaseDialog(
         stopButton.isEnabled = false
     }
 
+    internal fun recordRepositoryResult(result: GitRepositoryResult) =
+        updateRepositoryRow(result.repository, result.status, result.message, result.recoveryHint)
+
+    internal fun resolveSelectedConflicts() {
+        val row = repositoryList.selectedValue ?: return
+        if (running || row.status != GitRebaseStatus.CONFLICT) return
+        resolveButton.isEnabled = false
+        try {
+            val message = (conflictResolver ?: ideProject.service<IdeaConflictResolutionService>()::resolve)(row.repository.rootPath)
+            statusLabel.text = message
+            recoveryDetails.text = listOfNotNull(row.recoveryHint, message).joinToString("\n\n")
+        } catch (error: Exception) {
+            statusLabel.text = "Conflict resolution stopped: ${error.message}"
+        } finally {
+            resolveButton.isEnabled = !running
+        }
+    }
+
     private fun updateRow(index: Int, status: GitRebaseStatus, message: String, recoveryHint: String? = null) {
         val row = listModel.get(index)
         listModel.set(index, row.copy(status = status, message = message, recoveryHint = recoveryHint))
@@ -363,6 +390,7 @@ class GitRebaseDialog(
 
     private fun showRecoveryDetails() {
         val row = repositoryList.selectedValue
+        resolveButton.isEnabled = !running && row?.status == GitRebaseStatus.CONFLICT
         recoveryDetails.text = row?.let { listOfNotNull(it.repository.rootPath, it.message, it.recoveryHint).joinToString("\n\n") }.orEmpty()
         recoveryDetails.caretPosition = 0
     }

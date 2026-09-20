@@ -79,6 +79,21 @@ class GitRebaseDialogTest : BasePlatformTestCase() {
             dialog.close(DialogWrapper.CANCEL_EXIT_CODE)
         }
     }
+    fun testConflictActionUsesTheSelectedRepositoryAndDoesNotRunAlignment() {
+        var root: String? = null
+        val dialog = GitRebaseDialog(project, plan,
+            align = { _, _ -> error("Resolving conflicts must not trigger alignment") },
+            conflictResolver = { selected -> root = selected; "Conflicts resolved; continue in IntelliJ." })
+        try {
+            dialog.resolveSelectedConflicts()
+            assertNull(root)
+            dialog.recordRepositoryResult(GitRepositoryResult(plan.repositories.single(), GitRebaseStatus.CONFLICT, "Test conflict", "Test recovery instructions", true))
+            dialog.resolveSelectedConflicts()
+            assertEquals(plan.repositories.single().rootPath, root)
+            assertTrue(dialog.statusText.contains("continue in IntelliJ"))
+        } finally { dialog.close(DialogWrapper.CANCEL_EXIT_CODE) }
+    }
+
     private fun assertBusy() {
         assertThrows(IllegalStateException::class.java) { WorkspaceOperationCoordinator.acquire("Build") }
     }
