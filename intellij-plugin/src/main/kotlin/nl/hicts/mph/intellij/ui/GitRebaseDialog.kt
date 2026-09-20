@@ -300,7 +300,7 @@ class GitRebaseDialog(
         }
         statusLabel.text = "Reapplying '${plan.prefix}' and aligning dependent versions…"
         val alignment = try {
-            ideProject.service<BulkVersionUpdateService>().update(
+            reviewVersionAlignment(ideProject,
                 BulkVersionUpdateRequest(
                     selectedProjects = selectedProjects,
                     workspaceProjects = workspaceProjects,
@@ -314,6 +314,10 @@ class GitRebaseDialog(
         } catch (error: Exception) {
             statusLabel.text = "Version alignment stopped. Recovery copies were retained."
             recoveryDetails.text = "${error.message}\n\nPre-alignment POM copies: $recovery"
+            return
+        }
+        if (alignment == null) {
+            statusLabel.text = "Git synchronization completed. Version alignment was not applied."
             return
         }
         recoveryDetails.text = "Pre-alignment POM copies: $recovery\n\n" + alignment.issues.joinToString("\n")

@@ -142,6 +142,67 @@ class BulkVersionUpdateServiceTest : BasePlatformTestCase() {
         }
     }
 
+    fun testPreviewDoesNotWriteAndRejectsNewEditorChanges() = withAlignmentFiles { service, request, target, dependent ->
+        val plan = service.prepare(request)
+        assertEquals(2, plan.edits.size)
+        assertTrue(Files.readString(target).contains("<version>1.0-SNAPSHOT</version>"))
+        val local = document(dependent).text + "\n<!-- local edit after preview -->"
+        WriteCommandAction.runWriteCommandAction(project) { document(dependent).setText(local) }
+        expectFailure { service.apply(plan) }
+        assertEquals(local, document(dependent).text)
+        assertEquals(plan.edits.first().before, document(target).text)
+    }
+
+    fun testExternalDiskChangesInvalidatePreviewBeforeAnyWrite() = withAlignmentFiles { service, request, target, dependent ->
+        val plan = service.prepare(request)
+        Files.writeString(dependent, "<project><!-- external edit --></project>")
+        expectFailure { service.apply(plan) }
+        assertEquals(plan.edits.first().before, Files.readString(target))
+        assertTrue(Files.readString(dependent).contains("external edit"))
+    }
+
+    fun testPartialSaveFailureRetainsDiskAndEditorRecoveryCopies() = withAlignmentFiles { service, request, target, dependent ->
+        val plan = service.prepare(request)
+        var saved = 0
+        val failure = expectFailure {
+            service.applyOwned(plan) { document ->
+                if (++saved == 2) error("Test save failure")
+                FileDocumentManager.getInstance().saveDocument(document)
+            }
+        }
+        assertTrue(failure is AlignmentApplyException)
+        assertTrue(failure.message.orEmpty().contains("Files possibly changed"))
+        assertTrue(failure.message.orEmpty().contains("recovery copies"))
+        val backups = Files.list(AlignmentRecoveryStore.root()).use { it.toList() }
+        assertTrue(backups.any { directory ->
+            Files.exists(directory.resolve("0.pom")) &&
+                Files.readString(directory.resolve("0.pom")) == plan.edits.first().before &&
+                Files.exists(directory.resolve("1.editor.txt"))
+        })
+        assertTrue(document(target).text.contains("2.0"))
+        assertTrue(FileDocumentManager.getInstance().isDocumentUnsaved(document(dependent)))
+    }
+
+    private fun expectFailure(action: () -> Unit): Exception {
+        try { action() } catch (error: Exception) { return error }
+        throw AssertionError("Expected alignment to stop")
+    }
+
+    private fun withAlignmentFiles(action: (BulkVersionUpdateService, BulkVersionUpdateRequest, Path, Path) -> Unit) {
+        val target = tempPom("preview-target", pom("library", "1.0-SNAPSHOT"))
+        val dependent = tempPom("preview-dependent", pom("service", "1.0-SNAPSHOT",
+            "<dependency><groupId>org.example</groupId><artifactId>library</artifactId><version>1.0-SNAPSHOT</version></dependency>"))
+        try {
+            val info = projectInfo("library", target)
+            action(project.service<BulkVersionUpdateService>(), BulkVersionUpdateRequest(
+                listOf(info), listOf(info, projectInfo("service", dependent)), "2.0", BulkVersionMode.SET_VERSION, true,
+            ), target, dependent)
+        } finally {
+            Files.deleteIfExists(target)
+            Files.deleteIfExists(dependent)
+        }
+    }
+
     private fun tempPom(name: String, content: String): Path =
         Files.createTempFile("mph-bulk-$name-", ".txt").also { Files.writeString(it, content) }
 

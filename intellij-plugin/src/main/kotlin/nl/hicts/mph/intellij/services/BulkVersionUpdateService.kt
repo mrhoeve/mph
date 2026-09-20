@@ -1,5 +1,7 @@
 package nl.hicts.mph.intellij.services
 
+import java.nio.file.Files
+import java.nio.file.Path
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.fileEditor.FileDocumentManager
@@ -46,52 +48,101 @@ class BulkVersionUpdateService(
     private val project: Project,
 ) {
     fun update(request: BulkVersionUpdateRequest, owner: WorkspaceOperationCoordinator.Lease? = null): BulkVersionUpdateResult =
-        WorkspaceOperationCoordinator.run("Version update", owner) { updateOwned(request) }
+        WorkspaceOperationCoordinator.run("Version update", owner) { applyOwned(prepare(request)) }
 
-    private fun updateOwned(request: BulkVersionUpdateRequest): BulkVersionUpdateResult {
+    fun prepare(request: BulkVersionUpdateRequest): VersionAlignmentPlan {
         require(request.selectedProjects.isNotEmpty()) { "Select at least one Maven project." }
         require(request.mode == BulkVersionMode.KEEP_CURRENT || request.prefix.isNotBlank()) {
-            if (request.mode == BulkVersionMode.SET_VERSION) "Enter a target version." else "Enter a version prefix."
+            "Enter a version or prefix."
         }
-
-        val fileDocumentManager = FileDocumentManager.getInstance()
-        val documents = request.workspaceProjects
-            .distinctBy(MavenProjectInfo::pomPath)
-            .associateWith { projectInfo ->
-                LocalFileSystem.getInstance().refreshAndFindFileByPath(projectInfo.pomPath)
-                    ?.let(fileDocumentManager::getDocument)
-            }
-        val selected = request.selectedProjects.distinctBy(MavenProjectInfo::pomPath)
-        val selectedPaths = selected.map(MavenProjectInfo::pomPath).toSet()
+        val manager = FileDocumentManager.getInstance()
+        val projects = (request.workspaceProjects + request.selectedProjects).distinctBy { it.pomPath }
+        val inputs = projects.map { info ->
+            val path = Path.of(info.pomPath)
+            require(Files.isRegularFile(path, java.nio.file.LinkOption.NOFOLLOW_LINKS)) { "POM is missing or is a symbolic link: $path" }
+            val file = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(path)
+                ?: error("POM is unavailable: $path")
+            val document = manager.getDocument(file) ?: error("POM cannot be read: $path")
+            AlignmentInput(info, document.text, Files.readAllBytes(path))
+        }
+        val documents = projects.associateWith { info ->
+            LocalFileSystem.getInstance().findFileByPath(info.pomPath.replace('\\', '/'))?.let(manager::getDocument)
+        }
+        val selected = request.selectedProjects.distinctBy { it.pomPath }
         val issues = mutableListOf<String>()
-        val targetVersions = targetVersions(request, selected, documents, issues)
+        val targets = targetVersions(request, selected, documents, issues)
+        var references = 0
+        val edits = inputs.mapNotNull { input ->
+            val update = updateDocument(input.project, input.content, targets, request.updateDependents, issues)
+            references += update.updatedReferences
+            if (update.content == input.content) null else {
+                validatePom(update.content)
+                AlignmentEdit(input.project, input.content, update.content)
+            }
+        }
+        val changed = edits.map { it.project.pomPath }.toSet()
+        val updated = selected.count { it.pomPath in changed }
+        return VersionAlignmentPlan(inputs, edits, BulkVersionUpdateResult(updated, references, selected.size - updated, issues.distinct()))
+    }
 
-        var updatedReferences = 0
-        val changedPaths = linkedSetOf<String>()
-        WriteCommandAction.writeCommandAction(project)
-            .withName("Bulk update Maven versions")
-            .withGlobalUndo()
-            .run<RuntimeException> {
-                documents.forEach { (projectInfo, document) ->
-                    if (document == null) return@forEach
-                    val update = updateDocument(projectInfo, document.text, targetVersions, request.updateDependents, issues)
-                    val content = update.content
-                    updatedReferences += update.updatedReferences
+    fun apply(plan: VersionAlignmentPlan, owner: WorkspaceOperationCoordinator.Lease? = null): BulkVersionUpdateResult =
+        WorkspaceOperationCoordinator.run("Version update", owner) { applyOwned(plan) }
 
-                    if (content != document.text) {
-                        document.setText(content)
-                        fileDocumentManager.saveDocument(document)
-                        changedPaths += projectInfo.pomPath
+    internal fun applyOwned(
+        plan: VersionAlignmentPlan,
+        save: (Document) -> Unit = FileDocumentManager.getInstance()::saveDocument,
+    ): BulkVersionUpdateResult {
+        val manager = FileDocumentManager.getInstance()
+        val documents = plan.inputs.associate { input ->
+            val path = Path.of(input.project.pomPath)
+            val file = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(path) ?: error("POM disappeared: $path")
+            val document = manager.getDocument(file) ?: error("POM cannot be read: $path")
+            check(Files.readAllBytes(path).contentEquals(input.diskBytes) && document.text == input.content) {
+                "POM changed after the preview. Review alignment again: $path"
+            }
+            if (plan.edits.any { it.project.pomPath == input.project.pomPath }) {
+                check(file.isWritable && document.isWritable && Files.isWritable(path)) { "POM is read-only: $path" }
+            }
+            input.project.pomPath to document
+        }
+        if (plan.edits.isEmpty()) return plan.result
+        val backup = AlignmentRecoveryStore.capture(plan.inputs)
+        val touched = mutableListOf<String>()
+        WriteCommandAction.writeCommandAction(project).withName("Apply reviewed Maven alignment").withGlobalUndo().run<RuntimeException> {
+            try {
+                // Validate every input again inside the write action before changing any document.
+                plan.inputs.forEach { input ->
+                    check(documents.getValue(input.project.pomPath).text == input.content &&
+                        Files.readAllBytes(Path.of(input.project.pomPath)).contentEquals(input.diskBytes)) {
+                        "POM changed before alignment: ${input.project.pomPath}"
                     }
                 }
+                plan.edits.forEach { edit ->
+                    val document = documents.getValue(edit.project.pomPath)
+                    touched += edit.project.pomPath
+                    document.setText(edit.after)
+                    save(document)
+                    check(!manager.isDocumentUnsaved(document)) { "POM could not be saved: ${edit.project.pomPath}" }
+                }
+            } catch (error: Exception) {
+                throw AlignmentApplyException(
+                    "Alignment stopped. Files possibly changed: ${touched.joinToString().ifEmpty { "none" }}. " +
+                        "Review Git status and use Undo or recovery copies at $backup. ${error.message}", error,
+                )
             }
+        }
+        return plan.result
+    }
 
-        return BulkVersionUpdateResult(
-            updatedProjectCount = selectedPaths.count(changedPaths::contains),
-            updatedReferenceCount = updatedReferences,
-            unchangedProjectCount = selectedPaths.size - selectedPaths.count(changedPaths::contains),
-            issues = issues.distinct(),
-        )
+    private fun validatePom(content: String) {
+        val factory = javax.xml.parsers.DocumentBuilderFactory.newInstance()
+        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+        factory.setFeature("http://xml.org/sax/features/external-general-entities", false)
+        factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false)
+        factory.setAttribute(javax.xml.XMLConstants.ACCESS_EXTERNAL_DTD, "")
+        factory.setAttribute(javax.xml.XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")
+        val xml = factory.newDocumentBuilder().parse(org.xml.sax.InputSource(java.io.StringReader(content)))
+        require(xml.documentElement.tagName == "project") { "The updated file is not a Maven POM." }
     }
 
     private fun targetVersions(

@@ -72,9 +72,9 @@ class MphToolWindowPanel(
     },
     private val reloadMavenProjects: ((() -> Unit, (Throwable) -> Unit) -> Unit)? = null,
     private val queueRefreshTask: (Task.Backgroundable) -> Unit = Task.Backgroundable::queue,
-    private val realignVersions: (List<MavenProjectInfo>, List<MavenProjectInfo>) -> BulkVersionUpdateResult =
+    private val realignVersions: (List<MavenProjectInfo>, List<MavenProjectInfo>) -> BulkVersionUpdateResult? =
         { selected, workspace ->
-            project.service<BulkVersionUpdateService>().update(
+            reviewVersionAlignment(project,
                 BulkVersionUpdateRequest(
                     selectedProjects = selected,
                     workspaceProjects = workspace,
@@ -593,7 +593,7 @@ class MphToolWindowPanel(
             }
         }
 
-        val result = project.service<BulkVersionUpdateService>().update(
+        val result = reviewVersionAlignment(project,
             BulkVersionUpdateRequest(
                 selectedProjects = selected,
                 workspaceProjects = snapshot.groups.flatMap(GitProjectGroup::projects),
@@ -602,6 +602,7 @@ class MphToolWindowPanel(
                 updateDependents = dialog.updateDependents,
             ),
         )
+        if (result == null) return
         val summary = buildString {
             append("Updated ${result.updatedProjectCount} project")
             if (result.updatedProjectCount != 1) append('s')
@@ -641,7 +642,7 @@ class MphToolWindowPanel(
         val projectAndModules = workspace.filter { info ->
             Path.of(info.pomPath).toAbsolutePath().normalize().startsWith(rootDirectory)
         }
-        val result = project.service<BulkVersionUpdateService>().update(
+        val result = reviewVersionAlignment(project,
             BulkVersionUpdateRequest(
                 selectedProjects = projectAndModules.ifEmpty { listOf(selected) },
                 workspaceProjects = workspace,
@@ -650,6 +651,7 @@ class MphToolWindowPanel(
                 updateDependents = true,
             ),
         )
+        if (result == null) return
         notifyVersionResult("Maven versions updated", result)
         refresh()
     }
@@ -692,7 +694,7 @@ class MphToolWindowPanel(
                     return
                 }
                 try {
-                    val result = realignVersions(selected, workspace)
+                    val result = realignVersions(selected, workspace) ?: return
                     notifyVersionResult("Maven references realigned", result)
                     refresh()
                 } catch (error: WorkspaceOperationBusyException) {
