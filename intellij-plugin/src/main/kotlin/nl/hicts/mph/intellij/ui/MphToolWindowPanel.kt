@@ -10,6 +10,7 @@ import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.service
+import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.notification.NotificationGroupManager
@@ -38,6 +39,7 @@ import nl.hicts.mph.intellij.model.MavenProjectInfo
 import nl.hicts.mph.intellij.model.ProjectSnapshot
 import nl.hicts.mph.intellij.services.IdeaProjectDiscoveryService
 import nl.hicts.mph.intellij.services.BulkVersionUpdateRequest
+import nl.hicts.mph.intellij.services.BulkVersionUpdateResult
 import nl.hicts.mph.intellij.services.BulkVersionUpdateService
 import nl.hicts.mph.intellij.services.GitRebaseService
 import nl.hicts.mph.intellij.services.GitWorkspaceService
@@ -69,6 +71,19 @@ class MphToolWindowPanel(
     },
     private val reloadMavenProjects: ((() -> Unit, (Throwable) -> Unit) -> Unit)? = null,
     private val queueRefreshTask: (Task.Backgroundable) -> Unit = Task.Backgroundable::queue,
+    private val realignVersions: (List<MavenProjectInfo>, List<MavenProjectInfo>) -> BulkVersionUpdateResult =
+        { selected, workspace ->
+            project.service<BulkVersionUpdateService>().update(
+                BulkVersionUpdateRequest(
+                    selectedProjects = selected,
+                    workspaceProjects = workspace,
+                    prefix = "",
+                    mode = nl.hicts.mph.intellij.services.BulkVersionMode.KEEP_CURRENT,
+                    updateDependents = true,
+                ),
+            )
+        },
+    private val versionResultNotifier: ((String, BulkVersionUpdateResult) -> Unit)? = null,
     refreshOnCreate: Boolean = true,
 ) : SimpleToolWindowPanel(true, true), Disposable {
     private val summary = JBLabel("Discovering Maven projects…", SwingConstants.LEFT)
@@ -91,6 +106,20 @@ class MphToolWindowPanel(
             }
 
             override fun getActionUpdateThread() = ActionUpdateThread.EDT
+        }
+        val expandAllAction = object : DumbAwareAction(
+            "Expand All",
+            "Expand all services and show their Maven modules",
+            AllIcons.Actions.Expandall,
+        ) {
+            override fun actionPerformed(event: AnActionEvent) = expandAllRows()
+        }
+        val collapseAllAction = object : DumbAwareAction(
+            "Collapse All",
+            "Collapse all services",
+            AllIcons.Actions.Collapseall,
+        ) {
+            override fun actionPerformed(event: AnActionEvent) = collapseAllRows()
         }
         val alignVersionsAction = object : DumbAwareAction(
             "Align Versions",
@@ -118,12 +147,12 @@ class MphToolWindowPanel(
         }
         val realignVersionsAction = object : DumbAwareAction(
             "Realign Versions",
-            "Update linked Maven references to every selected project's current version",
+            "Reload Maven projects, then update linked references to every selected project's current version",
             MphIcons.VersionsRealign,
         ) {
             override fun actionPerformed(event: AnActionEvent) = realignSelectedVersions()
             override fun update(event: AnActionEvent) {
-                event.presentation.isEnabled = selectedProjects().isNotEmpty()
+                event.presentation.isEnabled = !reloadInProgress && selectedProjects().isNotEmpty()
             }
             override fun getActionUpdateThread() = ActionUpdateThread.EDT
         }
@@ -279,6 +308,8 @@ class MphToolWindowPanel(
                 rebaseAction,
                 aboutAction,
                 settingsAction,
+                expandAllAction,
+                collapseAllAction,
                 refreshAction,
             ),
             true,
@@ -372,6 +403,7 @@ class MphToolWindowPanel(
 
     private fun reloadMavenModel(onSuccess: () -> Unit, onFailure: (Throwable) -> Unit) {
         val manager = MavenProjectsManager.getInstance(project)
+        FileDocumentManager.getInstance().saveAllDocuments()
         val listenerDisposable = Disposer.newDisposable("MPH Maven reload listener")
         Disposer.register(this, listenerDisposable)
         manager.addManagerListener(
@@ -408,11 +440,17 @@ class MphToolWindowPanel(
         }
 
     internal fun render(snapshot: ProjectSnapshot) {
+        val hadProjects = rootNode.childCount > 0
+        val expandedRepositories = expandedRepositoryKeys()
         this.snapshot = snapshot
         rootNode.removeAllChildren()
         snapshot.groups.forEach { group -> rootNode.add(groupNode(group)) }
         treeModel.reload()
-        expandAllRows()
+        if (hadProjects) {
+            restoreExpandedRepositories(expandedRepositories)
+        } else {
+            collapseAllRows()
+        }
         summary.text = "${snapshot.projectCount} Maven projects in ${snapshot.repositoryCount} Git repositories"
     }
 
@@ -439,12 +477,42 @@ class MphToolWindowPanel(
         }
     }
 
-    private fun expandAllRows() {
+    internal fun expandAllRows() {
         var row = 0
         while (row < tree.rowCount) {
             tree.expandRow(row++)
         }
     }
+
+    internal fun collapseAllRows() {
+        var row = tree.rowCount - 1
+        while (row >= 0) {
+            tree.collapseRow(row--)
+        }
+        tree.expandPath(javax.swing.tree.TreePath(rootNode.path))
+    }
+
+    private fun expandedRepositoryKeys(): Set<String> = (0 until tree.rowCount)
+        .filter(tree::isExpanded)
+        .mapNotNull { row ->
+            val node = tree.getPathForRow(row)?.lastPathComponent as? DefaultMutableTreeNode
+            (node?.userObject as? RepositoryTreeEntry)?.let(::repositoryExpansionKey)
+        }
+        .toSet()
+
+    private fun restoreExpandedRepositories(expandedRepositories: Set<String>) {
+        tree.expandPath(javax.swing.tree.TreePath(rootNode.path))
+        for (index in 0 until rootNode.childCount) {
+            val node = rootNode.getChildAt(index) as? DefaultMutableTreeNode ?: continue
+            val repository = node.userObject as? RepositoryTreeEntry ?: continue
+            if (repositoryExpansionKey(repository) in expandedRepositories) {
+                tree.expandPath(javax.swing.tree.TreePath(node.path))
+            }
+        }
+    }
+
+    private fun repositoryExpansionKey(repository: RepositoryTreeEntry): String =
+        repository.rootPath ?: "<outside-git-repository>"
 
     internal fun openSelectedPom() {
         val node = tree.lastSelectedPathComponent as? DefaultMutableTreeNode ?: return
@@ -567,23 +635,58 @@ class MphToolWindowPanel(
         refresh()
     }
 
-    private fun realignSelectedVersions() {
-        val selected = selectedProjects()
-        if (selected.isEmpty()) return
-        val result = project.service<BulkVersionUpdateService>().update(
-            BulkVersionUpdateRequest(
-                selectedProjects = selected,
-                workspaceProjects = workspaceProjects(),
-                prefix = "",
-                mode = nl.hicts.mph.intellij.services.BulkVersionMode.KEEP_CURRENT,
-                updateDependents = true,
-            ),
+    internal fun realignSelectedVersions() {
+        val selectedPomPaths = selectedProjects().map(MavenProjectInfo::pomPath).toSet()
+        if (selectedPomPaths.isEmpty() || reloadInProgress) return
+        reloadInProgress = true
+        summary.text = "Reloading root Maven projects before realigning versions…"
+        (reloadMavenProjects ?: ::reloadMavenModel)(
+            {
+                ApplicationManager.getApplication().invokeLater {
+                    reloadInProgress = false
+                    queueRefreshTask(createRealignmentTask(selectedPomPaths))
+                }
+            },
+            { error ->
+                ApplicationManager.getApplication().invokeLater {
+                    reloadInProgress = false
+                    summary.text = "Unable to reload Maven projects: ${error.message ?: error.javaClass.simpleName}"
+                }
+            },
         )
-        notifyVersionResult("Maven references realigned", result)
-        refresh()
     }
 
+    internal fun createRealignmentTask(selectedPomPaths: Set<String>): Task.Backgroundable =
+        object : Task.Backgroundable(project, "Reloading Maven versions", false) {
+            private lateinit var refreshedSnapshot: ProjectSnapshot
+
+            override fun run(indicator: ProgressIndicator) {
+                refreshedSnapshot = discoverProjects()
+            }
+
+            override fun onSuccess() {
+                render(refreshedSnapshot)
+                val workspace = workspaceProjects()
+                val selected = workspace.filter { it.pomPath in selectedPomPaths }
+                if (selected.isEmpty()) {
+                    summary.text = "The selected Maven projects were not found after reloading."
+                    return
+                }
+                val result = realignVersions(selected, workspace)
+                notifyVersionResult("Maven references realigned", result)
+                refresh()
+            }
+
+            override fun onThrowable(error: Throwable) {
+                summary.text = "Unable to rediscover Maven projects: ${error.message ?: error.javaClass.simpleName}"
+            }
+        }
+
     private fun notifyVersionResult(title: String, result: nl.hicts.mph.intellij.services.BulkVersionUpdateResult) {
+        versionResultNotifier?.let { notifier ->
+            notifier(title, result)
+            return
+        }
         val details = "Updated ${result.updatedProjectCount} project versions and " +
             "${result.updatedReferenceCount} dependent references." +
             result.issues.takeIf { it.isNotEmpty() }?.joinToString("<br>", "<br><br>").orEmpty()

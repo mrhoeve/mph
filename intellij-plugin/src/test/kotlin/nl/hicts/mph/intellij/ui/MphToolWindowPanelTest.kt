@@ -6,6 +6,7 @@ import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import nl.hicts.mph.intellij.model.GitProjectGroup
 import nl.hicts.mph.intellij.model.MavenProjectInfo
 import nl.hicts.mph.intellij.model.ProjectSnapshot
+import nl.hicts.mph.intellij.services.BulkVersionUpdateResult
 import java.awt.event.MouseEvent
 import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.TreePath
@@ -32,6 +33,28 @@ class MphToolWindowPanelTest : BasePlatformTestCase() {
         val module = repository.getChildAt(0) as DefaultMutableTreeNode
         assertEquals("sample-service", repository.toString())
         assertEquals("sample-service", module.toString())
+    }
+
+    fun testStartsCollapsedAndPreservesExpansionStateAcrossRefreshes() {
+        val projectInfo = projectInfo("sample-service", "/workspace/sample-service/pom.xml")
+        val panel = MphToolWindowPanel(project, refreshOnCreate = false)
+        panel.render(snapshot(projectInfo))
+        val root = panel.projectTree.model.root as DefaultMutableTreeNode
+        val repository = root.getChildAt(0) as DefaultMutableTreeNode
+        val repositoryPath = TreePath(repository.path)
+        assertFalse(panel.projectTree.isExpanded(repositoryPath))
+
+        panel.expandAllRows()
+        assertTrue(panel.projectTree.isExpanded(repositoryPath))
+        panel.render(snapshot(projectInfo))
+
+        val refreshedRoot = panel.projectTree.model.root as DefaultMutableTreeNode
+        val refreshedRepository = refreshedRoot.getChildAt(0) as DefaultMutableTreeNode
+        val refreshedRepositoryPath = TreePath(refreshedRepository.path)
+        assertTrue(panel.projectTree.isExpanded(refreshedRepositoryPath))
+
+        panel.collapseAllRows()
+        assertFalse(panel.projectTree.isExpanded(refreshedRepositoryPath))
     }
 
     fun testRefreshTaskRendersDiscoveryResultAndReportsErrors() {
@@ -89,6 +112,50 @@ class MphToolWindowPanelTest : BasePlatformTestCase() {
         PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
 
         assertEquals("Unable to reload Maven projects: Test reload failure", panel.summaryText)
+    }
+
+    fun testReloadsAndRediscoversMavenProjectsBeforeRealigningVersions() {
+        val pomPath = "/workspace/sample-service/pom.xml"
+        val original = projectInfo("sample-service", pomPath).copy(version = "1.0-SNAPSHOT")
+        val refreshed = original.copy(version = "2.0-SNAPSHOT")
+        var reloadRequested = false
+        var rediscovered = false
+        var alignedProjects = emptyList<MavenProjectInfo>()
+        var alignedWorkspace = emptyList<MavenProjectInfo>()
+        val panel = MphToolWindowPanel(
+            project = project,
+            discoverProjects = {
+                assertTrue(reloadRequested)
+                rediscovered = true
+                snapshot(refreshed)
+            },
+            reloadMavenProjects = { onSuccess, _ ->
+                reloadRequested = true
+                assertFalse(rediscovered)
+                onSuccess()
+            },
+            queueRefreshTask = { task ->
+                task.run(EmptyProgressIndicator())
+                task.onSuccess()
+            },
+            realignVersions = { selected, workspace ->
+                assertTrue(rediscovered)
+                alignedProjects = selected
+                alignedWorkspace = workspace
+                BulkVersionUpdateResult(0, 0, selected.size, emptyList())
+            },
+            versionResultNotifier = { _, _ -> },
+            refreshOnCreate = false,
+        )
+        selectOnlyProject(panel, original)
+
+        panel.realignSelectedVersions()
+        assertTrue(reloadRequested)
+        assertTrue(alignedProjects.isEmpty())
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        assertEquals(listOf(refreshed), alignedProjects)
+        assertEquals(listOf(refreshed), alignedWorkspace)
     }
 
     fun testOpensTheSelectedPom() {
