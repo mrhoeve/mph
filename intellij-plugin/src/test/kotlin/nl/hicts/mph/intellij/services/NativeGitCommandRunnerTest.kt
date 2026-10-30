@@ -58,21 +58,4 @@ class NativeGitCommandRunnerTest {
 }
 
 private fun javaExecutable() = Path.of(System.getProperty("java.home"), "bin", if (System.getProperty("os.name").startsWith("Windows")) "java.exe" else "java").toString()
-private fun fakeClasspath() = listOf(FakeGitProcess::class.java, Unit::class.java)
-    .joinToString(java.io.File.pathSeparator) { Path.of(it.protectionDomain.codeSource.location.toURI()).toString() }
-
-internal object FakeGitProcess {
-    @JvmStatic fun main(args: Array<String>) {
-        when (args.first()) {
-            "stdin" -> { while (System.`in`.read() != -1) { /* drain */ }; print("stdin closed") }
-            "output" -> repeat(256) { System.out.print("o".repeat(8192)); System.err.print("e".repeat(8192)) }
-            "wait" -> { Thread.sleep(800); print("finished") }
-            "child" -> Thread.sleep(8000)
-            "descendant" -> {
-                val child = ProcessBuilder(javaExecutable(), "-cp", fakeClasspath(), FakeGitProcess::class.java.name, "child").inheritIO().start()
-                print(child.pid())
-            }
-            "environment" -> print(listOf("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE", "GIT_TERMINAL_PROMPT").joinToString(":") { System.getenv(it) ?: "null" })
-        }
-    }
-}
+private fun fakeClasspath() = System.getProperty("mph.test.classpath", System.getProperty("java.class.path"))

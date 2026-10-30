@@ -4,9 +4,9 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     java
-    kotlin("jvm") version "2.4.10"
-    id("org.jetbrains.kotlinx.kover") version "0.9.9"
-    id("org.jetbrains.intellij.platform") version "2.18.1"
+    kotlin("jvm") version "2.4.21"
+    id("org.jetbrains.kotlinx.kover") version "0.9.11"
+    id("org.jetbrains.intellij.platform") version "2.19.0"
 }
 
 group = "nl.hicts.mph"
@@ -26,7 +26,7 @@ repositories {
 
 dependencies {
     intellijPlatform {
-        intellijIdea("2026.1.4")
+        intellijIdea("2026.1.5")
         bundledPlugins("com.intellij.java", "org.jetbrains.idea.maven", "Git4Idea")
         testFramework(TestFrameworkType.Platform)
     }
@@ -66,7 +66,7 @@ intellijPlatform {
     pluginVerification {
         ides {
             current()
-            create(IntelliJPlatformType.IntellijIdea, "2026.2.2")
+            create(IntelliJPlatformType.IntellijIdea, "2026.2.3")
         }
     }
 }
@@ -101,6 +101,7 @@ tasks {
 
     test {
         useJUnit()
+        systemProperty("mph.test.classpath", sourceSets.test.get().output.classesDirs.asPath)
         environment.keys.filter { it.startsWith("GIT_", ignoreCase = true) }.forEach { environment.remove(it) }
         environment("GIT_CONFIG_NOSYSTEM", "1")
         environment("GIT_CONFIG_GLOBAL", if (System.getProperty("os.name").startsWith("Windows")) "NUL" else "/dev/null")
