@@ -44,6 +44,8 @@ jobs:
   build:
     name: Run release verification
     needs: validate-develop
+    permissions:
+      contents: write
     uses: ./.github/workflows/build-and-publish.yml
     with:
       release_version: ${{ inputs.release_version }}
