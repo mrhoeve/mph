@@ -36,3 +36,8 @@ build/
 ### Local SonarQube credentials ###
 .sonar-token
 .scannerwork/
+
+### Plugin signing credentials ###
+private.pem
+private_encrypted.pem
+chain.crt

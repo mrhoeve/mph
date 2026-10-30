@@ -60,7 +60,7 @@ intellijPlatform {
         """.trimIndent()
 
         vendor {
-            name = "MPH"
+            name = "Marc Hoeve"
         }
     }
 
@@ -136,5 +136,9 @@ tasks {
 
     named("sonar") {
         dependsOn("koverXmlReport")
+    }
+
+    named("verifyPluginSignature") {
+        dependsOn("signPlugin")
     }
 }

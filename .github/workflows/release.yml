@@ -11,6 +11,14 @@ on:
         description: Next version ending in -SNAPSHOT (leave empty to increment the final number)
         required: false
         type: string
+      marketplace_mode:
+        description: Bootstrap the first Marketplace release manually, or publish an existing plugin automatically
+        required: true
+        type: choice
+        default: bootstrap
+        options:
+        - bootstrap
+        - publish
 
 permissions:
   contents: read
@@ -43,9 +51,87 @@ jobs:
     secrets:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
+  sign:
+    name: Sign verified plugin
+    needs: build
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.sha }}
+
+    - name: Set up JDK 21
+      uses: actions/setup-java@v6
+      with:
+        java-version: '21'
+        distribution: 'temurin'
+        cache: gradle
+        cache-dependency-path: |
+          intellij-plugin/*.gradle.kts
+          intellij-plugin/gradle.properties
+          intellij-plugin/gradle/wrapper/gradle-wrapper.properties
+
+    - name: Download verified plugin
+      uses: actions/download-artifact@v8
+      with:
+        name: mph-intellij-plugin
+        path: intellij-plugin/build/distributions
+
+    - name: Verify signing configuration
+      env:
+        CERTIFICATE_CHAIN: ${{ secrets.JETBRAINS_CERTIFICATE_CHAIN }}
+        PRIVATE_KEY: ${{ secrets.JETBRAINS_PRIVATE_KEY }}
+        PRIVATE_KEY_PASSWORD: ${{ secrets.JETBRAINS_PRIVATE_KEY_PASSWORD }}
+      run: |
+        [[ -n "$CERTIFICATE_CHAIN" ]] || { echo "::error::JETBRAINS_CERTIFICATE_CHAIN is not configured"; exit 1; }
+        [[ -n "$PRIVATE_KEY" ]] || { echo "::error::JETBRAINS_PRIVATE_KEY is not configured"; exit 1; }
+        [[ -n "$PRIVATE_KEY_PASSWORD" ]] || { echo "::error::JETBRAINS_PRIVATE_KEY_PASSWORD is not configured"; exit 1; }
+
+    - name: Sign and verify plugin
+      working-directory: intellij-plugin
+      env:
+        CERTIFICATE_CHAIN: ${{ secrets.JETBRAINS_CERTIFICATE_CHAIN }}
+        PRIVATE_KEY: ${{ secrets.JETBRAINS_PRIVATE_KEY }}
+        PRIVATE_KEY_PASSWORD: ${{ secrets.JETBRAINS_PRIVATE_KEY_PASSWORD }}
+        RELEASE_VERSION: ${{ needs.build.outputs.version }}
+      run: |
+        set -euo pipefail
+        chmod +x gradlew
+        ./gradlew \
+          -PmphVersion="$RELEASE_VERSION" \
+          signPlugin verifyPluginSignature \
+          -x buildPlugin \
+          --console=plain
+
+    - name: Prepare signed release artifact
+      env:
+        RELEASE_VERSION: ${{ needs.build.outputs.version }}
+      run: |
+        set -euo pipefail
+        mapfile -t SIGNED_FILES < <(find intellij-plugin/build/distributions -type f -name '*-signed.zip')
+        if [[ ${#SIGNED_FILES[@]} -ne 1 ]]; then
+          echo "::error::Expected exactly one signed IntelliJ plugin ZIP, found ${#SIGNED_FILES[@]}."
+          exit 1
+        fi
+        mkdir -p signed-assets
+        cp "${SIGNED_FILES[0]}" "signed-assets/mph-intellij-plugin-$RELEASE_VERSION.zip"
+
+    - name: Upload signed plugin
+      uses: actions/upload-artifact@v7
+      with:
+        name: mph-intellij-plugin-signed
+        path: signed-assets/mph-intellij-plugin-${{ needs.build.outputs.version }}.zip
+        if-no-files-found: error
+        retention-days: 7
+
   release:
     name: Publish release
-    needs: build
+    needs:
+    - build
+    - sign
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -68,7 +154,7 @@ jobs:
     - name: Download verified plugin
       uses: actions/download-artifact@v8
       with:
-        name: mph-intellij-plugin
+        name: mph-intellij-plugin-signed
         path: release-assets
 
     - name: Verify release artifact
@@ -170,3 +256,44 @@ jobs:
         prerelease: false
         make_latest: "true"
         generate_release_notes: true
+
+  marketplace:
+    name: Publish to JetBrains Marketplace
+    if: ${{ inputs.marketplace_mode == 'publish' }}
+    needs:
+    - build
+    - release
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+    steps:
+    - name: Download signed plugin
+      uses: actions/download-artifact@v8
+      with:
+        name: mph-intellij-plugin-signed
+        path: marketplace-assets
+
+    - name: Verify Marketplace configuration
+      env:
+        PUBLISH_TOKEN: ${{ secrets.JETBRAINS_MARKETPLACE_TOKEN }}
+      run: |
+        [[ -n "$PUBLISH_TOKEN" ]] || { echo "::error::JETBRAINS_MARKETPLACE_TOKEN is not configured"; exit 1; }
+
+    - name: Upload stable Marketplace update
+      env:
+        PUBLISH_TOKEN: ${{ secrets.JETBRAINS_MARKETPLACE_TOKEN }}
+        RELEASE_VERSION: ${{ needs.build.outputs.version }}
+      run: |
+        set -euo pipefail
+        PLUGIN_FILE="marketplace-assets/mph-intellij-plugin-$RELEASE_VERSION.zip"
+        [[ -f "$PLUGIN_FILE" ]] || { echo "::error::Signed plugin artifact is missing."; exit 1; }
+        curl \
+          --fail-with-body \
+          --silent \
+          --show-error \
+          --retry 3 \
+          --header "Authorization: Bearer $PUBLISH_TOKEN" \
+          --form "xmlId=nl.hicts.mph.plugin" \
+          --form "file=@$PLUGIN_FILE" \
+          https://plugins.jetbrains.com/api/updates/upload
