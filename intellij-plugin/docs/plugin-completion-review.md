@@ -1,6 +1,6 @@
 # Plugin completion review
 
-The plugin owns its implementation and fixtures. The deprecated standalone application is not a dependency and can be removed independently.
+The plugin owns its complete implementation and fixtures and is the only distributed MPH application.
 
 ## Alignment review
 
@@ -8,14 +8,14 @@ Bulk alignment, explicit version updates, realignment, and post-rebase alignment
 
 Recovery copies preserve both exact disk bytes and original editor text in the IDE configuration directory under `mph-recovery`. A multi-file save is not filesystem-atomic: a failure names all possibly changed files and retains copies for inspection or Undo rather than silently claiming success or overwriting a concurrent edit during rollback.
 
-Validation: all 141 plugin tests pass on Windows, including stale editor/disk previews, a failure on the second save, real Git recovery failures, external-change detection, and dialog lifecycle checks. The plugin package builds successfully. Offline Plugin Verifier checks report compatibility with IntelliJ IDEA 2026.1.4 and 2026.2.2. Both report four experimental-API usages in the existing `MavenSyncSpec` refresh adapter; recheck that isolated adapter when upgrading IDE support. The online verifier stalled on Marketplace requests, so the completed check used the cached IDEs and dependencies.
+Validation: all 178 plugin tests pass on Windows, including stale editor/disk previews, a failure on the second save, real Git recovery failures, external-change detection, and dialog lifecycle checks. The plugin package builds successfully. Plugin Verifier reports compatibility with IntelliJ IDEA 2026.1.5 and 2026.2.3. Both report four experimental-API usages in the isolated `MavenSyncSpec` refresh adapter; recheck that adapter when upgrading IDE support.
 
 ## Completed implementation
 
 - **External changes:** branch, HEAD, staged/unstaged diffs, tracked/untracked POM bytes, active Git operations, and the refreshed Maven model are checked before post-rebase alignment and again after review. This detects concurrent edits; it cannot make multiple filesystem writes atomic against an unrelated process.
 - **Git separation:** the service delegates to a workflow with an injectable command runner and recovery writer. stdout and stderr remain separate. Ref-update and recovery-write failures have deterministic regression tests.
 - **Recovery browser:** the toolbar lists recovery instructions and original POM locations. Cleanup requires explicit review, rejects changed or unrecognized files and linked paths, and deletes only that run's copy/instruction files. Git refs and stashes remain available.
-- **Plugin-owned contracts:** fixtures and expected outcomes live in the plugin. No test imports standalone classes/resources. The plugin owns `pluginVersion` and builds without the root application POM; the existing combined release workflow updates the plugin-owned version.
+- **Plugin-owned contracts:** fixtures and expected outcomes live in the plugin. The plugin owns `pluginVersion`; CI, SonarQube, snapshots, and releases all use the same Gradle build and plugin-owned version.
 - **Toolbar and context actions:** commands are grouped by inspection, versions, Git/build, settings, and view controls. Context actions preserve multiple selection and support Shift+F10 and the context-menu key.
 - **Native conflict resolution:** a stopped conflict row offers **Resolve Conflicts…**, opening IntelliJ's native merge UI with rebase-aware sides. Finishing a merge does not implicitly continue a rebase, reapply a partially restored stash, or align versions. Instructions explain the appropriate next steps. Committed version-only conflicts still resolve automatically.
 

@@ -1,8 +1,4 @@
 HELP.md
-target/
-.mvn/wrapper/maven-wrapper.jar
-!**/src/main/**/target/
-!**/src/test/**/target/
 
 ### STS ###
 .apt_generated
@@ -37,10 +33,6 @@ build/
 ### VS Code ###
 .vscode/
 
-### Playwright ###
-frontend/mph/e2e/.runtime/
-frontend/mph/playwright-report/
-frontend/mph/test-results/
-
 ### Local SonarQube credentials ###
 .sonar-token
+.scannerwork/
