@@ -98,4 +98,17 @@ class GitRebaseDialogTest : BasePlatformTestCase() {
         assertThrows(IllegalStateException::class.java) { WorkspaceOperationCoordinator.acquire("Build") }
     }
 
+    fun testAlignmentFailureCanBeReportedWithoutBeingMistakenForCancellation() {
+        val failure = AlignmentApplyException("Test partial save; recovery copies retained", IllegalStateException("Test save failure"))
+        val reported = assertThrows(AlignmentApplyException::class.java) {
+            reviewVersionAlignment(project,
+                BulkVersionUpdateRequest(listOf(old), listOf(old), "PREFIX-", BulkVersionMode.ADD_PREFIX, true),
+                validateState = { throw failure },
+                reportFailure = { throw it },
+            )
+        }
+        assertSame(failure, reported)
+        WorkspaceOperationCoordinator.run("Build") { }
+    }
+
 }

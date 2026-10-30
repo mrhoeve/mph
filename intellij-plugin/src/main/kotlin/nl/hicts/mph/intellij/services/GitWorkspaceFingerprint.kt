@@ -7,7 +7,7 @@ import java.security.MessageDigest
 private const val REV_PARSE = "rev-parse"
 
 /** A conservative check between Git completion, Maven import, and applying reviewed edits. */
-internal data class GitWorkspaceFingerprint(val root: Path, val digest: String) {
+data class GitWorkspaceFingerprint(val root: Path, val digest: String) {
     fun verify() {
         check(capture(root) == this) {
             "The repository changed outside this synchronization: $root. Alignment was skipped; refresh and review it again."

@@ -119,6 +119,11 @@ class BulkVersionUpdateService(
                 }
                 plan.edits.forEach { edit ->
                     val document = documents.getValue(edit.project.pomPath)
+                    val input = plan.inputs.single { it.project.pomPath == edit.project.pomPath }
+                    check(document.text == input.content &&
+                        Files.readAllBytes(Path.of(edit.project.pomPath)).contentEquals(input.diskBytes)) {
+                        "POM changed during alignment: ${edit.project.pomPath}"
+                    }
                     touched += edit.project.pomPath
                     document.setText(edit.after)
                     save(document)

@@ -6,6 +6,22 @@ import java.nio.file.Files
 import java.util.UUID
 
 class RecoveryCatalogTest {
+    @Test fun `atomic instruction updates and orphaned temporary writes remain discoverable`() {
+        val root = Files.createTempDirectory("mph-recovery-record-")
+        try {
+            val run = Files.createDirectory(root.resolve(UUID.randomUUID().toString()))
+            val record = run.resolve("recovery.txt")
+            writeGitRecoveryRecord(record, "Original commits and stash marker")
+            val orphan = Files.createTempFile(root, "recovery-", ".tmp")
+            Files.writeString(orphan, "Interrupted replacement")
+            assertTrue(RecoveryCatalog(listOf(root)).list().single().details.contains("Original commits"))
+            writeGitRecoveryRecord(record, "Original commits and exact stash object")
+            val reviewed = RecoveryCatalog(listOf(root)).list().single()
+            assertTrue(reviewed.details.contains("exact stash object"))
+            assertEquals(setOf("recovery.txt"), reviewed.files.keys)
+        } finally { root.toFile().deleteRecursively() }
+    }
+
     @Test fun `cleanup only deletes the reviewed unchanged run`() {
         val root = Files.createTempDirectory("mph-recovery-catalog-")
         try {

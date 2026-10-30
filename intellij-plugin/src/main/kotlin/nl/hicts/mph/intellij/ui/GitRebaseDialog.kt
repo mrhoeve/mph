@@ -206,7 +206,7 @@ class GitRebaseDialog(
             }
             cancelled = indicator.isCanceled || results.any { it.status == GitRebaseStatus.CANCELLED }
             allSucceeded = !cancelled && results.isNotEmpty() && results.all { it.status == GitRebaseStatus.SUCCESS }
-            if (allSucceeded) expectedRepositories = plan.repositories.map { GitWorkspaceFingerprint.capture(Path.of(it.rootPath)) }
+            if (allSucceeded) expectedRepositories = results.map { requireNotNull(it.workspaceFingerprint) }
         }
 
         override fun onSuccess() {
@@ -344,9 +344,10 @@ class GitRebaseDialog(
                         "The Maven model changed after synchronization. Refresh and review alignment again."
                     }
                 },
+                reportFailure = { throw it },
             )
         } catch (error: Exception) {
-            statusLabel.text = "Version alignment stopped. Recovery copies were retained."
+            statusLabel.text = "Version alignment stopped. Inspect possible partial changes; recovery copies were retained."
             recoveryDetails.text = "${error.message}\n\nPre-alignment POM copies: $recovery"
             return
         }

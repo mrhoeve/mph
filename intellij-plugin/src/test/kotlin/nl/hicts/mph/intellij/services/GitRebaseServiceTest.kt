@@ -103,10 +103,9 @@ class GitRebaseServiceTest {
     @Test
     fun `rebases a local-only feature branch and restores uncommitted work without disturbing existing stashes`() {
         val testRoot = Files.createTempDirectory("mph-rebase-integration-")
-        val origin = testRoot.resolve("origin.git")
+        val origin = testRoot.resolve("origin.bundle")
         val repository = Files.createDirectory(testRoot.resolve("workspace"))
         try {
-            git(testRoot, "init", "--bare", origin.toString())
             git(repository, "init", "--initial-branch=develop")
             git(repository, "config", "user.name", "Test User")
             git(repository, "config", "user.email", "test.user@example.org")
@@ -115,7 +114,7 @@ class GitRebaseServiceTest {
             git(repository, "add", "pom.xml")
             git(repository, "commit", "-m", "Initial project")
             git(repository, "remote", "add", "origin", origin.toString())
-            git(repository, "push", "--set-upstream", "origin", "develop")
+            publishDevelop(repository)
 
             git(repository, "switch", "--create", "feature/upgrade")
             Files.writeString(repository.resolve("feature.txt"), "feature work\n")
@@ -127,7 +126,7 @@ class GitRebaseServiceTest {
             Files.writeString(pom, pom("service", "2.0-SNAPSHOT"))
             git(repository, "add", "pom.xml")
             git(repository, "commit", "-m", "Upgrade development version")
-            git(repository, "push", "origin", "develop")
+            publishDevelop(repository)
             git(repository, "switch", "feature/upgrade")
 
             Files.writeString(pom, pom("service", "PREFIX-1234-1.0-SNAPSHOT"))
@@ -169,7 +168,7 @@ class GitRebaseServiceTest {
             assertTrue(results.single().stashPreserved)
             assertEquals("staged feature work\n", git(repository, "show", ":feature.txt"))
             assertEquals("unstaged feature work\n", Files.readString(repository.resolve("feature.txt")))
-            assertEquals(originalHead, git(repository, "for-each-ref", "--format=%(objectname)", "refs/mph/recovery").trim())
+            assertEquals(originalHead, git(repository, "for-each-ref", "--format=%(objectname)", "refs/mph/recovery/*/head").trim())
             assertTrue(results.single().recoveryHint.orEmpty().contains("recovery.txt"))
             git(repository, "merge-base", "--is-ancestor", "origin/develop", "HEAD")
         } finally {
@@ -180,10 +179,9 @@ class GitRebaseServiceTest {
     @Test
     fun `preserves all uncommitted work when a rebase requires manual conflict resolution`() {
         val testRoot = Files.createTempDirectory("mph-rebase-conflict-")
-        val origin = testRoot.resolve("origin.git")
+        val origin = testRoot.resolve("origin.bundle")
         val repository = Files.createDirectory(testRoot.resolve("workspace"))
         try {
-            git(testRoot, "init", "--bare", origin.toString())
             git(repository, "init", "--initial-branch=develop")
             git(repository, "config", "user.name", "Test User")
             git(repository, "config", "user.email", "test.user@example.org")
@@ -193,7 +191,7 @@ class GitRebaseServiceTest {
             git(repository, "add", "pom.xml", "application.txt")
             git(repository, "commit", "-m", "Initial project")
             git(repository, "remote", "add", "origin", origin.toString())
-            git(repository, "push", "--set-upstream", "origin", "develop")
+            publishDevelop(repository)
 
             git(repository, "switch", "--create", "feature/upgrade")
             Files.writeString(source, "value=feature\n")
@@ -203,7 +201,7 @@ class GitRebaseServiceTest {
             Files.writeString(source, "value=develop\n")
             git(repository, "add", "application.txt")
             git(repository, "commit", "-m", "Change development value")
-            git(repository, "push", "origin", "develop")
+            publishDevelop(repository)
             git(repository, "switch", "feature/upgrade")
 
             Files.writeString(pom, pom("service", "PREFIX-1234-1.0-SNAPSHOT"))
@@ -253,7 +251,7 @@ class GitRebaseServiceTest {
         Files.writeString(root.resolve("private.txt"), "remote content")
         git(root, "add", "private.txt")
         git(root, "commit", "-m", "Track incoming file")
-        git(root, "push", "origin", "develop")
+        publishDevelop(root)
         git(root, "switch", "feature/test")
         Files.writeString(root.resolve(".git/info/exclude"), "private.txt\n")
         Files.writeString(root.resolve("private.txt"), "irreplaceable ignored work")
@@ -275,7 +273,7 @@ class GitRebaseServiceTest {
                 Files.writeString(incoming, "remote content")
                 git(root, "add", ".")
                 git(root, "commit", "-m", "Add incoming path")
-                git(root, "push", "origin", "develop")
+                publishDevelop(root)
                 git(root, "switch", "feature/test")
                 Files.writeString(root.resolve(".git/info/exclude"), "obstacle\n")
                 val local = if (incomingIsDirectory) obstacle else Files.createDirectory(obstacle).resolve("local.txt")
@@ -397,7 +395,7 @@ class GitRebaseServiceTest {
         Files.writeString(root.resolve("source.txt"), "develop")
         git(root, "add", ".")
         git(root, "commit", "-m", "Develop version and source")
-        git(root, "push", "origin", "develop")
+        publishDevelop(root)
         git(root, "switch", "feature/test")
         val result = synchronize(root)
         assertEquals(GitRebaseStatus.CONFLICT, result.status)
@@ -431,7 +429,7 @@ class GitRebaseServiceTest {
     @Test
     fun `missing remote develop cannot silently reuse a stale remote tracking ref`() = withRepository { root, _ ->
         val original = git(root, "rev-parse", "HEAD")
-        git(root, "push", "origin", "--delete", "develop")
+        git(root, "bundle", "create", git(root, "remote", "get-url", "origin").trim(), "HEAD")
         Files.writeString(root.resolve("notes.txt"), "untouched")
         val result = synchronize(root)
         assertEquals(GitRebaseStatus.FAILED, result.status)
@@ -494,6 +492,235 @@ class GitRebaseServiceTest {
         assertEquals("", git(root, "stash", "list"))
     }
 
+    @Test
+    fun `safety stash survives clearing ordinary stashes and immediate garbage collection`() = withRepository { root, testRoot ->
+        Files.writeString(root.resolve("pom.xml"), pom("service", "STAGED-1.0-SNAPSHOT"))
+        git(root, "add", "pom.xml")
+        Files.writeString(root.resolve("pom.xml"), pom("service", "UNSTAGED-1.0-SNAPSHOT"))
+        Files.writeString(root.resolve("notes.txt"), "untracked work")
+        val result = synchronize(root)
+        assertEquals(result.message, GitRebaseStatus.SUCCESS, result.status)
+        val stashRef = git(root, "for-each-ref", "--format=%(refname)", "refs/mph/recovery/*/stash").trim()
+        val headRef = git(root, "for-each-ref", "--format=%(refname)", "refs/mph/recovery/*/head").trim()
+        assertTrue(result.recoveryHint.orEmpty().contains(stashRef))
+        git(root, "stash", "clear")
+        git(root, "reflog", "expire", "--expire=now", "--all")
+        git(root, "gc", "--prune=now")
+        val recovered = testRoot.resolve("recovered")
+        git(root, "worktree", "add", "--detach", recovered.toString(), headRef)
+        git(recovered, "stash", "apply", "--index", stashRef)
+        assertEquals(pom("service", "STAGED-1.0-SNAPSHOT"), git(recovered, "show", ":pom.xml"))
+        assertEquals(pom("service", "UNSTAGED-1.0-SNAPSHOT"), Files.readString(recovered.resolve("pom.xml")))
+        assertEquals("untracked work", Files.readString(recovered.resolve("notes.txt")))
+    }
+
+    @Test
+    fun `failed recovery record update still reports and pins the exact stash`() = withRepository { root, _ ->
+        Files.writeString(root.resolve("notes.txt"), "local notes")
+        var writes = 0
+        lateinit var recoveryFile: Path
+        val workflow = GitRebaseWorkflow(recoveryWriter = { path, text ->
+            recoveryFile = path
+            if (++writes > 1) error("Test disk full after stash")
+            writeGitRecoveryRecord(path, text)
+        })
+        val result = runWorkflow(root, workflow)
+        val stash = git(root, "rev-parse", "refs/stash").trim()
+        assertEquals(GitRebaseStatus.FAILED, result.status)
+        assertTrue(result.stashPreserved)
+        assertTrue(result.recoveryHint.orEmpty().contains(stash))
+        assertTrue(Files.readString(recoveryFile).contains("Stash marker:"))
+        assertEquals(stash, git(root, "for-each-ref", "--format=%(objectname)", "refs/mph/recovery/*/stash").trim())
+        git(root, "stash", "apply", "--index", stash)
+        assertEquals("local notes", Files.readString(root.resolve("notes.txt")))
+    }
+
+    @Test
+    fun `exception reporting stash completion still identifies its recovery object`() = withRepository { root, _ ->
+        Files.writeString(root.resolve("notes.txt"), "local notes")
+        val native = NativeGitCommandRunner()
+        val workflow = GitRebaseWorkflow(GitCommandRunner { directory, arguments, progress, environment ->
+            val output = native.execute(directory, arguments, progress, environment)
+            if (arguments.take(2) == listOf("stash", "push")) error("Test completion failure")
+            output
+        })
+        val result = runWorkflow(root, workflow)
+        assertEquals(GitRebaseStatus.FAILED, result.status)
+        assertTrue(result.stashPreserved)
+        assertTrue(result.recoveryHint.orEmpty().contains(git(root, "rev-parse", "refs/stash").trim()))
+        assertEquals("local notes", git(root, "show", "refs/stash^3:notes.txt"))
+    }
+
+    @Test
+    fun `branch changes during fetch stop before moving develop or stashing`() = withRepository { root, _ ->
+        advanceDevelop(root)
+        git(root, "update-ref", "refs/heads/develop", "HEAD")
+        val oldDevelop = git(root, "rev-parse", "develop")
+        Files.writeString(root.resolve("notes.txt"), "local notes")
+        val native = NativeGitCommandRunner()
+        val workflow = GitRebaseWorkflow(GitCommandRunner { directory, arguments, progress, environment ->
+            val output = native.execute(directory, arguments, progress, environment)
+            if (arguments.first() == "fetch") git(root, "switch", "develop")
+            output
+        })
+        val result = runWorkflow(root, workflow)
+        assertEquals(GitRebaseStatus.FAILED, result.status)
+        assertTrue(result.message.contains("branch or HEAD changed"))
+        assertEquals(oldDevelop, git(root, "rev-parse", "develop"))
+        assertEquals("local notes", Files.readString(root.resolve("notes.txt")))
+        assertEquals("", git(root, "stash", "list"))
+    }
+
+    @Test
+    fun `new work between stash and rebase is not overwritten`() = withRepository { root, _ ->
+        advanceDevelop(root)
+        Files.writeString(root.resolve("notes.txt"), "stashed notes")
+        val head = git(root, "rev-parse", "HEAD")
+        val result = synchronize(root) { _, _, message ->
+            if (message.startsWith("Rebasing ")) Files.writeString(root.resolve("pom.xml"), "new unsaved work on disk")
+        }
+        assertEquals(GitRebaseStatus.FAILED, result.status)
+        assertTrue(result.stashPreserved)
+        assertEquals(head, git(root, "rev-parse", "HEAD"))
+        assertEquals("new unsaved work on disk", Files.readString(root.resolve("pom.xml")))
+        assertEquals("stashed notes", git(root, "show", "refs/stash^3:notes.txt"))
+    }
+
+    @Test
+    fun `new ignored collisions between preflight and rebase are preserved`() = withRepository { root, _ ->
+        git(root, "switch", "develop")
+        Files.writeString(root.resolve("private.txt"), "incoming file")
+        git(root, "add", "private.txt")
+        git(root, "commit", "-m", "Track file on develop")
+        publishDevelop(root)
+        git(root, "switch", "feature/test")
+        Files.writeString(root.resolve(".git/info/exclude"), "private.txt\n")
+        val result = synchronize(root) { _, _, message ->
+            if (message.startsWith("Rebasing ")) Files.writeString(root.resolve("private.txt"), "new ignored work")
+        }
+        assertEquals(result.message, GitRebaseStatus.SKIPPED, result.status)
+        assertEquals("new ignored work", Files.readString(root.resolve("private.txt")))
+    }
+
+    @Test
+    fun `stash is not applied to a different checkout after rebase`() = withRepository { root, _ ->
+        advanceDevelop(root)
+        Files.writeString(root.resolve("notes.txt"), "feature notes")
+        val result = synchronize(root) { _, _, message ->
+            if (message == "Restoring uncommitted work") git(root, "switch", "develop")
+        }
+        assertEquals(GitRebaseStatus.FAILED, result.status)
+        assertTrue(result.stashPreserved)
+        assertEquals("develop", git(root, "branch", "--show-current").trim())
+        assertFalse(Files.exists(root.resolve("notes.txt")))
+        assertEquals("feature notes", git(root, "show", "refs/stash^3:notes.txt"))
+    }
+
+    @Test
+    fun `each repository baseline is captured before processing the next repository`() = withRepository { first, _ ->
+        withRepository { second, _ ->
+            val plan = GitRebasePlan("PREFIX-", listOf(
+                GitRepositoryPlan(first.toString(), "first"), GitRepositoryPlan(second.toString(), "second"),
+            ), emptyList())
+            val results = GitRebaseWorkflow().rebase(plan, notCancelledIndicator(), GitRebaseListener { repo, _, message ->
+                if (repo.rootPath == second.toString() && message == "Starting Git preflight") {
+                    Files.writeString(first.resolve("pom.xml"), "changed while the second repository runs")
+                }
+            })
+            assertTrue(results.all { it.status == GitRebaseStatus.SUCCESS })
+            assertThrows(IllegalStateException::class.java) { requireNotNull(results.first().workspaceFingerprint).verify() }
+            requireNotNull(results.last().workspaceFingerprint).verify()
+        }
+    }
+
+    @Test
+    fun `fetch configuration cannot update unrelated local branches`() = withRepository { root, _ ->
+        advanceDevelop(root)
+        git(root, "branch", "local-only")
+        val original = git(root, "rev-parse", "HEAD")
+        git(root, "update-ref", "refs/heads/develop", "HEAD")
+        git(root, "config", "remote.origin.fetch", "+refs/heads/*:refs/heads/*")
+        git(root, "config", "fetch.prune", "true")
+        // Stop immediately after fetch: local develop must still be at the old ID.
+        val native = NativeGitCommandRunner()
+        val workflow = GitRebaseWorkflow(GitCommandRunner { directory, arguments, progress, environment ->
+            val output = native.execute(directory, arguments, progress, environment)
+            if (arguments.first() == "fetch") {
+                assertEquals(original, git(root, "rev-parse", "develop"))
+                assertEquals(original, git(root, "rev-parse", "local-only"))
+            }
+            output
+        })
+        val result = runWorkflow(root, workflow)
+        assertEquals(result.message, GitRebaseStatus.SUCCESS, result.status)
+        assertEquals(original, git(root, "rev-parse", "local-only"))
+    }
+
+    @Test
+    fun `merge-only committed work is not silently dropped by recreating the merge`() = withRepository { root, _ ->
+        git(root, "switch", "-c", "side")
+        Files.writeString(root.resolve("side.txt"), "side work")
+        git(root, "add", ".")
+        git(root, "commit", "-m", "Side work")
+        git(root, "switch", "feature/test")
+        Files.writeString(root.resolve("feature.txt"), "feature work")
+        git(root, "add", ".")
+        git(root, "commit", "-m", "Feature work")
+        git(root, "merge", "--no-ff", "--no-commit", "side")
+        Files.writeString(root.resolve("merge-only.txt"), "work added when merging")
+        git(root, "add", ".")
+        git(root, "commit", "-m", "Merge with additional work")
+        val head = git(root, "rev-parse", "HEAD")
+        advanceDevelop(root)
+        Files.writeString(root.resolve("notes.txt"), "uncommitted notes")
+        val result = synchronize(root)
+        assertEquals(result.message, GitRebaseStatus.SKIPPED, result.status)
+        assertTrue(result.message.contains("manual merge changes"))
+        assertEquals(head, git(root, "rev-parse", "HEAD"))
+        assertEquals("work added when merging", Files.readString(root.resolve("merge-only.txt")))
+        assertEquals("uncommitted notes", Files.readString(root.resolve("notes.txt")))
+        assertEquals("", git(root, "stash", "list"))
+    }
+
+    @Test
+    fun `version conflicts in paths containing Git wildcard characters are staged literally`() = withRepository { root, _ ->
+        git(root, "switch", "develop")
+        val module = Files.createDirectory(root.resolve("[module]"))
+        val modulePom = module.resolve("pom.xml")
+        Files.writeString(modulePom, pom("module", "1.0-SNAPSHOT"))
+        git(root, "add", ".")
+        git(root, "commit", "-m", "Add module")
+        git(root, "switch", "feature/test")
+        git(root, "merge", "--ff-only", "develop")
+        Files.writeString(modulePom, pom("module", "PREFIX-1.0-SNAPSHOT"))
+        git(root, "add", ".")
+        git(root, "commit", "-m", "Prefix module")
+        git(root, "switch", "develop")
+        Files.writeString(modulePom, pom("module", "2.0-SNAPSHOT"))
+        git(root, "add", ".")
+        git(root, "commit", "-m", "Advance module")
+        publishDevelop(root)
+        git(root, "switch", "feature/test")
+        val result = synchronize(root)
+        assertEquals(result.message, GitRebaseStatus.SUCCESS, result.status)
+        assertEquals(pom("module", "2.0-SNAPSHOT"), Files.readString(modulePom))
+    }
+
+    @Test
+    fun `a leftover REBASE_HEAD does not prevent synchronization or stash restoration`() = withRepository { root, _ ->
+        git(root, "update-ref", "REBASE_HEAD", "HEAD")
+        Files.writeString(root.resolve("notes.txt"), "local notes")
+        val result = synchronize(root)
+        assertEquals(result.message, GitRebaseStatus.SUCCESS, result.status)
+        assertEquals("local notes", Files.readString(root.resolve("notes.txt")))
+        requireNotNull(result.workspaceFingerprint).verify()
+    }
+
+    private fun runWorkflow(root: Path, workflow: GitRebaseWorkflow): GitRepositoryResult = workflow.rebase(
+        GitRebasePlan("PREFIX-", listOf(GitRepositoryPlan(root.toString(), "service")), emptyList()),
+        notCancelledIndicator(), GitRebaseListener { _, _, _ -> },
+    ).single()
+
     private fun synchronize(
         root: Path,
         service: GitRebaseService = GitRebaseService(),
@@ -509,16 +736,22 @@ class GitRebaseServiceTest {
         Files.writeString(root.resolve("pom.xml"), pom("service", "2.0-SNAPSHOT"))
         git(root, "add", "pom.xml")
         git(root, "commit", "-m", "Advance develop")
-        git(root, "push", "origin", "develop")
+        publishDevelop(root)
         git(root, "switch", "feature/test")
+    }
+
+    // A local bundle exposes real remote refs to fetch without network or a helper shell.
+    private fun publishDevelop(root: Path) {
+        val origin = git(root, "remote", "get-url", "origin").trim()
+        git(root, "bundle", "create", origin, "develop")
+        git(root, "fetch", "origin", "+refs/heads/develop:refs/remotes/origin/develop")
     }
 
     private fun withRepository(action: (Path, Path) -> Unit) {
         val testRoot = Files.createTempDirectory("mph-rebase-safety-")
         val root = Files.createDirectory(testRoot.resolve("workspace"))
         try {
-            val origin = testRoot.resolve("origin.git")
-            git(testRoot, "init", "--bare", origin.toString())
+            val origin = testRoot.resolve("origin.bundle")
             git(root, "init", "--initial-branch=develop")
             git(root, "config", "user.name", "Test User")
             git(root, "config", "user.email", "test.user@example.org")
@@ -527,7 +760,7 @@ class GitRebaseServiceTest {
             git(root, "add", "pom.xml")
             git(root, "commit", "-m", "Initial project")
             git(root, "remote", "add", "origin", origin.toString())
-            git(root, "push", "origin", "develop")
+            publishDevelop(root)
             git(root, "switch", "-c", "feature/test")
             action(root, testRoot)
         } finally {
@@ -553,21 +786,27 @@ class GitRebaseServiceTest {
     """.trimIndent()
 
     private fun git(directory: Path, vararg arguments: String): String {
-        val process = ProcessBuilder(listOf("git") + arguments)
-            .directory(directory.toFile())
-            .redirectErrorStream(true)
-            .start()
-        val output = process.inputStream.bufferedReader().use { it.readText() }
-        val exitCode = process.waitFor()
-        check(exitCode == 0) { "git ${arguments.joinToString(" ")} failed ($exitCode): $output" }
-        return output
+        val outputFile = Files.createTempFile("mph-git-output-", ".txt")
+        return try {
+            val process = ProcessBuilder(listOf("git") + arguments)
+                .directory(directory.toFile())
+                .redirectErrorStream(true)
+                .redirectOutput(outputFile.toFile())
+                .start()
+            val exitCode = process.waitFor()
+            val output = Files.readString(outputFile)
+            check(exitCode == 0) { "git ${arguments.joinToString(" ")} failed ($exitCode): $output" }
+            output
+        } finally {
+            Files.deleteIfExists(outputFile)
+        }
     }
 
     private fun gitExitCode(directory: Path, vararg arguments: String): Int = ProcessBuilder(listOf("git") + arguments)
         .directory(directory.toFile())
         .redirectErrorStream(true)
+        .redirectOutput(ProcessBuilder.Redirect.DISCARD)
         .start()
-        .apply { inputStream.bufferedReader().use { it.readText() } }
         .waitFor()
 
     private fun notCancelledIndicator(): ProgressIndicator {

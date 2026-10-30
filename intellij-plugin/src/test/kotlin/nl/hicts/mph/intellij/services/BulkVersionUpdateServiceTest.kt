@@ -183,6 +183,23 @@ class BulkVersionUpdateServiceTest : BasePlatformTestCase() {
         assertTrue(FileDocumentManager.getInstance().isDocumentUnsaved(document(dependent)))
     }
 
+    fun testEditDuringEarlierSaveDoesNotOverwriteLaterPom() = withAlignmentFiles { service, request, target, dependent ->
+        val plan = service.prepare(request)
+        val laterEdit = "<project><!-- work created during the first save --></project>"
+        var saved = 0
+        val failure = expectFailure {
+            service.applyOwned(plan) { document ->
+                FileDocumentManager.getInstance().saveDocument(document)
+                if (++saved == 1) Files.writeString(dependent, laterEdit)
+            }
+        }
+        assertTrue(failure is AlignmentApplyException)
+        assertTrue(failure.message.orEmpty().contains("POM changed during alignment"))
+        assertEquals(1, saved)
+        assertEquals(laterEdit, Files.readString(dependent))
+        assertTrue(Files.readString(target).contains("<version>2.0</version>"))
+    }
+
     fun testPreviewRejectsDoctypeBeforeChangingPoms() = withAlignmentFiles { service, request, target, dependent ->
         val targetDisk = Files.readString(target)
         val dependentDisk = Files.readString(dependent)

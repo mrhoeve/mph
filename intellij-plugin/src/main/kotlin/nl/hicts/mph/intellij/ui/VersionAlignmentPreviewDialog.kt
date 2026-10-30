@@ -53,6 +53,9 @@ internal fun reviewVersionAlignment(
     request: BulkVersionUpdateRequest,
     owner: WorkspaceOperationCoordinator.Lease? = null,
     validateState: () -> Unit = {},
+    reportFailure: (Exception) -> Unit = { error ->
+        Messages.showErrorDialog(project, error.message.orEmpty(), "Version Alignment Stopped")
+    },
 ): BulkVersionUpdateResult? = WorkspaceOperationCoordinator.run("Version alignment", owner) {
     try {
         validateState()
@@ -65,7 +68,7 @@ internal fun reviewVersionAlignment(
         }
         else null
     } catch (error: Exception) {
-        Messages.showErrorDialog(project, error.message.orEmpty(), "Version Alignment Stopped")
+        reportFailure(error)
         null
     }
 }
