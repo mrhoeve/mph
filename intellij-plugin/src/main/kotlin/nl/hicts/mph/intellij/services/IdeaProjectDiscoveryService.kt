@@ -19,7 +19,7 @@ import java.nio.file.Files
 class IdeaProjectDiscoveryService(
     private val project: Project,
 ) {
-    fun discover(): ProjectSnapshot {
+    fun discover(includeGitStatus: Boolean = true): ProjectSnapshot {
         val mavenProjects = MavenProjectsManager.getInstance(project).projects
         val snapshot = ProjectSnapshotBuilder().build(
             mavenProjects.map { mavenProject ->
@@ -32,6 +32,7 @@ class IdeaProjectDiscoveryService(
             },
             gitRootPaths(),
         )
+        if (!includeGitStatus) return snapshot
         val statuses = snapshot.groups.mapNotNull { group ->
             group.rootPath?.let { it to project.service<GitWorkspaceService>().status(it) }
         }.toMap()

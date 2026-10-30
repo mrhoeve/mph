@@ -28,6 +28,7 @@ import nl.hicts.mph.intellij.services.WorkspaceOperationCoordinator
 import nl.hicts.mph.intellij.services.IdeaConflictResolutionService
 import nl.hicts.mph.intellij.services.GitRepositoryResult
 import nl.hicts.mph.intellij.services.GitWorkspaceFingerprint
+import nl.hicts.mph.intellij.services.AlignmentWorkspaceBaseline
 import com.intellij.openapi.progress.ProgressManager
 import nl.hicts.mph.intellij.services.GitRecoverySnapshots
 import nl.hicts.mph.intellij.services.GitRebaseListener
@@ -74,6 +75,7 @@ class GitRebaseDialog(
     @Volatile private var gitIndicator: ProgressIndicator? = null
     private var refreshing = false
     private var expectedRepositories = emptyList<GitWorkspaceFingerprint>()
+    private var dependentBaseline: AlignmentWorkspaceBaseline? = null
     internal val statusText: String get() = statusLabel.text
 
     init {
@@ -189,10 +191,14 @@ class GitRebaseDialog(
     ) {
         private var allSucceeded = false
         private var cancelled = false
+        private var baselineFailure: String? = null
 
         override fun run(indicator: ProgressIndicator) {
             gitIndicator = indicator
             if (stopRequested) indicator.cancel()
+            expectedRepositories = emptyList()
+            dependentBaseline = runCatching { AlignmentWorkspaceBaseline.capture(plan) }
+                .onFailure { baselineFailure = it.message ?: "Dependent workspace state could not be captured." }.getOrNull()
             val listener = GitRebaseListener { repository, status, message ->
                 ApplicationManager.getApplication().invokeLater {
                     updateRepositoryRow(repository, status, message)
@@ -210,13 +216,15 @@ class GitRebaseDialog(
         }
 
         override fun onSuccess() {
-            if (allSucceeded && !stopRequested && !isDisposed) {
+            if (allSucceeded && baselineFailure != null) {
+                statusLabel.text = "Git synchronization completed. Version alignment was skipped: $baselineFailure"
+            } else if (allSucceeded && !stopRequested && !isDisposed) {
                 refreshAndAlign()
             } else {
                 statusLabel.text = if (cancelled || stopRequested) {
                     "Cancelled. Version alignment was skipped."
                 } else {
-                    "Finished with issues. Resolve them before aligning versions."
+                    "Finished with issues. Version alignment was skipped. Resolve the repository issues before retrying."
                 }
             }
         }
@@ -266,9 +274,11 @@ class GitRebaseDialog(
         try {
             if (reloadMaven != null) reloadMaven.invoke(success, failure)
             else {
-                plan.repositories.forEach { repository ->
-                    LocalFileSystem.getInstance().refreshAndFindFileByPath(repository.rootPath)?.refresh(false, true)
-                }
+                ProgressManager.getInstance().runProcessWithProgressSynchronously({
+                    plan.repositories.forEach { repository ->
+                        LocalFileSystem.getInstance().refreshAndFindFileByPath(repository.rootPath)?.refresh(false, true)
+                    }
+                }, "Refreshing synchronized files", false, ideProject)
                 ideProject.service<MavenModelRefreshService>().reload(success, failure)
             }
         } catch (error: Exception) {
@@ -294,7 +304,7 @@ class GitRebaseDialog(
     private fun alignRefreshedProjects() {
         verifyRepositories()
         val fresh = discover?.invoke() ?: ideProject.service<IdeaProjectDiscoveryService>()
-            .discover().groups.flatMap { it.projects }
+            .discover(includeGitStatus = false).groups.flatMap { it.projects }
         val roots = plan.repositories.map { Path.of(it.rootPath).toAbsolutePath().normalize() }.toSet()
         val selected = fresh.filter { it.gitRootPath?.let { root -> Path.of(root).toAbsolutePath().normalize() } in roots }
         val selectedRoots = selected.map { Path.of(it.gitRootPath!!).toAbsolutePath().normalize() }.toSet()
@@ -312,9 +322,6 @@ class GitRebaseDialog(
         if (FileDocumentManager.getInstance().unsavedDocuments.isNotEmpty()) {
             statusLabel.text = "Editor changes appeared during synchronization. Version alignment was skipped."
             return
-        }
-        plan.repositories.forEach { repository ->
-            LocalFileSystem.getInstance().refreshAndFindFileByPath(repository.rootPath)?.refresh(false, true)
         }
         val recovery = try {
             GitRecoverySnapshots.capture(
@@ -339,7 +346,7 @@ class GitRebaseDialog(
                 operation,
                 validateState = {
                     verifyRepositories()
-                    val current = ideProject.service<IdeaProjectDiscoveryService>().discover().groups.flatMap { it.projects }
+                    val current = ideProject.service<IdeaProjectDiscoveryService>().discover(includeGitStatus = false).groups.flatMap { it.projects }
                     check(current.map { it.copy(gitStatus = null) }.toSet() == workspaceProjects.map { it.copy(gitStatus = null) }.toSet()) {
                         "The Maven model changed after synchronization. Refresh and review alignment again."
                     }
@@ -366,7 +373,7 @@ class GitRebaseDialog(
     private fun verifyRepositories() {
         if (expectedRepositories.isEmpty()) return
         ProgressManager.getInstance().runProcessWithProgressSynchronously(
-            { expectedRepositories.forEach(GitWorkspaceFingerprint::verify) },
+            { dependentBaseline?.verify(); expectedRepositories.forEach(GitWorkspaceFingerprint::verify) },
             "Checking repository changes", false, ideProject,
         )
     }

@@ -34,6 +34,7 @@ data class GitRebasePlan(
     val prefix: String,
     val repositories: List<GitRepositoryPlan>,
     val alignmentProjects: List<MavenProjectInfo>,
+    val workspaceProjects: List<MavenProjectInfo> = alignmentProjects,
 )
 
 data class GitRepositoryResult(
@@ -93,7 +94,7 @@ internal class GitRebaseWorkflow(
                 ?: throw IllegalArgumentException("No Maven project was found in $root.")
             GitRepositoryPlan(root, representative.artifactId)
         }
-        return GitRebasePlan(prefixes.single(), repositories, alignmentProjects)
+        return GitRebasePlan(prefixes.single(), repositories, alignmentProjects, workspaceProjects)
     }
 
     fun rebase(plan: GitRebasePlan, indicator: ProgressIndicator, listener: GitRebaseListener): List<GitRepositoryResult> =
@@ -171,7 +172,7 @@ internal class GitRebaseWorkflow(
     private fun preflight(context: RepositoryCommandContext): PreflightResult {
         context.emit("Starting Git preflight")
         if (!Files.isDirectory(context.root.resolve(".git"))) {
-            return PreflightResult(failure = skipped(context.repository, "No .git directory was found."))
+            return PreflightResult(failure = skipped(context.repository, "This checkout has no local .git directory. Linked worktrees and separate Git directories require manual synchronization."))
         }
         if (context.operationInProgress()) {
             return PreflightResult(failure = skipped(context.repository, "Another Git operation is already in progress."))
@@ -181,11 +182,17 @@ internal class GitRebaseWorkflow(
             return PreflightResult(failure = skipped(context.repository, "The repository has a detached HEAD."))
         }
         val branchName = branch.output.trim()
-        if (branchName in PROTECTED_BRANCHES) {
+        if (PROTECTED_BRANCHES.any { sameRefName(branchName, it) }) {
             return PreflightResult(failure = skipped(context.repository, "The current branch '$branchName' is protected from this operation."))
         }
         context.originalBranch = branchName
         context.expectedHead = context.requireCommand(REV_PARSE, "--verify", "HEAD^{commit}").trim()
+        for (ref in listOf(REMOTE_DEVELOP, LOCAL_DEVELOP)) {
+            val symbolic = context.command("symbolic-ref", QUIET, ref)
+            if (symbolic.exitCode == 0) return PreflightResult(failure = skipped(context.repository,
+                "$ref is symbolic. Updating it could move another branch."))
+            check(symbolic.exitCode == 1) { "Could not inspect $ref safely." }
+        }
         context.emit("Fetching origin/develop")
         val hidden = context.command(LS_FILES, "-v", "-z")
         if (hidden.exitCode != 0 || hidden.output.split('\u0000').any {
@@ -197,7 +204,7 @@ internal class GitRebaseWorkflow(
             context.requireCommand(LS_FILES, "--stage", "-z").split('\u0000').any { it.startsWith("160000 ") }) {
             return PreflightResult(failure = skipped(context.repository, "Repositories with submodules require manual synchronization."))
         }
-        val fetch = context.command("fetch", "--no-tags", "--no-prune", "--no-recurse-submodules", "--refmap=",
+        val fetch = context.command("fetch", "--no-tags", "--no-prune", "--no-prune-tags", "--no-recurse-submodules", "--refmap=",
             "origin", "+refs/heads/develop:$REMOTE_DEVELOP", stream = true)
         if (fetch.exitCode != 0) {
             return PreflightResult(failure = failed(context.repository, "Fetching origin/develop failed.", fetch.diagnostic))
@@ -260,7 +267,7 @@ internal class GitRebaseWorkflow(
 
     private fun updateLocalDevelop(context: RepositoryCommandContext): GitRepositoryResult? {
         val worktrees = context.requireCommand("worktree", "list", PORCELAIN)
-        if (worktrees.lineSequence().any { it == "branch $LOCAL_DEVELOP" }) {
+        if (worktrees.lineSequence().any { sameRefName(it, "branch $LOCAL_DEVELOP") }) {
             return skipped(context.repository, "Local develop is checked out in another worktree.")
         }
         val refs = context.requireCommand("for-each-ref", "--format=%(refname) %(objectname)", LOCAL_DEVELOP)
@@ -272,7 +279,7 @@ internal class GitRebaseWorkflow(
                 return skipped(context.repository, "Local develop has commits that are not on origin/develop.")
             }
         }
-        val updateDevelop = context.command("update-ref", LOCAL_DEVELOP, context.upstream, oldId)
+        val updateDevelop = context.command("update-ref", "--no-deref", LOCAL_DEVELOP, context.upstream, oldId)
         return updateDevelop.takeIf { it.exitCode != 0 }?.let {
             failed(context.repository, "Local develop could not be updated.", it.diagnostic)
         }
@@ -364,7 +371,9 @@ internal class GitRebaseWorkflow(
             if (conflicts.isEmpty()) {
                 return failed(context.repository, "Rebase did not complete.", rebase.diagnostic, stashId != null)
             }
-            if (!resolveVersionOnlyConflicts(context.root, conflicts)) {
+            context.verifyRebase()
+            val beforeResolution = GitWorkspaceFingerprint.capture(context.root, allowRebase = true)
+            if (!resolveVersionOnlyConflicts(context.root, conflicts, beforeResolution::verify)) {
                 return GitRepositoryResult(
                     context.repository,
                     GitRebaseStatus.CONFLICT,
@@ -373,10 +382,14 @@ internal class GitRebaseWorkflow(
                     stashPreserved = stashId != null,
                 )
             }
+            context.verifyRebase()
             val add = runGit(context.root, listOf("--literal-pathspecs", "add", "--") + conflicts)
             if (add.exitCode != 0) return failed(context.repository, "Resolved POM files could not be staged.", add.diagnostic, stashId != null)
             context.cancelled()?.let { return it }
+            val beforeContinue = GitWorkspaceFingerprint.capture(context.root, allowRebase = true)
             context.emit("Continuing after resolving version-only POM conflicts")
+            context.verifyRebase()
+            beforeContinue.verify()
             rebase = runGit(
                 context.root,
                 listOf("-c", "commit.gpgSign=false", "-c", "rerere.enabled=false", "rebase", "--continue"),
@@ -429,15 +442,20 @@ internal class GitRebaseWorkflow(
         return result.output.split('\u0000').filter(String::isNotEmpty)
     }
 
-    private fun resolveVersionOnlyConflicts(root: Path, conflicts: List<String>): Boolean {
+    private fun resolveVersionOnlyConflicts(root: Path, conflicts: List<String>, verify: () -> Unit): Boolean {
         // Validate every file before changing any, so a mixed conflict set stays untouched.
         val resolved = conflicts.map { relative ->
             val path = root.resolve(relative).normalize()
             if (!path.startsWith(root) || path.fileName.toString() != "pom.xml" || Files.isSymbolicLink(path)) return false
-            val content = GitVersionConflictResolver.resolvedContent(Files.readString(path)) ?: return false
-            path to content
+            val original = Files.readString(path)
+            val content = GitVersionConflictResolver.resolvedPomContent(original) ?: return false
+            Triple(path, original, content)
         }
-        resolved.forEach { (path, content) -> Files.writeString(path, content) }
+        verify()
+        resolved.forEach { (path, original, content) ->
+            check(Files.readString(path) == original) { "A conflicted POM changed during resolution: $path" }
+            Files.writeString(path, content)
+        }
         return true
     }
 
@@ -455,6 +473,10 @@ internal class GitRebaseWorkflow(
         "Resolve the repository state manually, then retry.",
     )
 
+    private fun sameRefName(first: String, second: String): Boolean =
+        // Consistent protection also on case-insensitive Windows/macOS ref storage.
+        first.equals(second, ignoreCase = true)
+
     private fun failed(
         repository: GitRepositoryPlan,
         message: String,
@@ -463,7 +485,7 @@ internal class GitRebaseWorkflow(
     ) = GitRepositoryResult(
         repository,
         GitRebaseStatus.FAILED,
-        listOf(message, details.trim()).filter(String::isNotBlank).joinToString(" "),
+        GitDiagnostics.redact(listOf(message, details.trim()).filter(String::isNotBlank).joinToString(" ")),
         if (stashPreserved) {
             "Inspect the Git state. The MPH stash was preserved."
         } else {
@@ -505,6 +527,15 @@ internal class GitRebaseWorkflow(
         }
 
         fun operationInProgress(): Boolean = operationPaths.any { Files.exists(it) }
+
+        fun verifyRebase() {
+            val directory = Path.of(requireCommand(REV_PARSE, "--path-format=absolute", "--git-path", "rebase-merge").trim())
+            check(Files.readString(directory.resolve("head-name")).trim() == "refs/heads/$originalBranch" &&
+                Files.readString(directory.resolve("orig-head")).trim() == expectedHead &&
+                Files.readString(directory.resolve("onto")).trim() == upstream) {
+                "The active rebase changed outside this synchronization. Automatic resolution was stopped."
+            }
+        }
 
         fun createRecovery(branch: String) {
             verifyCheckout()
@@ -563,7 +594,7 @@ internal class GitRebaseWorkflow(
             return result.output
         }
 
-        fun emit(message: String) = listener.onEvent(repository, GitRebaseStatus.RUNNING, message)
+        fun emit(message: String) = listener.onEvent(repository, GitRebaseStatus.RUNNING, GitDiagnostics.redact(message))
 
         fun command(vararg arguments: String, stream: Boolean = false): GitCommandResult =
             runGit(root, arguments.toList(), if (stream) ::emit else null)
@@ -604,7 +635,14 @@ object GitVersionConflictResolver {
         return resolvedConflictLines(content.split(separator))?.joinToString(separator)
     }
 
-    private fun resolvedConflictLines(lines: List<String>): List<String>? {
+    internal fun resolvedPomContent(content: String): String? {
+        val current = resolvedContent(content) ?: return null
+        val separator = if ("\r\n" in content) "\r\n" else "\n"
+        val incoming = resolvedConflictLines(content.split(separator), false)?.joinToString(separator) ?: return null
+        return current.takeIf { PomVersionConflictCheck.onlyVersionTextChanges(current, incoming) }
+    }
+
+    private fun resolvedConflictLines(lines: List<String>, useCurrent: Boolean = true): List<String>? {
         val resolved = buildList {
             var index = 0
             var foundConflict = false
@@ -617,7 +655,7 @@ object GitVersionConflictResolver {
                 val conflict = readConflict(lines, index + 1) ?: return null
                 if (!isVersionOnly(conflict.current) || !isVersionOnly(conflict.incoming)) return null
                 if (versionTags(conflict.current) != versionTags(conflict.incoming)) return null
-                addAll(conflict.current)
+                addAll(if (useCurrent) conflict.current else conflict.incoming)
                 index = conflict.nextIndex
             }
             if (!foundConflict) return null

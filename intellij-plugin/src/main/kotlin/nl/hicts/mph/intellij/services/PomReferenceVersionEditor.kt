@@ -33,6 +33,16 @@ data class PomPropertyUpdate(
 object PomReferenceVersionEditor {
     private val propertyReference = Regex("^\\$\\{([^}]+)}$")
 
+    internal fun inheritsVersionFrom(content: String, parentContent: String, parent: MavenCoordinates): Boolean {
+        val parentBlock = tagMatches(content, "parent", xmlTextRanges(content)).singleOrNull() ?: return false
+        if (!matchesCoordinates(parentBlock.value, parent)) return false
+        val declaration = projectVersionMatch(content)?.groups?.get(1)?.value?.trim()
+        if (declaration == null || declaration in setOf("\${project.parent.version}", "\${pom.parent.version}")) return true
+        // CI-friendly versions may be declared in the child but supplied by the reactor parent.
+        return propertyReference.matches(declaration) && declaration == projectVersionMatch(parentContent)?.groups?.get(1)?.value?.trim() &&
+            findProjectVersion(content) == null
+    }
+
     fun findProjectVersion(content: String): String? {
         val version = projectVersionMatch(content)
             ?.groups?.get(1)?.value?.trim()
@@ -65,7 +75,7 @@ object PomReferenceVersionEditor {
     }
 
     fun localProperties(content: String): List<LocalPomProperty> {
-        val comments = ranges(content, "<!--", "-->")
+        val comments = xmlTextRanges(content)
         val properties = tagMatches(content, "properties", comments).firstOrNull() ?: return emptyList()
         val entry = Regex(
             "(?:<!--\\s*(.*?)\\s*-->\\s*)?<([A-Za-z_][A-Za-z0-9_.-]*)>\\s*(.*?)\\s*</\\2>",
@@ -96,7 +106,7 @@ object PomReferenceVersionEditor {
 
         val commentLine = comment?.trim()?.takeIf(String::isNotBlank)?.let { "        <!-- $it -->\n" }.orEmpty()
         val propertyLine = "        <$propertyName>$value</$propertyName>\n"
-        val properties = tagMatches(content, "properties", ranges(content, "<!--", "-->"))
+        val properties = tagMatches(content, "properties", xmlTextRanges(content))
             .firstOrNull()
         val updated = if (properties != null) {
             val closing = content.indexOf("</properties>", properties.range.first)
@@ -113,7 +123,7 @@ object PomReferenceVersionEditor {
 
     fun removeProperty(content: String, propertyName: String): PomPropertyUpdate {
         requireSafePropertyName(propertyName)
-        val properties = tagMatches(content, "properties", ranges(content, "<!--", "-->"))
+        val properties = tagMatches(content, "properties", xmlTextRanges(content))
             .firstOrNull() ?: return PomPropertyUpdate(content, changed = false)
         val property = Regex(
             "(?:[ \\t]*<!--(?:(?!-->).)*-->\\s*)?[ \\t]*<${Regex.escape(propertyName)}>.*?</${Regex.escape(propertyName)}>\\s*",
@@ -134,11 +144,11 @@ object PomReferenceVersionEditor {
     ): PomReferenceUpdate {
         requireSafeVersion(newVersion)
 
-        val comments = ranges(content, "<!--", "-->")
+        val comments = xmlTextRanges(content)
         val dependencyManagement = tagRanges(content, "dependencyManagement", comments)
         val pluginBlocks = tagRanges(content, "plugin", comments)
         val replacements = mutableListOf<Replacement>()
-        val referencedProperties = linkedMapOf<String, Int>()
+        val referencedProperties = linkedMapOf<String, MutableList<Replacement>>()
         val collector = VersionReplacementCollector(
             target = UpdateTarget(content, target, newVersion, referenceKinds),
             ranges = ReferenceRanges(comments, dependencyManagement, pluginBlocks),
@@ -146,8 +156,16 @@ object PomReferenceVersionEditor {
         )
         val missingVersionCount = collectParentReplacement(collector) + collectDependencyReplacements(collector)
 
+        // A property shared with another artifact must not silently change that artifact as a side effect.
+        // Keep the property and specialize only the requested references when its uses are not exclusive.
+        referencedProperties.entries.removeIf { (name, locations) ->
+            val uses = Regex(Regex.escape("\${$name}")).findAll(content)
+                .count { match -> comments.none { match.range.first in it } }
+            if (uses > locations.size) { replacements += locations; true } else false
+        }
+
         val propertyResult = updateReferencedProperties(
-            applyReplacements(content, replacements), newVersion, referencedProperties, replacements.size,
+            applyReplacements(content, replacements), newVersion, referencedProperties.mapValues { it.value.size }, replacements.size,
         )
 
         return PomReferenceUpdate(
@@ -241,13 +259,15 @@ object PomReferenceVersionEditor {
         version: MatchResult,
         newVersion: String,
         replacements: MutableList<Replacement>,
-        referencedProperties: MutableMap<String, Int>,
+        referencedProperties: MutableMap<String, MutableList<Replacement>>,
     ) {
         val valueGroup = version.groups[1] ?: return
         val oldVersion = valueGroup.value.trim()
         val propertyName = propertyReference.matchEntire(oldVersion)?.groups?.get(1)?.value
         if (propertyName != null) {
-            referencedProperties[propertyName] = referencedProperties.getOrDefault(propertyName, 0) + 1
+            referencedProperties.getOrPut(propertyName) { mutableListOf() } += Replacement(
+                IntRange(blockStart + valueGroup.range.first, blockStart + valueGroup.range.last), newVersion,
+            )
         } else if (oldVersion != newVersion) {
             replacements += Replacement(
                 IntRange(blockStart + valueGroup.range.first, blockStart + valueGroup.range.last),
@@ -257,7 +277,7 @@ object PomReferenceVersionEditor {
     }
 
     private fun updateProperty(content: String, propertyName: String, newVersion: String): PropertyUpdate {
-        val comments = ranges(content, "<!--", "-->")
+        val comments = xmlTextRanges(content)
         val propertyBlocks = tagMatches(content, "properties", comments)
         propertyBlocks.forEach { properties ->
             val property = elementMatch(properties.value, Regex.escape(propertyName)) ?: return@forEach
@@ -273,7 +293,7 @@ object PomReferenceVersionEditor {
     }
 
     private fun findPropertyValue(content: String, propertyName: String): String? {
-        val comments = ranges(content, "<!--", "-->")
+        val comments = xmlTextRanges(content)
         tagMatches(content, "properties", comments).forEach { properties ->
             return elementMatch(properties.value, Regex.escape(propertyName))
                 ?.groups?.get(1)?.value?.trim()?.takeIf(String::isNotBlank)
@@ -294,7 +314,8 @@ object PomReferenceVersionEditor {
             "pluginRepositories",
             "distributionManagement",
         )
-        val ignoredRanges = ignoredTags.flatMap { tag -> tagRanges(content, tag, emptyList()) }
+        val textRanges = xmlTextRanges(content)
+        val ignoredRanges = textRanges + ignoredTags.flatMap { tag -> tagRanges(content, tag, textRanges) }
         return Regex("<version>\\s*(.*?)\\s*</version>", setOf(RegexOption.DOT_MATCHES_ALL))
             .findAll(content)
             .firstOrNull { match -> ignoredRanges.none { match.range.first in it } }
@@ -316,10 +337,14 @@ object PomReferenceVersionEditor {
             containsElement(block, "artifactId", target.artifactId)
 
     private fun containsElement(content: String, tag: String, value: String): Boolean =
-        Regex("<$tag>\\s*${Regex.escape(value)}\\s*</$tag>").containsMatchIn(content)
+        elementMatch(content, tag)?.groups?.get(1)?.value?.trim() == value
 
     private fun elementMatch(content: String, tag: String): MatchResult? =
-        Regex("<$tag>\\s*(.*?)\\s*</$tag>", setOf(RegexOption.DOT_MATCHES_ALL)).find(content)
+        Regex("<$tag>\\s*(.*?)\\s*</$tag>", setOf(RegexOption.DOT_MATCHES_ALL)).findAll(content)
+            .firstOrNull { match -> xmlTextRanges(content).none { match.range.first in it } }
+
+    private fun xmlTextRanges(content: String): List<IntRange> =
+        ranges(content, "<!--", "-->") + ranges(content, "<![CDATA[", "]]>")
 
     private fun tagMatches(content: String, tag: String, ignoredRanges: List<IntRange>): List<MatchResult> =
         Regex("<$tag(?:\\s[^>]*)?>.*?</$tag>", setOf(RegexOption.DOT_MATCHES_ALL))
@@ -366,6 +391,6 @@ object PomReferenceVersionEditor {
     )
     private data class CollectedReplacements(
         val replacements: MutableList<Replacement>,
-        val referencedProperties: MutableMap<String, Int>,
+        val referencedProperties: MutableMap<String, MutableList<Replacement>>,
     )
 }

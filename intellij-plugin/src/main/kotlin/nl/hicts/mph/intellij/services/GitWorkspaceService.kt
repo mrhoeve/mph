@@ -1,11 +1,8 @@
 package nl.hicts.mph.intellij.services
 
-import com.intellij.execution.configurations.GeneralCommandLine
-import com.intellij.execution.process.CapturingProcessHandler
 import com.intellij.openapi.components.Service
 import nl.hicts.mph.intellij.model.GitWorkspaceStatus
 import nl.hicts.mph.intellij.model.MavenProjectInfo
-import java.nio.charset.StandardCharsets
 import java.nio.file.Path
 
 data class GitBranchResult(val rootPath: String, val success: Boolean, val message: String)
@@ -69,13 +66,9 @@ class GitWorkspaceService {
     private fun isClean(root: String): Boolean = run(root, "status", "--porcelain").let { it.success && it.output.isBlank() }
 
     private fun run(root: String, vararg arguments: String): CommandResult {
-        val command = GeneralCommandLine("git")
-            .withParameters(arguments.toList())
-            .withWorkDirectory(root)
-            .withCharset(StandardCharsets.UTF_8)
         return try {
-            val output = CapturingProcessHandler(command).runProcess(COMMAND_TIMEOUT_MS)
-            CommandResult(output.exitCode == 0, output.stdout, output.stderr.trim())
+            val output = NativeGitCommandRunner().execute(Path.of(root), arguments.toList(), null, emptyMap())
+            CommandResult(output.exitCode == 0, output.output, output.diagnostic.trim())
         } catch (error: Exception) {
             CommandResult(false, "", error.message ?: error.javaClass.simpleName)
         }
@@ -83,9 +76,6 @@ class GitWorkspaceService {
 
     private data class CommandResult(val success: Boolean, val output: String, val error: String)
 
-    private companion object {
-        const val COMMAND_TIMEOUT_MS = 120_000
-    }
 }
 
 object GitOutputParser {

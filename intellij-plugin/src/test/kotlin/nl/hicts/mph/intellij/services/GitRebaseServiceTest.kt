@@ -12,6 +12,165 @@ import java.nio.file.Path
 import java.lang.reflect.Proxy
 
 class GitRebaseServiceTest {
+    @Test fun `Windows case aliases cannot bypass protected branch checks`() {
+        org.junit.Assume.assumeTrue(System.getProperty("os.name").startsWith("Windows"))
+        withRepository { root, _ ->
+            git(root, "branch", "main")
+            git(root, "symbolic-ref", "HEAD", "refs/heads/MAIN")
+            assertEquals("MAIN", git(root, "branch", "--show-current").trim())
+            val head = git(root, "rev-parse", "HEAD")
+            val result = synchronize(root)
+            assertEquals(result.message, GitRebaseStatus.SKIPPED, result.status)
+            assertTrue(result.message.contains("protected"))
+            assertEquals(head, git(root, "rev-parse", "main"))
+        }
+    }
+
+    @Test fun `Windows case aliases cannot move develop checked out in another worktree`() {
+        org.junit.Assume.assumeTrue(System.getProperty("os.name").startsWith("Windows"))
+        withRepository { root, temporary ->
+            advanceDevelop(root)
+            git(root, "update-ref", "refs/heads/develop", "HEAD")
+            val linked = temporary.resolve("linked-develop")
+            git(root, "worktree", "add", linked.toString(), "develop")
+            git(linked, "symbolic-ref", "HEAD", "refs/heads/DEVELOP")
+            val head = git(root, "rev-parse", "develop")
+            val result = synchronize(root)
+            assertEquals(result.message, GitRebaseStatus.SKIPPED, result.status)
+            assertTrue(result.message.contains("another worktree"))
+            assertEquals(head, git(root, "rev-parse", "develop"))
+            assertEquals(pom("service", "1.0-SNAPSHOT"), Files.readString(linked.resolve("pom.xml")))
+        }
+    }
+
+    @Test fun `new ignored files at restoration cannot be overwritten by the stash`() = withRepository { root, _ ->
+        git(root, "switch", "develop")
+        Files.writeString(root.resolve(".gitignore"), "notes.txt\n")
+        git(root, "add", ".gitignore")
+        git(root, "commit", "-m", "Ignore generated notes")
+        publishDevelop(root)
+        git(root, "switch", "feature/test")
+        Files.writeString(root.resolve("notes.txt"), "original notes")
+        val result = synchronize(root, listener = GitRebaseListener { _, _, message ->
+            if (message == "Restoring uncommitted work") Files.writeString(root.resolve("notes.txt"), "new ignored notes")
+        })
+        assertEquals(GitRebaseStatus.CONFLICT, result.status)
+        assertEquals("new ignored notes", Files.readString(root.resolve("notes.txt")))
+        assertEquals("original notes", git(root, "show", "refs/stash^3:notes.txt"))
+        assertTrue(result.stashPreserved)
+    }
+
+    @Test fun `stashed executable index mode is restored after synchronization`() = withRepository { root, _ ->
+        Files.writeString(root.resolve("run.txt"), "fixture executable content")
+        git(root, "add", "run.txt")
+        git(root, "commit", "-m", "Add executable fixture")
+        advanceDevelop(root)
+        git(root, "update-index", "--chmod=+x", "run.txt")
+        val index = git(root, "ls-files", "--stage", "run.txt")
+        val result = synchronize(root)
+        assertEquals(result.message, GitRebaseStatus.SUCCESS, result.status)
+        assertEquals(index, git(root, "ls-files", "--stage", "run.txt"))
+        assertEquals("fixture executable content", Files.readString(root.resolve("run.txt")))
+    }
+
+    @Test fun `symlink targets are restored without touching the destination`() {
+        org.junit.Assume.assumeFalse("Windows symlink creation requires machine privileges", System.getProperty("os.name").startsWith("Windows"))
+        withRepository { root, temporary ->
+            val target = Files.writeString(temporary.resolve("external.txt"), "external work")
+            val link = Files.createSymbolicLink(root.resolve("link.txt"), target)
+            val result = synchronize(root)
+            assertEquals(result.message, GitRebaseStatus.SUCCESS, result.status)
+            assertTrue(Files.isSymbolicLink(link))
+            assertEquals(target, Files.readSymbolicLink(link))
+            assertEquals("external work", Files.readString(target))
+        }
+    }
+
+    @Test fun `symbolic develop refs cannot overwrite protected local commits`() {
+        listOf("refs/remotes/origin/develop", "refs/heads/develop").forEach { ref ->
+            withRepository { root, _ ->
+                advanceDevelop(root)
+                git(root, "switch", "-c", "main")
+                Files.writeString(root.resolve("local-only.txt"), "local committed work")
+                git(root, "add", "local-only.txt")
+                git(root, "commit", "-m", "Keep local main work")
+                val main = git(root, "rev-parse", "main")
+                git(root, "switch", "feature/test")
+                val head = git(root, "rev-parse", "HEAD")
+                Files.writeString(root.resolve("notes.txt"), "uncommitted work")
+                git(root, "symbolic-ref", ref, "refs/heads/main")
+                val result = synchronize(root)
+                assertEquals(result.message, GitRebaseStatus.SKIPPED, result.status)
+                assertTrue(result.message.contains("symbolic"))
+                assertEquals(head, git(root, "rev-parse", "HEAD"))
+                assertEquals(main, git(root, "rev-parse", "main"))
+                assertEquals("uncommitted work", Files.readString(root.resolve("notes.txt")))
+                assertTrue(git(root, "stash", "list").isBlank())
+            }
+        }
+    }
+
+    @Test fun `configured tag pruning cannot fetch or overwrite tags`() = withRepository { root, _ ->
+        git(root, "tag", "remote-only")
+        git(root, "bundle", "create", git(root, "remote", "get-url", "origin").trim(), "develop", "refs/tags/remote-only")
+        git(root, "tag", "-d", "remote-only")
+        git(root, "tag", "local-only")
+        git(root, "config", "fetch.prune", "true")
+        git(root, "config", "fetch.pruneTags", "true")
+        git(root, "config", "remote.origin.pruneTags", "true")
+        val before = git(root, "show-ref", "--tags")
+        val result = synchronize(root)
+        assertEquals(result.message, GitRebaseStatus.SUCCESS, result.status)
+        assertEquals(before, git(root, "show-ref", "--tags"))
+    }
+
+    @Test fun `external edits before continue are not committed by automatic conflict resolution`() = withRepository { root, _ ->
+        Files.writeString(root.resolve("pom.xml"), pom("service", "PREFIX-1.0-SNAPSHOT"))
+        git(root, "add", "pom.xml")
+        git(root, "commit", "-m", "Prefix feature")
+        advanceDevelop(root)
+        val result = synchronize(root, listener = GitRebaseListener { _, _, message ->
+            if (message == "Continuing after resolving version-only POM conflicts") {
+                Files.writeString(root.resolve("notes.txt"), "concurrent work")
+                git(root, "add", "notes.txt")
+            }
+        })
+        assertEquals(result.message, GitRebaseStatus.FAILED, result.status)
+        assertTrue(Files.isDirectory(root.resolve(".git/rebase-merge")))
+        assertEquals("concurrent work", git(root, "show", ":notes.txt"))
+        assertTrue(result.recoveryHint.orEmpty().contains("refs/mph/recovery/"))
+    }
+
+    @Test fun `gitfile checkouts and protected branches are refused without changing local work`() = withRepository { root, testRoot ->
+        val worktree = testRoot.resolve("linked")
+        git(root, "worktree", "add", "-b", "feature/linked", worktree.toString(), "HEAD")
+        Files.writeString(worktree.resolve("notes.txt"), "linked work")
+        assertEquals(GitRebaseStatus.SKIPPED, synchronize(worktree).status)
+        assertEquals("linked work", Files.readString(worktree.resolve("notes.txt")))
+        listOf("main", "master", "develop").forEach { branch ->
+            if (branch == "develop") git(root, "switch", branch) else git(root, "switch", "-c", branch)
+            assertEquals(GitRebaseStatus.SKIPPED, synchronize(root).status)
+        }
+        git(root, "switch", "--detach")
+        assertEquals(GitRebaseStatus.SKIPPED, synchronize(root).status)
+    }
+
+    @Test fun `empty and already applied commits remain reachable after synchronization`() = withRepository { root, _ ->
+        git(root, "commit", "--allow-empty", "-m", "Intentional empty feature commit")
+        Files.writeString(root.resolve("feature.txt"), "shared change")
+        git(root, "add", "feature.txt")
+        git(root, "commit", "-m", "Shared feature change")
+        val featureCommit = git(root, "rev-parse", "HEAD").trim()
+        git(root, "switch", "develop")
+        git(root, "cherry-pick", featureCommit)
+        publishDevelop(root)
+        git(root, "switch", "feature/test")
+        val result = synchronize(root)
+        assertEquals(result.message, GitRebaseStatus.SUCCESS, result.status)
+        assertTrue(git(root, "log", "--format=%s").contains("Intentional empty feature commit"))
+        assertEquals("shared change", Files.readString(root.resolve("feature.txt")))
+    }
+
     @Test
     fun `detects the part before the semantic version as prefix`() {
         assertEquals("PREFIX-1234-", GitVersionPrefix.detect("PREFIX-1234-4.1-SNAPSHOT"))
@@ -172,7 +331,7 @@ class GitRebaseServiceTest {
             assertTrue(results.single().recoveryHint.orEmpty().contains("recovery.txt"))
             git(repository, "merge-base", "--is-ancestor", "origin/develop", "HEAD")
         } finally {
-            testRoot.toFile().deleteRecursively()
+            GitTestSupport.deleteRepository(testRoot)
         }
     }
 
@@ -226,7 +385,7 @@ class GitRebaseServiceTest {
             assertEquals("PREFIX-1234-1.0-SNAPSHOT", PomReferenceVersionEditor.findProjectVersion(Files.readString(pom)))
             assertEquals("uncommitted notes\n", Files.readString(notes))
         } finally {
-            testRoot.toFile().deleteRecursively()
+            GitTestSupport.deleteRepository(testRoot)
         }
     }
 
@@ -360,7 +519,7 @@ class GitRebaseServiceTest {
         hook.toFile().setExecutable(true)
         val result = synchronize(root)
         assertEquals(result.message, GitRebaseStatus.FAILED, result.status)
-        assertTrue(result.message.contains("Test hook rejected rebase"))
+        assertTrue(result.message, result.message.contains("Test hook rejected rebase"))
         assertTrue(result.stashPreserved)
         git(root, "stash", "apply", "--index")
         assertEquals("recoverable work", Files.readString(root.resolve("notes.txt")))
@@ -471,7 +630,7 @@ class GitRebaseServiceTest {
         Files.writeString(root.resolve("notes.txt"), "local notes")
         val native = NativeGitCommandRunner()
         val workflow = GitRebaseWorkflow(GitCommandRunner { directory, arguments, progress, environment ->
-            if (arguments.take(2) == listOf("update-ref", "refs/heads/develop")) GitCommandResult(1, "", "Test ref race")
+            if (arguments.take(3) == listOf("update-ref", "--no-deref", "refs/heads/develop")) GitCommandResult(1, "", "Test ref race")
             else native.execute(directory, arguments, progress, environment)
         })
         val result = workflow.rebase(GitRebasePlan("PREFIX-", listOf(GitRepositoryPlan(root.toString(), "service")), emptyList()), notCancelledIndicator(), GitRebaseListener { _, _, _ -> }).single()
@@ -764,7 +923,7 @@ class GitRebaseServiceTest {
             git(root, "switch", "-c", "feature/test")
             action(root, testRoot)
         } finally {
-            testRoot.toFile().deleteRecursively()
+            GitTestSupport.deleteRepository(testRoot)
         }
     }
 
@@ -785,29 +944,9 @@ class GitRebaseServiceTest {
         </project>
     """.trimIndent()
 
-    private fun git(directory: Path, vararg arguments: String): String {
-        val outputFile = Files.createTempFile("mph-git-output-", ".txt")
-        return try {
-            val process = ProcessBuilder(listOf("git") + arguments)
-                .directory(directory.toFile())
-                .redirectErrorStream(true)
-                .redirectOutput(outputFile.toFile())
-                .start()
-            val exitCode = process.waitFor()
-            val output = Files.readString(outputFile)
-            check(exitCode == 0) { "git ${arguments.joinToString(" ")} failed ($exitCode): $output" }
-            output
-        } finally {
-            Files.deleteIfExists(outputFile)
-        }
-    }
+    private fun git(directory: Path, vararg arguments: String): String = GitTestSupport.git(directory, *arguments)
 
-    private fun gitExitCode(directory: Path, vararg arguments: String): Int = ProcessBuilder(listOf("git") + arguments)
-        .directory(directory.toFile())
-        .redirectErrorStream(true)
-        .redirectOutput(ProcessBuilder.Redirect.DISCARD)
-        .start()
-        .waitFor()
+    private fun gitExitCode(directory: Path, vararg arguments: String): Int = GitTestSupport.run(directory, *arguments).exitCode
 
     private fun notCancelledIndicator(): ProgressIndicator {
         var cancelled = false

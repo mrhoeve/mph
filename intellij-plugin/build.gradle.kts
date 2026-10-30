@@ -101,6 +101,11 @@ tasks {
 
     test {
         useJUnit()
+        environment.keys.filter { it.startsWith("GIT_", ignoreCase = true) }.forEach { environment.remove(it) }
+        environment("GIT_CONFIG_NOSYSTEM", "1")
+        environment("GIT_CONFIG_GLOBAL", if (System.getProperty("os.name").startsWith("Windows")) "NUL" else "/dev/null")
+        environment("GIT_TERMINAL_PROMPT", "0")
+        environment("GCM_INTERACTIVE", "Never")
         // Load MPH and its dependencies, rather than unrelated bundled language plugins.
         systemProperty("idea.load.plugins.id", "nl.hicts.mph.plugin")
     }

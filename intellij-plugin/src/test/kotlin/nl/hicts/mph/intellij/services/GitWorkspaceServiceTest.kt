@@ -67,15 +67,16 @@ class GitWorkspaceServiceTest {
     @Test
     fun `creates and checks out local and remote branches`() {
         val testRoot = Files.createTempDirectory("mph-git-branches-")
-        val origin = testRoot.resolve("origin.git")
+        val origin = testRoot.resolve("origin.bundle")
         val repository = testRoot.resolve("workspace")
         try {
-            git(testRoot, "init", "--bare", origin.toString())
             Files.createDirectory(repository)
             configureRepository(repository)
             commit(repository, "base.txt", "base", "Initial commit")
             git(repository, "remote", "add", "origin", origin.toString())
-            git(repository, "push", "--set-upstream", "origin", "develop")
+            git(repository, "bundle", "create", origin.toString(), "develop")
+            git(repository, "fetch", "origin")
+            git(repository, "branch", "--set-upstream-to=origin/develop", "develop")
 
             val service = GitWorkspaceService()
             val created = service.createOrCheckoutBranch(listOf(repository.toString()), "feature/created").single()
@@ -89,13 +90,13 @@ class GitWorkspaceServiceTest {
 
             git(repository, "switch", "develop")
             git(repository, "branch", "feature/remote")
-            git(repository, "push", "origin", "feature/remote")
+            git(repository, "bundle", "create", origin.toString(), "develop", "feature/remote")
             git(repository, "branch", "--delete", "feature/remote")
             val remote = service.createOrCheckoutBranch(listOf(repository.toString()), "feature/remote").single()
             assertTrue(remote.success)
             assertEquals("feature/remote", git(repository, "branch", "--show-current").trim())
         } finally {
-            testRoot.toFile().deleteRecursively()
+            GitTestSupport.deleteRepository(testRoot)
         }
     }
 
@@ -124,7 +125,7 @@ class GitWorkspaceServiceTest {
             configureRepository(repository)
             test(repository)
         } finally {
-            repository.toFile().deleteRecursively()
+            GitTestSupport.deleteRepository(repository)
         }
     }
 
@@ -158,14 +159,5 @@ class GitWorkspaceServiceTest {
         </project>
     """.trimIndent()
 
-    private fun git(directory: Path, vararg arguments: String): String {
-        val process = ProcessBuilder(listOf("git") + arguments)
-            .directory(directory.toFile())
-            .redirectErrorStream(true)
-            .start()
-        val output = process.inputStream.bufferedReader().use { it.readText() }
-        val exitCode = process.waitFor()
-        check(exitCode == 0) { "git ${arguments.joinToString(" ")} failed ($exitCode): $output" }
-        return output
-    }
+    private fun git(root: Path, vararg args: String): String = GitTestSupport.git(root, *args)
 }

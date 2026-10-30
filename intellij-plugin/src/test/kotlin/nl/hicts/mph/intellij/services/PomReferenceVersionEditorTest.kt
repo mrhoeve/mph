@@ -9,6 +9,18 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PomReferenceVersionEditorTest {
+    @Test fun `shared dependency properties cannot overwrite the version of another artifact`() {
+        val source = """<project><properties><shared.version>1.0</shared.version></properties><dependencies>
+            <dependency><groupId>org.example</groupId><artifactId>first</artifactId><version>${'$'}{shared.version}</version></dependency>
+            <dependency><groupId>org.example</groupId><artifactId>second</artifactId><version>${'$'}{shared.version}</version></dependency>
+            </dependencies></project>"""
+        val first = PomReferenceVersionEditor.update(source, MavenCoordinates("org.example", "first"), "2.0", MavenReferenceKind.entries.toSet())
+        assertTrue(first.content.contains("<artifactId>first</artifactId><version>2.0</version>"))
+        assertTrue(first.content.contains("<shared.version>1.0</shared.version>"))
+        val second = PomReferenceVersionEditor.update(first.content, MavenCoordinates("org.example", "second"), "3.0", MavenReferenceKind.entries.toSet())
+        assertTrue(second.content.contains("<artifactId>first</artifactId><version>2.0</version>"))
+        assertTrue(second.content.contains("<shared.version>3.0</shared.version>"))
+    }
     @Test
     fun `adds updates and removes local Maven properties with comments`() {
         val original = """

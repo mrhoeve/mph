@@ -157,24 +157,42 @@ class BulkVersionUpdateService(
         selected: List<MavenProjectInfo>,
         documents: Map<MavenProjectInfo, Document?>,
         issues: MutableList<String>,
-    ): List<TargetVersion> = selected.mapNotNull { projectInfo ->
-        val document = documents[projectInfo]
-        if (document == null) {
-            issues += "${projectInfo.artifactId}: pom.xml is unavailable or not writable."
-            return@mapNotNull null
+    ): List<TargetVersion> {
+        val targets = selected.mapNotNull { projectInfo ->
+            val document = documents[projectInfo]
+            if (document == null) {
+                issues += "${projectInfo.artifactId}: pom.xml is unavailable or not writable."
+                return@mapNotNull null
+            }
+            val localVersion = PomReferenceVersionEditor.findProjectVersion(document.text)
+            val currentVersion = localVersion ?: request.takeIf { it.mode == BulkVersionMode.KEEP_CURRENT }
+                ?.let { projectInfo.version }
+            if (currentVersion.isNullOrBlank()) {
+                return@mapNotNull null
+            }
+            TargetVersion(
+                project = projectInfo,
+                version = adjustedVersion(request, currentVersion),
+                updateProjectVersion = localVersion != null,
+            )
+        }.toMutableList()
+        // Resolve chains in any Maven display order, without inserting versions into inheriting modules.
+        if (request.updateDependents) repeat(selected.size) {
+            selected.filter { info -> targets.none { it.project == info } }.forEach { info ->
+                val content = documents[info]?.text ?: return@forEach
+                val parent = targets.firstOrNull { candidate ->
+                    val group = candidate.project.groupId ?: return@firstOrNull false
+                    val parentContent = documents[candidate.project]?.text ?: return@firstOrNull false
+                    PomReferenceVersionEditor.inheritsVersionFrom(content, parentContent,
+                        MavenCoordinates(group, candidate.project.artifactId))
+                }
+                if (parent != null) targets += TargetVersion(info, parent.version, updateProjectVersion = false)
+            }
         }
-        val localVersion = PomReferenceVersionEditor.findProjectVersion(document.text)
-        val currentVersion = localVersion ?: request.takeIf { it.mode == BulkVersionMode.KEEP_CURRENT }
-            ?.let { projectInfo.version }
-        if (currentVersion.isNullOrBlank()) {
-            issues += "${projectInfo.artifactId}: the project version is inherited or unresolved."
-            return@mapNotNull null
+        selected.filter { info -> targets.none { it.project == info } }.forEach {
+            issues += "${it.artifactId}: the project version is inherited or unresolved."
         }
-        TargetVersion(
-            project = projectInfo,
-            version = adjustedVersion(request, currentVersion),
-            updateProjectVersion = localVersion != null,
-        )
+        return targets
     }
 
     private fun adjustedVersion(request: BulkVersionUpdateRequest, currentVersion: String): String =

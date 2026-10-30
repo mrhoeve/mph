@@ -6,6 +6,33 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 class GitWorkspaceFingerprintTest {
+    @Test fun `alignment protects dependent POMs outside Git from changes during sync`() {
+        val root = Files.createTempDirectory("mph-dependent-baseline-")
+        try {
+            val pom = Files.writeString(root.resolve("pom.xml"), "<project><version>1</version></project>")
+            val dependent = nl.hicts.mph.intellij.model.MavenProjectInfo("org.example", "dependent", "1", pom.toString(), null)
+            val plan = GitRebasePlan("FEATURE-", emptyList(), emptyList(), listOf(dependent))
+            val baseline = AlignmentWorkspaceBaseline.capture(plan)
+            baseline.verify()
+            Files.writeString(pom, "<project><version>2</version></project>")
+            assertThrows(IllegalStateException::class.java) { baseline.verify() }
+        } finally { GitTestSupport.deleteRepository(root) }
+    }
+    @Test fun `untracked file bytes and hidden index flags invalidate the baseline`() {
+        withRepository { root ->
+            val notes = root.resolve("notes.txt")
+            Files.writeString(notes, "first draft")
+            val baseline = GitWorkspaceFingerprint.capture(root)
+            Files.writeString(notes, "other draft")
+            assertThrows(IllegalStateException::class.java) { baseline.verify() }
+            val beforeFlag = GitWorkspaceFingerprint.capture(root)
+            git(root, "update-index", "--assume-unchanged", "pom.xml")
+            assertThrows(IllegalStateException::class.java) { beforeFlag.verify() }
+            val hidden = GitWorkspaceFingerprint.capture(root)
+            Files.writeString(root.resolve("pom.xml"), "<project>hidden change</project>")
+            assertThrows(IllegalStateException::class.java) { hidden.verify() }
+        }
+    }
     @Test fun `detects edits to already dirty and untracked POMs and branch changes`() {
         withRepository { root ->
             Files.writeString(root.resolve("pom.xml"), "<project>local</project>")
@@ -45,11 +72,7 @@ class GitWorkspaceFingerprintTest {
             git(root, "add", "pom.xml")
             git(root, "commit", "-m", "Test baseline")
             action(root)
-        } finally { root.toFile().deleteRecursively() }
+        } finally { GitTestSupport.deleteRepository(root) }
     }
-    private fun git(root: Path, vararg args: String) {
-        val process = ProcessBuilder(listOf("git") + args).directory(root.toFile()).redirectErrorStream(true).start()
-        val text = process.inputStream.bufferedReader().use { it.readText() }
-        check(process.waitFor() == 0) { text }
-    }
+    private fun git(root: Path, vararg args: String): String = GitTestSupport.git(root, *args)
 }

@@ -11,6 +11,29 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 class BulkVersionUpdateServiceTest : BasePlatformTestCase() {
+    fun testSynchronizationPrefixesInheritedModulesAndTheirConsumersUsingTheCurrentParent() {
+        val parentFile = tempPom("parent", pom("sample-parent", "2.0-SNAPSHOT"))
+        val moduleFile = tempPom("module", inheritedPom("sample-module", "sample-parent"))
+        val aliasFile = tempPom("alias", inheritedPom("alias-module", "sample-parent", "${'$'}{project.parent.version}"))
+        val consumerFile = tempPom("consumer", pom("consumer", "1.0", """
+            <dependencyManagement><dependencies>
+            <dependency><groupId>org.example</groupId><artifactId>sample-module</artifactId><version>${'$'}{module.version}</version></dependency>
+            <dependency><groupId>org.example</groupId><artifactId>alias-module</artifactId><version>1.0</version></dependency>
+            </dependencies></dependencyManagement><properties><module.version>1.0</module.version></properties>
+        """.trimIndent()))
+        val selected = listOf(projectInfo("alias-module", aliasFile, "2.0-SNAPSHOT"),
+            projectInfo("sample-module", moduleFile, "2.0-SNAPSHOT"), projectInfo("sample-parent", parentFile, "2.0-SNAPSHOT"))
+        try {
+            val result = project.service<BulkVersionUpdateService>().update(BulkVersionUpdateRequest(selected,
+                selected + projectInfo("consumer", consumerFile), "FEATURE-", BulkVersionMode.ADD_PREFIX, true, true))
+            assertTrue(result.issues.toString(), result.issues.isEmpty())
+            assertEquals(4, result.updatedReferenceCount)
+            assertTrue(document(moduleFile).text.contains("<version>FEATURE-2.0-SNAPSHOT</version>"))
+            assertTrue(document(aliasFile).text.contains("<version>${'$'}{project.parent.version}</version>"))
+            assertTrue(document(consumerFile).text.contains("<module.version>FEATURE-2.0-SNAPSHOT</module.version>"))
+            assertTrue(document(consumerFile).text.contains("<version>FEATURE-2.0-SNAPSHOT</version>"))
+        } finally { listOf(parentFile, moduleFile, aliasFile, consumerFile).forEach(Files::deleteIfExists) }
+    }
     fun testSetsAnExplicitVersionAndRealignsCurrentReferences() {
         val targetFile = tempPom("manual-target", pom("shared-api", "1.0-SNAPSHOT"))
         val dependentFile = tempPom("manual-dependent", pom(
