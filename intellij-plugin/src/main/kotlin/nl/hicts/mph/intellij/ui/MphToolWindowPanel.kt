@@ -1,0 +1,844 @@
+package nl.hicts.mph.intellij.ui
+
+import com.intellij.icons.AllIcons
+import com.intellij.openapi.Disposable
+import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.ActionPlaces
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.DefaultActionGroup
+import com.intellij.openapi.actionSystem.ActionUpdateThread
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.components.service
+import com.intellij.openapi.fileEditor.FileDocumentManager
+import com.intellij.openapi.fileEditor.OpenFileDescriptor
+import com.intellij.openapi.options.ShowSettingsUtil
+import com.intellij.notification.NotificationGroupManager
+import com.intellij.notification.NotificationType
+import com.intellij.openapi.progress.ProgressIndicator
+import com.intellij.openapi.progress.ProgressManager
+import com.intellij.openapi.progress.Task
+import com.intellij.openapi.project.DumbAwareAction
+import com.intellij.openapi.project.Project
+import com.intellij.openapi.ui.SimpleToolWindowPanel
+import nl.hicts.mph.intellij.services.MavenModelRefreshService
+import nl.hicts.mph.intellij.services.WorkspaceOperationCoordinator
+import nl.hicts.mph.intellij.services.WorkspaceOperationBusyException
+import com.intellij.openapi.ui.Messages
+import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.vfs.VirtualFileManager
+import com.intellij.openapi.vfs.newvfs.BulkFileListener
+import com.intellij.openapi.vfs.newvfs.events.VFileEvent
+import com.intellij.ui.ScrollPaneFactory
+import com.intellij.ui.ColoredTreeCellRenderer
+import com.intellij.ui.SimpleTextAttributes
+import com.intellij.ui.TreeSpeedSearch
+import com.intellij.ui.components.JBLabel
+import com.intellij.ui.treeStructure.Tree
+import com.intellij.util.ui.JBUI
+import nl.hicts.mph.intellij.icons.MphIcons
+import nl.hicts.mph.intellij.model.GitProjectGroup
+import nl.hicts.mph.intellij.model.MavenProjectInfo
+import nl.hicts.mph.intellij.model.ProjectSnapshot
+import nl.hicts.mph.intellij.services.IdeaProjectDiscoveryService
+import nl.hicts.mph.intellij.services.BulkVersionUpdateRequest
+import nl.hicts.mph.intellij.services.BulkVersionUpdateResult
+import nl.hicts.mph.intellij.services.BulkVersionUpdateService
+import nl.hicts.mph.intellij.services.GitRebaseService
+import nl.hicts.mph.intellij.services.GitWorkspaceService
+import nl.hicts.mph.intellij.services.IntellijSbomService
+import nl.hicts.mph.intellij.services.NexusIqSettings
+import nl.hicts.mph.intellij.model.WorkspaceDependencyAnalyzer
+import java.awt.BorderLayout
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
+import java.awt.Font
+import java.nio.file.Path
+import javax.swing.JPanel
+import javax.swing.JComponent
+import javax.swing.SwingConstants
+import javax.swing.JTree
+import javax.swing.tree.DefaultMutableTreeNode
+import javax.swing.tree.DefaultTreeModel
+
+private const val MPH_TITLE = "Maven Project Helper"
+
+class MphToolWindowPanel(
+    private val project: Project,
+    private val discoverProjects: () -> ProjectSnapshot = {
+        project.service<IdeaProjectDiscoveryService>().discover()
+    },
+    private val openPom: (String) -> Unit = { pomPath ->
+        LocalFileSystem.getInstance().refreshAndFindFileByPath(pomPath)?.let { virtualFile ->
+            OpenFileDescriptor(project, virtualFile).navigate(true)
+        }
+    },
+    private val reloadMavenProjects: ((() -> Unit, (Throwable) -> Unit) -> Unit)? = null,
+    private val queueRefreshTask: (Task.Backgroundable) -> Unit = Task.Backgroundable::queue,
+    private val realignVersions: (List<MavenProjectInfo>, List<MavenProjectInfo>) -> BulkVersionUpdateResult? =
+        { selected, workspace ->
+            reviewVersionAlignment(project,
+                BulkVersionUpdateRequest(
+                    selectedProjects = selected,
+                    workspaceProjects = workspace,
+                    prefix = "",
+                    mode = nl.hicts.mph.intellij.services.BulkVersionMode.KEEP_CURRENT,
+                    updateDependents = true,
+                ),
+            )
+        },
+    private val versionResultNotifier: ((String, BulkVersionUpdateResult) -> Unit)? = null,
+    refreshOnCreate: Boolean = true,
+) : SimpleToolWindowPanel(true, true), Disposable {
+    private val summary = JBLabel("Discovering Maven projects…", SwingConstants.LEFT)
+    private val rootNode = DefaultMutableTreeNode("Maven Projects")
+    private val treeModel = DefaultTreeModel(rootNode)
+    private val tree = Tree(treeModel)
+    private var snapshot = ProjectSnapshot(emptyList())
+    private var reloadInProgress = false
+    internal val toolbarActions = DefaultActionGroup()
+    internal val contextActions = DefaultActionGroup()
+
+    init {
+        val refreshAction = object : DumbAwareAction(
+            "Refresh",
+            "Reload Maven projects and refresh the screen",
+            AllIcons.Actions.Refresh,
+        ) {
+            override fun actionPerformed(event: AnActionEvent) = reloadAndRefresh()
+
+            override fun update(event: AnActionEvent) {
+                event.presentation.isEnabled = !reloadInProgress
+            }
+
+            override fun getActionUpdateThread() = ActionUpdateThread.EDT
+        }
+        val expandAllAction = object : DumbAwareAction(
+            "Expand All",
+            "Expand all services and show their Maven modules",
+            AllIcons.Actions.Expandall,
+        ) {
+            override fun actionPerformed(event: AnActionEvent) = expandAllRows()
+        }
+        val collapseAllAction = object : DumbAwareAction(
+            "Collapse All",
+            "Collapse all services",
+            AllIcons.Actions.Collapseall,
+        ) {
+            override fun actionPerformed(event: AnActionEvent) = collapseAllRows()
+        }
+        val alignVersionsAction = object : DumbAwareAction(
+            "Align Versions",
+            "Add or remove a version prefix across the selected Maven projects",
+            MphIcons.VersionsAlign,
+        ) {
+            override fun actionPerformed(event: AnActionEvent) = alignSelectedVersions()
+
+            override fun update(event: AnActionEvent) {
+                event.presentation.isEnabled = selectedProjects().isNotEmpty()
+            }
+
+            override fun getActionUpdateThread() = ActionUpdateThread.EDT
+        }
+        val updateVersionAction = object : DumbAwareAction(
+            "Update Version",
+            "Set a project version and update all linked usages",
+            MphIcons.VersionTag,
+        ) {
+            override fun actionPerformed(event: AnActionEvent) = updateSelectedProjectVersion()
+            override fun update(event: AnActionEvent) {
+                event.presentation.isEnabled = selectedBuildProjects().size == 1
+            }
+            override fun getActionUpdateThread() = ActionUpdateThread.EDT
+        }
+        val realignVersionsAction = object : DumbAwareAction(
+            "Realign Versions",
+            "Reload Maven projects, then update linked references to every selected project's current version",
+            MphIcons.VersionsRealign,
+        ) {
+            override fun actionPerformed(event: AnActionEvent) = realignSelectedVersions()
+            override fun update(event: AnActionEvent) {
+                event.presentation.isEnabled = !reloadInProgress && selectedProjects().isNotEmpty()
+            }
+            override fun getActionUpdateThread() = ActionUpdateThread.EDT
+        }
+        val buildAction = object : DumbAwareAction(
+            "Build",
+            "Run Maven for the selected projects",
+            MphIcons.Build,
+        ) {
+            override fun actionPerformed(event: AnActionEvent) = buildSelectedProjects()
+
+            override fun update(event: AnActionEvent) {
+                event.presentation.isEnabled = selectedBuildProjects().isNotEmpty()
+            }
+
+            override fun getActionUpdateThread() = ActionUpdateThread.EDT
+        }
+        val openPomAction = object : DumbAwareAction(
+            "Open POM",
+            "Open the selected pom.xml in the editor",
+            AllIcons.FileTypes.Xml,
+        ) {
+            override fun actionPerformed(event: AnActionEvent) = openSelectedPom()
+
+            override fun update(event: AnActionEvent) {
+                event.presentation.isEnabled = selectedBuildProjects().size == 1
+            }
+
+            override fun getActionUpdateThread() = ActionUpdateThread.EDT
+        }
+        val rebaseAction = object : DumbAwareAction(
+            "Sync with develop",
+            "Stash changes, rebase selected repositories on develop, restore work, and realign versions",
+            MphIcons.SyncDevelop,
+        ) {
+            override fun actionPerformed(event: AnActionEvent) = openRebaseDialog()
+
+            override fun update(event: AnActionEvent) {
+                event.presentation.isEnabled = selectedProjects().any { !it.gitRootPath.isNullOrBlank() }
+            }
+
+            override fun getActionUpdateThread() = ActionUpdateThread.EDT
+        }
+        val dependenciesAction = object : DumbAwareAction(
+            "Dependencies",
+            "Explore direct Maven dependencies and workspace dependents",
+            MphIcons.Dependencies,
+        ) {
+            override fun actionPerformed(event: AnActionEvent) = openDependencyExplorer()
+
+            override fun update(event: AnActionEvent) {
+                event.presentation.isEnabled = selectedBuildProjects().size == 1
+            }
+
+            override fun getActionUpdateThread() = ActionUpdateThread.EDT
+        }
+        val buildOrderAction = object : DumbAwareAction(
+            "Build Order",
+            "Calculate repository build stages from Maven dependencies",
+            MphIcons.BuildOrder,
+        ) {
+            override fun actionPerformed(event: AnActionEvent) = openBuildOrder()
+
+            override fun update(event: AnActionEvent) {
+                event.presentation.isEnabled = snapshot.projectCount > 0
+            }
+
+            override fun getActionUpdateThread() = ActionUpdateThread.EDT
+        }
+        val managedVersionsAction = object : DumbAwareAction(
+            "Managed Versions",
+            "Inspect and override managed Maven version properties or upgrade Spring Boot",
+            AllIcons.Nodes.Property,
+        ) {
+            override fun actionPerformed(event: AnActionEvent) {
+                selectedBuildProjects().singleOrNull()?.let { ManagedVersionsDialog(project, it).show() }
+            }
+
+            override fun update(event: AnActionEvent) {
+                event.presentation.isEnabled = selectedBuildProjects().size == 1
+            }
+
+            override fun getActionUpdateThread() = ActionUpdateThread.EDT
+        }
+        val sbomAction = object : DumbAwareAction(
+            "SBOM",
+            "Inspect the resolved dependency tree and export a CycloneDX SBOM",
+            MphIcons.Sbom,
+        ) {
+            override fun actionPerformed(event: AnActionEvent) {
+                selectedBuildProjects().singleOrNull()?.let { selected ->
+                    try {
+                        SbomDialog(project, project.service<IntellijSbomService>().inspect(selected)).show()
+                    } catch (error: IllegalArgumentException) {
+                        Messages.showErrorDialog(project, error.message, "Cannot Inspect Dependencies")
+                    }
+                }
+            }
+
+            override fun update(event: AnActionEvent) {
+                event.presentation.isEnabled = selectedBuildProjects().size == 1
+            }
+
+            override fun getActionUpdateThread() = ActionUpdateThread.EDT
+        }
+        val nexusIqAction = object : DumbAwareAction(
+            "Nexus IQ",
+            "Evaluate the selected Maven project and inspect policy violations",
+            MphIcons.SecurityScan,
+        ) {
+            override fun actionPerformed(event: AnActionEvent) {
+                if (!ApplicationManager.getApplication().service<NexusIqSettings>().configured()) {
+                    ShowSettingsUtil.getInstance().showSettingsDialog(project, NexusIqConfigurable::class.java)
+                }
+                if (ApplicationManager.getApplication().service<NexusIqSettings>().configured()) {
+                    selectedBuildProjects().singleOrNull()?.let { NexusIqDialog(project, it).show() }
+                }
+            }
+
+            override fun update(event: AnActionEvent) {
+                event.presentation.isEnabled = selectedBuildProjects().size == 1
+            }
+
+            override fun getActionUpdateThread() = ActionUpdateThread.EDT
+        }
+        val settingsAction = object : DumbAwareAction(
+            "Settings",
+            "Configure Maven Project Helper and Nexus IQ",
+            AllIcons.General.Settings,
+        ) {
+            override fun actionPerformed(event: AnActionEvent) {
+                ShowSettingsUtil.getInstance().showSettingsDialog(project, NexusIqConfigurable::class.java)
+            }
+        }
+        val aboutAction = object : DumbAwareAction(
+            "About",
+            "About Maven Project Helper",
+            AllIcons.General.Information,
+        ) {
+            override fun actionPerformed(event: AnActionEvent) = AboutMphDialog(project).show()
+        }
+        val recoveryAction = object : DumbAwareAction("Recovery Copies", "Browse retained Git instructions and POM copies", AllIcons.Actions.Rollback) {
+            override fun actionPerformed(event: AnActionEvent) {
+                RecoveryBrowserDialog(project, snapshot.groups.mapNotNull { it.rootPath }).show()
+            }
+        }
+        val toolbar = ActionManager.getInstance().createActionToolbar(
+            ActionPlaces.TOOLWINDOW_TOOLBAR_BAR,
+            toolbarActions.apply {
+                addAll(dependenciesAction, buildOrderAction, managedVersionsAction, sbomAction, nexusIqAction)
+                addSeparator()
+                addAll(updateVersionAction, alignVersionsAction, realignVersionsAction)
+                addSeparator()
+                addAll(buildAction, rebaseAction, recoveryAction)
+                addSeparator()
+                addAll(aboutAction, settingsAction)
+                addSeparator()
+                addAll(expandAllAction, collapseAllAction, refreshAction)
+            },
+            true,
+        )
+        toolbar.targetComponent = this
+        setToolbar(toolbar.component)
+
+        tree.isRootVisible = false
+        tree.showsRootHandles = true
+        tree.selectionModel.selectionMode = javax.swing.tree.TreeSelectionModel.DISCONTIGUOUS_TREE_SELECTION
+        tree.emptyText.text = "No linked Maven projects"
+        tree.cellRenderer = MphProjectTreeRenderer()
+        TreeSpeedSearch.installOn(tree, true) { path -> path.lastPathComponent.toString() }
+        val contextMenu = ActionManager.getInstance().createActionPopupMenu(
+            ActionPlaces.TOOLWINDOW_POPUP,
+            contextActions.apply {
+                add(openPomAction)
+                addSeparator("Inspect")
+                addAll(dependenciesAction, buildOrderAction, managedVersionsAction, sbomAction, nexusIqAction)
+                addSeparator("Versions")
+                addAll(updateVersionAction, alignVersionsAction, realignVersionsAction)
+                addSeparator("Build and Git")
+                addAll(buildAction, rebaseAction, recoveryAction)
+            },
+        )
+        tree.addMouseListener(object : MouseAdapter() {
+            override fun mousePressed(event: MouseEvent) = showContextMenu(event)
+
+            override fun mouseReleased(event: MouseEvent) = showContextMenu(event)
+
+            override fun mouseClicked(event: MouseEvent) {
+                if (event.clickCount == 2 && event.button == MouseEvent.BUTTON1) {
+                    openSelectedPom()
+                }
+            }
+
+            private fun showContextMenu(event: MouseEvent) {
+                if (!event.isPopupTrigger) return
+                val path = tree.getPathForLocation(event.x, event.y) ?: return
+                selectContextTarget(path)
+                contextMenu.component.show(tree, event.x, event.y)
+            }
+        })
+
+        val contextKey = "mph.contextMenu"
+        tree.getInputMap(JComponent.WHEN_FOCUSED).put(javax.swing.KeyStroke.getKeyStroke("shift F10"), contextKey)
+        tree.getInputMap(JComponent.WHEN_FOCUSED).put(javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_CONTEXT_MENU, 0), contextKey)
+        tree.actionMap.put(contextKey, object : javax.swing.AbstractAction() {
+            override fun actionPerformed(event: java.awt.event.ActionEvent) {
+                val path = tree.selectionPath ?: return
+                val bounds = tree.getPathBounds(path) ?: return
+                contextMenu.component.show(tree, bounds.x, bounds.y + bounds.height)
+            }
+        })
+        tree.accessibleContext.accessibleName = "Maven projects and repositories"
+
+        val body = JPanel(BorderLayout())
+        body.add(createHeader(), BorderLayout.NORTH)
+        body.add(ScrollPaneFactory.createScrollPane(tree, true), BorderLayout.CENTER)
+        setContent(body)
+
+        project.messageBus.connect(this).subscribe(
+            VirtualFileManager.VFS_CHANGES,
+            object : BulkFileListener {
+                override fun after(events: List<VFileEvent>) {
+                    if (containsPomChange(events.map(VFileEvent::getPath))) {
+                        ApplicationManager.getApplication().invokeLater(::refresh)
+                    }
+                }
+            },
+        )
+
+        if (refreshOnCreate) refresh()
+    }
+
+    internal val summaryText: String
+        get() = summary.text
+
+    internal val projectTree: Tree
+        get() = tree
+
+    internal fun containsPomChange(paths: List<String>): Boolean =
+        paths.any { it.endsWith("/pom.xml") || it.endsWith("\\pom.xml") }
+
+    internal fun refresh() {
+        if (project.isDisposed) return
+        summary.text = "Refreshing Maven projects…"
+
+        queueRefreshTask(createRefreshTask())
+    }
+
+    internal fun reloadAndRefresh() {
+        if (project.isDisposed || reloadInProgress) return
+        reloadInProgress = true
+        summary.text = "Reloading Maven projects…"
+        (reloadMavenProjects ?: ::reloadMavenModel)(
+            {
+                ApplicationManager.getApplication().invokeLater {
+                    reloadInProgress = false
+                    refresh()
+                }
+            },
+            { error ->
+                ApplicationManager.getApplication().invokeLater {
+                    reloadInProgress = false
+                    summary.text = "Unable to reload Maven projects: ${error.message ?: error.javaClass.simpleName}"
+                }
+            },
+        )
+    }
+
+    private fun reloadMavenModel(onSuccess: () -> Unit, onFailure: (Throwable) -> Unit) {
+        val owner = try {
+            WorkspaceOperationCoordinator.acquire("Maven refresh")
+        } catch (error: WorkspaceOperationBusyException) {
+            onFailure(error)
+            return
+        }
+        try {
+            FileDocumentManager.getInstance().saveAllDocuments()
+            project.service<MavenModelRefreshService>().reload(
+                { owner.close(); onSuccess() },
+                { error -> owner.close(); onFailure(error) },
+            )
+        } catch (error: Exception) {
+            owner.close()
+            onFailure(error)
+        }
+    }
+
+    internal fun createRefreshTask(): Task.Backgroundable =
+        object : Task.Backgroundable(project, "Refreshing Maven Project Helper", false) {
+            private lateinit var snapshot: ProjectSnapshot
+
+            override fun run(indicator: ProgressIndicator) {
+                snapshot = discoverProjects()
+            }
+
+            override fun onSuccess() {
+                render(snapshot)
+            }
+
+            override fun onThrowable(error: Throwable) {
+                summary.text = "Unable to discover Maven projects: ${error.message ?: error.javaClass.simpleName}"
+            }
+        }
+
+    internal fun render(snapshot: ProjectSnapshot) {
+        val hadProjects = rootNode.childCount > 0
+        val expandedRepositories = expandedRepositoryKeys()
+        this.snapshot = snapshot
+        rootNode.removeAllChildren()
+        snapshot.groups.forEach { group -> rootNode.add(groupNode(group)) }
+        treeModel.reload()
+        if (hadProjects) {
+            restoreExpandedRepositories(expandedRepositories)
+        } else {
+            collapseAllRows()
+        }
+        summary.text = "${snapshot.projectCount} Maven projects in ${snapshot.repositoryCount} Git repositories"
+    }
+
+    private fun groupNode(group: GitProjectGroup): DefaultMutableTreeNode {
+        val label = group.rootPath?.let { Path.of(it).fileName?.toString() ?: it } ?: "Outside a Git repository"
+        val repository = RepositoryTreeEntry(label, group.rootPath, group.projects)
+        return DefaultMutableTreeNode(repository).also { node ->
+            group.projects.forEach { node.add(DefaultMutableTreeNode(ProjectTreeEntry(it))) }
+        }
+    }
+
+    private fun createHeader(): JComponent {
+        val title = JBLabel(MPH_TITLE, MphIcons.Mph, SwingConstants.LEFT)
+        title.font = title.font.deriveFont(Font.BOLD, title.font.size2D + 2f)
+        title.iconTextGap = JBUI.scale(10)
+
+        summary.foreground = JBUI.CurrentTheme.ContextHelp.FOREGROUND
+        summary.border = JBUI.Borders.emptyLeft(50)
+
+        return JPanel(BorderLayout(0, JBUI.scale(2))).apply {
+            border = JBUI.Borders.empty(10, 12, 10, 12)
+            add(title, BorderLayout.CENTER)
+            add(summary, BorderLayout.SOUTH)
+        }
+    }
+
+    internal fun expandAllRows() {
+        var row = 0
+        while (row < tree.rowCount) {
+            tree.expandRow(row++)
+        }
+    }
+
+    internal fun collapseAllRows() {
+        var row = tree.rowCount - 1
+        while (row >= 0) {
+            tree.collapseRow(row--)
+        }
+        tree.expandPath(javax.swing.tree.TreePath(rootNode.path))
+    }
+
+    private fun expandedRepositoryKeys(): Set<String> = (0 until tree.rowCount)
+        .filter(tree::isExpanded)
+        .mapNotNull { row ->
+            val node = tree.getPathForRow(row)?.lastPathComponent as? DefaultMutableTreeNode
+            (node?.userObject as? RepositoryTreeEntry)?.let(::repositoryExpansionKey)
+        }
+        .toSet()
+
+    private fun restoreExpandedRepositories(expandedRepositories: Set<String>) {
+        tree.expandPath(javax.swing.tree.TreePath(rootNode.path))
+        for (index in 0 until rootNode.childCount) {
+            val node = rootNode.getChildAt(index) as? DefaultMutableTreeNode ?: continue
+            val repository = node.userObject as? RepositoryTreeEntry ?: continue
+            if (repositoryExpansionKey(repository) in expandedRepositories) {
+                tree.expandPath(javax.swing.tree.TreePath(node.path))
+            }
+        }
+    }
+
+    private fun repositoryExpansionKey(repository: RepositoryTreeEntry): String =
+        repository.rootPath ?: "<outside-git-repository>"
+
+    internal fun openSelectedPom() {
+        val node = tree.lastSelectedPathComponent as? DefaultMutableTreeNode ?: return
+        val projectInfo = when (val entry = node.userObject) {
+            is ProjectTreeEntry -> entry.project
+            is RepositoryTreeEntry -> entry.rootProject()
+            else -> null
+        } ?: return
+        openPom(projectInfo.pomPath)
+    }
+
+    private fun buildSelectedProjects() {
+        val selected = selectedBuildProjects()
+        if (selected.isEmpty()) return
+        val order = WorkspaceDependencyAnalyzer().buildOrderForSelection(
+            selected, project.service<IdeaProjectDiscoveryService>().dependencyDescriptors(),
+        )
+        val steps = order.entries.associate { it.project.pomPath to it.buildStep }
+        if (order.hasCycles) {
+            Messages.showWarningDialog(project, "Resolve workspace dependency cycles before building.", "Cannot Build Projects")
+            return
+        }
+        MavenBuildDialog(project, order.entries.map { it.project }, steps, order.entries.associate { it.project.pomPath to it.prerequisitePomPaths }).show()
+    }
+
+    internal fun selectContextTarget(path: javax.swing.tree.TreePath) {
+        if (!tree.isPathSelected(path)) tree.selectionPath = path
+    }
+
+    internal fun selectedProjects(): List<MavenProjectInfo> = tree.selectionPaths.orEmpty()
+        .flatMap { path ->
+            when (val entry = (path.lastPathComponent as? DefaultMutableTreeNode)?.userObject) {
+                is ProjectTreeEntry -> listOf(entry.project)
+                is RepositoryTreeEntry -> entry.projects
+                else -> emptyList()
+            }
+        }
+        .distinctBy(MavenProjectInfo::pomPath)
+
+    internal fun selectedBuildProjects(): List<MavenProjectInfo> = tree.selectionPaths.orEmpty()
+        .flatMap { path ->
+            when (val entry = (path.lastPathComponent as? DefaultMutableTreeNode)?.userObject) {
+                is ProjectTreeEntry -> listOf(entry.project)
+                is RepositoryTreeEntry -> listOfNotNull(entry.rootProject())
+                else -> emptyList()
+            }
+        }
+        .distinctBy(MavenProjectInfo::pomPath)
+
+    private fun alignSelectedVersions() {
+        try {
+            alignSelectedVersionsOwned()
+        } catch (error: WorkspaceOperationBusyException) {
+            Messages.showWarningDialog(project, error.message.orEmpty(), "Workspace Operation In Progress")
+        }
+    }
+
+    private fun alignSelectedVersionsOwned() {
+        val selected = selectedProjects()
+        if (selected.isEmpty()) return
+        val dialog = BulkVersionUpdateDialog(project, selected)
+        if (!dialog.showAndGet()) return
+
+        if (dialog.branchName.isNotBlank()) {
+            var branchResults = emptyList<nl.hicts.mph.intellij.services.GitBranchResult>()
+            ProgressManager.getInstance().run(object : Task.Modal(project, "Preparing Git branches", true) {
+                override fun run(indicator: ProgressIndicator) {
+                    branchResults = project.service<GitWorkspaceService>().createOrCheckoutBranch(
+                        selected.mapNotNull(MavenProjectInfo::gitRootPath),
+                        dialog.branchName,
+                    )
+                }
+            })
+            val failures = branchResults.filterNot(nl.hicts.mph.intellij.services.GitBranchResult::success)
+            if (failures.isNotEmpty()) {
+                Messages.showErrorDialog(
+                    project,
+                    failures.joinToString("\n") { "${it.rootPath}: ${it.message}" },
+                    "Git Branch Preparation Failed",
+                )
+                refresh()
+                return
+            }
+        }
+
+        val result = reviewVersionAlignment(project,
+            BulkVersionUpdateRequest(
+                selectedProjects = selected,
+                workspaceProjects = snapshot.groups.flatMap(GitProjectGroup::projects),
+                prefix = dialog.prefix,
+                mode = dialog.mode,
+                updateDependents = dialog.updateDependents,
+            ),
+        )
+        if (result == null) return
+        val summary = buildString {
+            append("Updated ${result.updatedProjectCount} project")
+            if (result.updatedProjectCount != 1) append('s')
+            append(" and ${result.updatedReferenceCount} dependent reference")
+            if (result.updatedReferenceCount != 1) append('s')
+            append(". Changes remain uncommitted and can be undone together.")
+            if (result.issues.isNotEmpty()) {
+                append("<br><br>")
+                append(result.issues.joinToString("<br>") { issue -> "• $issue" })
+            }
+        }
+        NotificationGroupManager.getInstance()
+            .getNotificationGroup(MPH_TITLE)
+            .createNotification(
+                "Maven version alignment completed",
+                summary,
+                if (result.issues.isEmpty()) NotificationType.INFORMATION else NotificationType.WARNING,
+            )
+            .notify(project)
+        refresh()
+    }
+
+    private fun updateSelectedProjectVersion() {
+        try {
+            updateSelectedProjectVersionOwned()
+        } catch (error: WorkspaceOperationBusyException) {
+            Messages.showWarningDialog(project, error.message.orEmpty(), "Workspace Operation In Progress")
+        }
+    }
+
+    private fun updateSelectedProjectVersionOwned() {
+        val selected = selectedBuildProjects().singleOrNull() ?: return
+        val dialog = ProjectVersionUpdateDialog(project, selected)
+        if (!dialog.showAndGet()) return
+        val workspace = workspaceProjects()
+        val rootDirectory = Path.of(selected.pomPath).toAbsolutePath().normalize().parent
+        val projectAndModules = workspace.filter { info ->
+            Path.of(info.pomPath).toAbsolutePath().normalize().startsWith(rootDirectory)
+        }
+        val result = reviewVersionAlignment(project,
+            BulkVersionUpdateRequest(
+                selectedProjects = projectAndModules.ifEmpty { listOf(selected) },
+                workspaceProjects = workspace,
+                prefix = dialog.selectedVersion,
+                mode = nl.hicts.mph.intellij.services.BulkVersionMode.SET_VERSION,
+                updateDependents = true,
+            ),
+        )
+        if (result == null) return
+        notifyVersionResult("Maven versions updated", result)
+        refresh()
+    }
+
+    internal fun realignSelectedVersions() {
+        val selectedPomPaths = selectedProjects().map(MavenProjectInfo::pomPath).toSet()
+        if (selectedPomPaths.isEmpty() || reloadInProgress) return
+        reloadInProgress = true
+        summary.text = "Reloading root Maven projects before realigning versions…"
+        (reloadMavenProjects ?: ::reloadMavenModel)(
+            {
+                ApplicationManager.getApplication().invokeLater {
+                    reloadInProgress = false
+                    queueRefreshTask(createRealignmentTask(selectedPomPaths))
+                }
+            },
+            { error ->
+                ApplicationManager.getApplication().invokeLater {
+                    reloadInProgress = false
+                    summary.text = "Unable to reload Maven projects: ${error.message ?: error.javaClass.simpleName}"
+                }
+            },
+        )
+    }
+
+    internal fun createRealignmentTask(selectedPomPaths: Set<String>): Task.Backgroundable =
+        object : Task.Backgroundable(project, "Reloading Maven versions", false) {
+            private lateinit var refreshedSnapshot: ProjectSnapshot
+
+            override fun run(indicator: ProgressIndicator) {
+                refreshedSnapshot = discoverProjects()
+            }
+
+            override fun onSuccess() {
+                render(refreshedSnapshot)
+                val workspace = workspaceProjects()
+                val selected = workspace.filter { it.pomPath in selectedPomPaths }
+                if (selected.isEmpty()) {
+                    summary.text = "The selected Maven projects were not found after reloading."
+                    return
+                }
+                try {
+                    val result = realignVersions(selected, workspace) ?: return
+                    notifyVersionResult("Maven references realigned", result)
+                    refresh()
+                } catch (error: WorkspaceOperationBusyException) {
+                    summary.text = error.message
+                }
+            }
+
+            override fun onThrowable(error: Throwable) {
+                summary.text = "Unable to rediscover Maven projects: ${error.message ?: error.javaClass.simpleName}"
+            }
+        }
+
+    private fun notifyVersionResult(title: String, result: nl.hicts.mph.intellij.services.BulkVersionUpdateResult) {
+        versionResultNotifier?.let { notifier ->
+            notifier(title, result)
+            return
+        }
+        val details = "Updated ${result.updatedProjectCount} project versions and " +
+            "${result.updatedReferenceCount} dependent references." +
+            result.issues.takeIf { it.isNotEmpty() }?.joinToString("<br>", "<br><br>").orEmpty()
+        NotificationGroupManager.getInstance().getNotificationGroup(MPH_TITLE)
+            .createNotification(
+                title,
+                details,
+                if (result.issues.isEmpty()) NotificationType.INFORMATION else NotificationType.WARNING,
+            ).notify(project)
+    }
+
+    private fun workspaceProjects(): List<MavenProjectInfo> = snapshot.groups.flatMap(GitProjectGroup::projects)
+
+    private fun openRebaseDialog() {
+        val selected = selectedProjects()
+        if (selected.isEmpty()) return
+        val workspaceProjects = snapshot.groups.flatMap(GitProjectGroup::projects)
+        val plan = try {
+            project.service<GitRebaseService>().createPlan(selected, workspaceProjects)
+        } catch (error: IllegalArgumentException) {
+            Messages.showErrorDialog(
+                project,
+                error.message ?: "The selected repositories cannot be rebased safely.",
+                "Cannot Synchronize Repositories",
+            )
+            return
+        }
+        GitRebaseDialog(project, plan).show()
+    }
+
+    private fun openDependencyExplorer() {
+        val selected = selectedBuildProjects().singleOrNull() ?: return
+        val descriptors = project.service<IdeaProjectDiscoveryService>().dependencyDescriptors()
+        val relationships = WorkspaceDependencyAnalyzer().relationships(selected.pomPath, descriptors) ?: return
+        DependencyExplorerDialog(project, relationships, openPom).show()
+    }
+
+    private fun openBuildOrder() {
+        val descriptors = project.service<IdeaProjectDiscoveryService>().dependencyDescriptors()
+        val order = WorkspaceDependencyAnalyzer().buildOrder(descriptors)
+        BuildOrderDialog(project, order, descriptors, openPom).show()
+    }
+
+    override fun dispose() = Unit
+}
+
+internal data class ProjectTreeEntry(
+    val project: MavenProjectInfo,
+) {
+    override fun toString(): String = project.artifactId
+}
+
+internal data class RepositoryTreeEntry(
+    val label: String,
+    val rootPath: String?,
+    val projects: List<MavenProjectInfo>,
+) {
+    fun rootProject(): MavenProjectInfo? {
+        val root = rootPath?.let(Path::of)?.toAbsolutePath()?.normalize()
+        return projects.minByOrNull { project ->
+            val parent = Path.of(project.pomPath).toAbsolutePath().normalize().parent
+            if (root != null && parent.startsWith(root)) root.relativize(parent).nameCount else parent.nameCount
+        }
+    }
+
+    override fun toString(): String = label
+}
+
+internal class MphProjectTreeRenderer : ColoredTreeCellRenderer() {
+    override fun customizeCellRenderer(
+        tree: JTree,
+        value: Any,
+        selected: Boolean,
+        expanded: Boolean,
+        leaf: Boolean,
+        row: Int,
+        hasFocus: Boolean,
+    ) {
+        toolTipText = null
+        when (val entry = (value as? DefaultMutableTreeNode)?.userObject) {
+            is RepositoryTreeEntry -> {
+                icon = AllIcons.Nodes.Folder
+                append(entry.label, SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES)
+                val rootProject = entry.rootProject()
+                rootProject?.version?.takeIf(String::isNotBlank)?.let { version ->
+                    append("  $version", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                }
+                rootProject?.gitStatus?.let { status ->
+                    append("  ${status.branchName}", SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES)
+                    if (status.behindCount > 0) append("  ↓${status.behindCount}", SimpleTextAttributes.ERROR_ATTRIBUTES)
+                    if (status.aheadCount > 0) append("  ↑${status.aheadCount}", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                }
+            }
+
+            is ProjectTreeEntry -> {
+                icon = AllIcons.Nodes.Module
+                append(entry.project.artifactId, SimpleTextAttributes.REGULAR_ATTRIBUTES)
+            }
+
+            else -> append(entry?.toString().orEmpty())
+        }
+    }
+}

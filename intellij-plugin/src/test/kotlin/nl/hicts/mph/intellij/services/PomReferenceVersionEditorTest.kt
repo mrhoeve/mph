@@ -1,0 +1,195 @@
+package nl.hicts.mph.intellij.services
+
+import nl.hicts.mph.intellij.model.MavenCoordinates
+import nl.hicts.mph.intellij.model.MavenReferenceKind
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class PomReferenceVersionEditorTest {
+    @Test fun `shared dependency properties cannot overwrite the version of another artifact`() {
+        val source = """<project><properties><shared.version>1.0</shared.version></properties><dependencies>
+            <dependency><groupId>org.example</groupId><artifactId>first</artifactId><version>${'$'}{shared.version}</version></dependency>
+            <dependency><groupId>org.example</groupId><artifactId>second</artifactId><version>${'$'}{shared.version}</version></dependency>
+            </dependencies></project>"""
+        val first = PomReferenceVersionEditor.update(source, MavenCoordinates("org.example", "first"), "2.0", MavenReferenceKind.entries.toSet())
+        assertTrue(first.content.contains("<artifactId>first</artifactId><version>2.0</version>"))
+        assertTrue(first.content.contains("<shared.version>1.0</shared.version>"))
+        val second = PomReferenceVersionEditor.update(first.content, MavenCoordinates("org.example", "second"), "3.0", MavenReferenceKind.entries.toSet())
+        assertTrue(second.content.contains("<artifactId>first</artifactId><version>2.0</version>"))
+        assertTrue(second.content.contains("<shared.version>3.0</shared.version>"))
+    }
+    @Test
+    fun `adds updates and removes local Maven properties with comments`() {
+        val original = """
+            <project>
+                <modelVersion>4.0.0</modelVersion>
+                <properties>
+                    <java.version>21</java.version>
+                </properties>
+            </project>
+        """.trimIndent()
+
+        val added = PomReferenceVersionEditor.upsertProperty(
+            original,
+            "spring-cloud.version",
+            "2025.1.2",
+            "Temporary compatibility override",
+        )
+        assertTrue(added.changed)
+        assertTrue(added.content.contains("<!-- Temporary compatibility override -->"))
+        assertEquals("2025.1.2", PomReferenceVersionEditor.localProperties(added.content)
+            .single { it.name == "spring-cloud.version" }.value)
+
+        val updated = PomReferenceVersionEditor.upsertProperty(added.content, "spring-cloud.version", "2025.1.3")
+        assertTrue(updated.content.contains("<spring-cloud.version>2025.1.3</spring-cloud.version>"))
+
+        val removed = PomReferenceVersionEditor.removeProperty(updated.content, "spring-cloud.version")
+        assertTrue(removed.changed)
+        assertFalse(removed.content.contains("spring-cloud.version"))
+        assertFalse(removed.content.contains("Temporary compatibility override"))
+    }
+    private val target = MavenCoordinates("org.example", "shared-api")
+
+    @Test
+    fun `updates parent direct and managed dependency versions only`() {
+        val pom = pom(
+            projectVersion = "1.0-SNAPSHOT",
+            body = """
+                <parent>
+                    <groupId>org.example</groupId><artifactId>shared-api</artifactId><version>1.0</version>
+                </parent>
+                <!-- <dependency><groupId>org.example</groupId><artifactId>shared-api</artifactId><version>comment</version></dependency> -->
+                <dependencies>
+                    <dependency><groupId>org.example</groupId><artifactId>shared-api</artifactId><version>1.0</version></dependency>
+                </dependencies>
+                <dependencyManagement><dependencies>
+                    <dependency><groupId>org.example</groupId><artifactId>shared-api</artifactId><version>1.0</version></dependency>
+                </dependencies></dependencyManagement>
+                <build><plugins><plugin><dependencies>
+                    <dependency><groupId>org.example</groupId><artifactId>shared-api</artifactId><version>plugin-version</version></dependency>
+                </dependencies></plugin></plugins></build>
+            """.trimIndent(),
+        )
+
+        val result = PomReferenceVersionEditor.update(pom, target, "2.0-SNAPSHOT", MavenReferenceKind.entries.toSet())
+
+        assertTrue(result.changed)
+        assertEquals(3, result.updatedReferenceCount)
+        assertEquals(3, Regex("<version>2.0-SNAPSHOT</version>").findAll(result.content).count())
+        assertTrue(result.content.contains("<version>plugin-version</version>"))
+        assertTrue(result.content.contains("<version>comment</version>"))
+    }
+
+    @Test
+    fun `updates a local version property once for every matching reference`() {
+        val pom = pom(
+            body = """
+                <properties><shared-api.version>1.0</shared-api.version></properties>
+                <dependencies>
+                    <dependency><groupId>org.example</groupId><artifactId>shared-api</artifactId><version>${'$'}{shared-api.version}</version></dependency>
+                </dependencies>
+                <dependencyManagement><dependencies>
+                    <dependency><groupId>org.example</groupId><artifactId>shared-api</artifactId><version>${'$'}{shared-api.version}</version></dependency>
+                </dependencies></dependencyManagement>
+            """.trimIndent(),
+        )
+
+        val result = PomReferenceVersionEditor.update(
+            pom,
+            target,
+            "2.0",
+            setOf(MavenReferenceKind.DEPENDENCY, MavenReferenceKind.MANAGED_DEPENDENCY),
+        )
+
+        assertEquals(2, result.updatedReferenceCount)
+        assertTrue(result.content.contains("<shared-api.version>2.0</shared-api.version>"))
+        assertTrue(result.unresolvedProperties.isEmpty())
+    }
+
+    @Test
+    fun `reports inherited properties and references without a local version`() {
+        val pom = pom(
+            body = """
+                <dependencies>
+                    <dependency><groupId>org.example</groupId><artifactId>shared-api</artifactId><version>${'$'}{inherited.version}</version></dependency>
+                    <dependency><groupId>org.example</groupId><artifactId>shared-api</artifactId></dependency>
+                </dependencies>
+            """.trimIndent(),
+        )
+
+        val result = PomReferenceVersionEditor.update(
+            pom,
+            target,
+            "2.0",
+            setOf(MavenReferenceKind.DEPENDENCY),
+        )
+
+        assertFalse(result.changed)
+        assertEquals(setOf("inherited.version"), result.unresolvedProperties)
+        assertEquals(1, result.missingVersionCount)
+    }
+
+    @Test
+    fun `finds literal and property based project versions`() {
+        assertEquals("2.0", PomReferenceVersionEditor.findProjectVersion(pom(projectVersion = "2.0")))
+        assertEquals(
+            "2.1-SNAPSHOT",
+            PomReferenceVersionEditor.findProjectVersion(
+                pom(
+                    projectVersion = "${'$'}{revision}",
+                    body = "<properties><revision>2.1-SNAPSHOT</revision></properties>",
+                ),
+            ),
+        )
+        assertEquals(null, PomReferenceVersionEditor.findProjectVersion(pom(projectVersion = null)))
+    }
+
+    @Test
+    fun `updates literal and property based project versions`() {
+        val literal = PomReferenceVersionEditor.updateProjectVersion(pom(projectVersion = "1.0"), "2.0")
+        val property = PomReferenceVersionEditor.updateProjectVersion(
+            pom(
+                projectVersion = "${'$'}{revision}",
+                body = "<properties><revision>1.0</revision></properties>",
+            ),
+            "2.0",
+        )
+
+        assertTrue(literal.changed)
+        assertTrue(literal.content.contains("<version>2.0</version>"))
+        assertTrue(property.changed)
+        assertTrue(property.content.contains("<revision>2.0</revision>"))
+        assertEquals(null, property.unresolvedProperty)
+    }
+
+    @Test
+    fun `reports a missing project version property without changing the pom`() {
+        val source = pom(projectVersion = "${'$'}{revision}")
+
+        val result = PomReferenceVersionEditor.updateProjectVersion(source, "2.0")
+
+        assertFalse(result.changed)
+        assertEquals(source, result.content)
+        assertEquals("revision", result.unresolvedProperty)
+    }
+
+    @Test
+    fun `rejects unsafe target versions`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            PomReferenceVersionEditor.update(pom(), target, "2<&", setOf(MavenReferenceKind.DEPENDENCY))
+        }
+    }
+
+    private fun pom(projectVersion: String? = null, body: String = ""): String = """
+        <project>
+            <modelVersion>4.0.0</modelVersion>
+            <groupId>org.example</groupId>
+            <artifactId>sample-service</artifactId>
+            ${projectVersion?.let { "<version>$it</version>" }.orEmpty()}
+            $body
+        </project>
+    """.trimIndent()
+}

@@ -1,0 +1,114 @@
+package nl.hicts.mph.intellij.services
+
+import com.intellij.openapi.components.Service
+import com.intellij.openapi.components.service
+import com.intellij.openapi.project.Project
+import git4idea.repo.GitRepositoryManager
+import nl.hicts.mph.intellij.model.DependentProjectsAnalysis
+import nl.hicts.mph.intellij.model.DependentProjectsAnalyzer
+import nl.hicts.mph.intellij.model.MavenCoordinates
+import nl.hicts.mph.intellij.model.MavenProjectDescriptor
+import nl.hicts.mph.intellij.model.MavenProjectDependencyDescriptor
+import nl.hicts.mph.intellij.model.ProjectSnapshot
+import nl.hicts.mph.intellij.model.ProjectSnapshotBuilder
+import org.jetbrains.idea.maven.project.MavenProjectsManager
+import java.nio.file.Path
+import java.nio.file.Files
+
+@Service(Service.Level.PROJECT)
+class IdeaProjectDiscoveryService(
+    private val project: Project,
+) {
+    fun discover(includeGitStatus: Boolean = true): ProjectSnapshot {
+        val mavenProjects = MavenProjectsManager.getInstance(project).projects
+        val snapshot = ProjectSnapshotBuilder().build(
+            mavenProjects.map { mavenProject ->
+                MavenProjectDescriptor(
+                    groupId = mavenProject.mavenId.groupId,
+                    artifactId = mavenProject.mavenId.artifactId ?: mavenProject.displayName,
+                    version = mavenProject.mavenId.version,
+                    pomPath = mavenProject.file.path,
+                )
+            },
+            gitRootPaths(),
+        )
+        if (!includeGitStatus) return snapshot
+        val statuses = snapshot.groups.mapNotNull { group ->
+            group.rootPath?.let { it to project.service<GitWorkspaceService>().status(it) }
+        }.toMap()
+        return snapshot.copy(groups = snapshot.groups.map { group ->
+            group.copy(projects = group.projects.map { info -> info.copy(gitStatus = statuses[group.rootPath]) })
+        })
+    }
+
+    fun findDependents(targetPomPath: String, targetPomContent: String? = null): DependentProjectsAnalysis? {
+        val descriptors = dependencyDescriptors()
+        val analysis = DependentProjectsAnalyzer().analyze(targetPomPath, descriptors) ?: return null
+        val documentVersion = targetPomContent?.let(PomReferenceVersionEditor::findProjectVersion)
+        return if (documentVersion == null) {
+            analysis
+        } else {
+            analysis.copy(target = analysis.target.copy(version = documentVersion))
+        }
+    }
+
+    fun dependencyDescriptors(): List<MavenProjectDependencyDescriptor> {
+        val mavenProjects = MavenProjectsManager.getInstance(project).projects
+        val projectInfos = ProjectSnapshotBuilder().build(
+            mavenProjects.map { mavenProject ->
+                MavenProjectDescriptor(
+                    groupId = mavenProject.mavenId.groupId,
+                    artifactId = mavenProject.mavenId.artifactId ?: mavenProject.displayName,
+                    version = mavenProject.mavenId.version,
+                    pomPath = mavenProject.file.path,
+                )
+            },
+            gitRootPaths(),
+        ).groups.flatMap { it.projects }.associateBy { normalizedPath(it.pomPath) }
+
+        return mavenProjects.mapNotNull { mavenProject ->
+            val projectInfo = projectInfos[normalizedPath(mavenProject.file.path)] ?: return@mapNotNull null
+            val declarations = runCatching {
+                PomDependencyDeclarations.parse(
+                    Files.readString(Path.of(mavenProject.file.path)),
+                    java.util.Properties().apply {
+                        putAll(mavenProject.properties)
+                        val id = mavenProject.mavenId
+                        id.groupId?.let { group ->
+                            setProperty("project.groupId", group)
+                            setProperty("pom.groupId", group)
+                        }
+                        id.artifactId?.let { artifact ->
+                            setProperty("project.artifactId", artifact)
+                            setProperty("pom.artifactId", artifact)
+                        }
+                        id.version?.let { version ->
+                            setProperty("project.version", version)
+                            setProperty("pom.version", version)
+                        }
+                    },
+                )
+            }.getOrNull()
+            MavenProjectDependencyDescriptor(
+                project = projectInfo,
+                parent = coordinates(mavenProject.parentId?.groupId, mavenProject.parentId?.artifactId),
+                dependencies = declarations?.dependencies ?: mavenProject.dependencies.mapNotNull { dependency ->
+                    coordinates(dependency.groupId, dependency.artifactId)
+                }.toSet(),
+                managedDependencies = declarations?.managedDependencies ?: emptySet(),
+            )
+        }
+    }
+
+    private fun gitRootPaths(): List<String> =
+        GitRepositoryManager.getInstance(project).repositories.map { repository ->
+            repository.root.path
+        }
+
+    private fun coordinates(groupId: String?, artifactId: String?): MavenCoordinates? =
+        groupId?.takeIf(String::isNotBlank)?.let { group ->
+            artifactId?.takeIf(String::isNotBlank)?.let { artifact -> MavenCoordinates(group, artifact) }
+        }
+
+    private fun normalizedPath(path: String): Path = Path.of(path).toAbsolutePath().normalize()
+}

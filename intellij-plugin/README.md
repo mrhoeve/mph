@@ -1,0 +1,101 @@
+# MPH IntelliJ IDEA plugin
+
+This module provides Maven Project Helper as a native IntelliJ IDEA plugin for multi-module, multi-repository workspaces.
+
+## Features
+
+- Adds an **MPH** tool window.
+- Reads the Maven projects already linked to the opened IDEA project.
+- Groups Maven projects by their nearest registered Git root.
+- Shows Maven coordinates and versions.
+- Opens a project's `pom.xml` on double-click.
+- Refreshes manually and after a `pom.xml` filesystem change.
+- Adds **Update Dependent Maven Projects…** to the editor and Project-view context menus for `pom.xml` files.
+- Previews every linked project that uses the selected project as a parent, dependency, or managed dependency.
+- Updates literal and locally property-managed versions as one undoable IntelliJ command after confirmation.
+- Reports inherited properties and references without a local version instead of modifying them unsafely.
+- Supports selecting multiple modules or complete repositories in the **MPH** tool window.
+- Adds or removes one shared version prefix and optionally updates dependent references across all linked projects as one undoable operation.
+- Sets a project and its modules to a manually entered version or the version found in the latest Git tag, then updates every linked usage.
+- Optionally creates or checks out one shared Git branch before applying a bulk version prefix.
+- Shows each repository's current branch and its ahead/behind status relative to `origin/develop`.
+- Realigns dependent references to the selected projects' current versions without changing those project versions.
+- Runs configurable Maven goals sequentially or in dependency-aware parallel stages, preferring each repository's Maven wrapper and streaming output into an IntelliJ console.
+- Synchronizes prefixed feature branches with `origin/develop`: fetches, safely updates the local `develop` reference, stashes tracked and untracked work, rebases, restores the stash, and reapplies the prefix to the current versions.
+- Explores incoming and outgoing Maven relationships, including dependencies outside the current IDEA workspace.
+- Calculates repository build stages, visualizes the complete project and module dependency graph, highlights dependency cycles, builds in that order, and exports the plan as Excel or the graph as PNG.
+- Shows effective managed version properties, filters local overrides, adds or removes overrides, upgrades Spring Boot parent or BOM versions, and retrieves Nexus IQ remediation recommendations for managed components.
+- Inspects the resolved direct and transitive dependency tree and exports CycloneDX 1.5 JSON or XML SBOMs.
+- Runs Nexus IQ evaluations, retrieves security-policy results, and links directly to the generated report.
+
+After a version update, IntelliJ refreshes its linked Maven model automatically. POM edits remain uncommitted and each alignment can be reverted with **Undo**. Git rebases have separate recovery instructions and retained backups.
+
+## Using the tool window
+
+Open **View -> Tool Windows -> MPH**. Select modules with Ctrl-click (Cmd-click on macOS), or select a repository row to include all its modules.
+
+- **Align Versions** previews the selected projects, adds or removes a prefix, and can update references in every linked Maven project.
+- **Update Version** accepts an explicit version or discovers it from the latest Git tag, updating modules and usages together.
+- **Realign Versions** repairs linked references using every selected project's current version.
+- **Build** runs `clean install` by default. Unit and integration tests can be enabled in the dialog. Selecting a repository row builds its root POM; selecting individual modules builds those POMs.
+- **Sync with develop** is available for projects in Git repositories. It refuses protected branches (`main`, `master`, and `develop`), detached heads, active Git operations, divergent local `develop` branches, and repositories without `origin/develop`.
+- **Recovery Copies** lists saved POM copies and synchronization instructions. Reviewed cleanup removes only the selected copy/instruction files; Git recovery refs and stashes are retained.
+- **Dependencies** shows what the selected module uses and which linked modules use it. Double-click a linked module to open its POM.
+- **Build Order** groups repositories into safe build stages, offers a focusable graph with zoom, pan, POM navigation and PNG export, can pass the calculated order to the Maven build dialog, and exports an `.xlsx` plan.
+- **Managed Versions** searches effective version properties, optionally shows only local overrides, and offers a Spring Boot upgrade when a parent or BOM is detected.
+- **SBOM** shows the resolved Maven dependency tree and exports CycloneDX 1.5 JSON or XML.
+- **Nexus IQ** evaluates a project whose `Jenkinsfile` calls `servicePipeline(...)` or `libraryPipeline(...)`, then displays its security-policy violations.
+
+## Nexus IQ configuration
+
+Open **Settings -> Tools -> Maven Project Helper**, or use the settings button in the MPH tool window. Configure the Nexus IQ server URL, optional username and password/token, and any application-ID prefix or suffix used by your organization. The password is stored in IntelliJ's Password Safe and is never written to the plugin settings file.
+
+The application ID is derived from the selected repository's `Jenkinsfile`, matching the standalone application's behavior. Maven repository mirrors, credentials, local-repository location, and environment placeholders continue to come from the developer's normal Maven configuration because the plugin invokes the repository's Maven wrapper (or `mvn`) in that project directory.
+
+Repositories are processed sequentially. Committed version-only `pom.xml` conflicts are resolved from the updated `develop` version. Source-code and structural POM conflicts remain available for manual resolution. Conflicts while restoring uncommitted work are never resolved automatically, including version conflicts. Processing continues with other repositories; final version alignment runs only if every repository succeeds.
+
+Before synchronization, editor changes must be saved. The plugin keeps named backups of both the original commits and the tracked/untracked safety stash under `refs/mph/recovery/`, even after successful restoration. The stash backup survives ordinary stash cleanup and reflog expiry. Staged and unstaged changes are restored with their original separation when Git can apply the index cleanly. Stop requests take effect between Git commands, so a write in progress can finish safely. No changes are pushed, and local working changes are not committed (rebase still rewrites existing commits).
+
+For a stopped conflict, select its repository row and click **Resolve Conflicts…** to open IntelliJ's normal conflict editor. After resolving, continue the rebase through IntelliJ and follow the retained instructions for local-work restoration before running **Realign Versions**. Resolving a conflict does not automatically continue the rebase or restore the stash.
+
+Version alignment presents a read-only, file-by-file preview. Applying a stale preview is refused if a source document or its disk contents changed. Alignment keeps original disk bytes and editor text under `mph-recovery` in the IDE configuration directory, accessible through **Recovery Copies**.
+
+Select a repository row to copy its recovery instructions. Instructions survive IDE restarts in `.git/mph-recovery/<id>/recovery.txt`. Before final version alignment, all known workspace POMs, including dependent projects outside the selection, are copied to `.git/mph-recovery/alignment-<id>/` in the first selected repository. Its `original-paths.properties` file maps each copy to its original path. Review these copies before restoring; subsequent edits may need to be merged. Keep backups until the synchronized work has been reviewed, then remove only the matching recovery refs, stash, and recovery directory.
+
+Synchronization also refuses submodules, hidden index changes, linked worktree entry points, develop checked out in another worktree, and ignored files that overlap the incoming or replayed history. Merges containing manual changes and merges with more than two parents require manual synchronization: recreating those merges can discard committed work. Unexpected branch, HEAD, or working-tree changes stop the workflow at command boundaries. Unrelated ignored build outputs stay in place. See [the synchronization review](docs/develop-synchronization-review.md) for tested scenarios and limits.
+
+## Run the development IDE
+
+From this directory, run:
+
+```shell
+./gradlew runIde
+```
+
+Open or import a multi-module Maven workspace in the development IDE, then open **View -> Tool Windows -> MPH**.
+
+## Verification
+
+From the repository root, the recommended local command is:
+
+```powershell
+.\build-plugin-local.cmd
+```
+
+The script locates JDK 21 even when `JAVA_HOME` points to another JDK. Pass `-JavaHome 'D:\path\to\jdk-21'` or set `MPH_JAVA_HOME_21` if JDK 21 is installed in a non-standard location.
+
+The equivalent direct Gradle command is:
+
+```shell
+./gradlew test verifyPlugin buildPlugin
+```
+
+Generate the JaCoCo-compatible Kover XML report used by the combined project SonarQube analysis with:
+
+```shell
+./gradlew koverXmlReport
+```
+
+The plugin supports IntelliJ IDEA 2026.1 and 2026.2. It is compiled against the lowest supported version and verified against both platform lines.
+
+The plugin owns its version in `gradle.properties` (`pluginVersion`). Its Gradle build and tests do not require the deprecated standalone application or its root `pom.xml`. Release builds use `-PreleaseBuild=true` to remove `-SNAPSHOT`; `-PmphVersion=...` overrides the packaged version. The combined release workflow updates the plugin version while the legacy application is still present.

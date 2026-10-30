@@ -1,0 +1,299 @@
+package nl.hicts.mph.intellij.services
+
+import com.intellij.openapi.command.undo.UndoManager
+import com.intellij.openapi.command.WriteCommandAction
+import com.intellij.openapi.components.service
+import com.intellij.openapi.fileEditor.FileDocumentManager
+import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import nl.hicts.mph.intellij.model.MavenProjectInfo
+import java.nio.file.Files
+import java.nio.file.Path
+
+class BulkVersionUpdateServiceTest : BasePlatformTestCase() {
+    fun testSynchronizationPrefixesInheritedModulesAndTheirConsumersUsingTheCurrentParent() {
+        val parentFile = tempPom("parent", pom("sample-parent", "2.0-SNAPSHOT"))
+        val moduleFile = tempPom("module", inheritedPom("sample-module", "sample-parent"))
+        val aliasFile = tempPom("alias", inheritedPom("alias-module", "sample-parent", "${'$'}{project.parent.version}"))
+        val consumerFile = tempPom("consumer", pom("consumer", "1.0", """
+            <dependencyManagement><dependencies>
+            <dependency><groupId>org.example</groupId><artifactId>sample-module</artifactId><version>${'$'}{module.version}</version></dependency>
+            <dependency><groupId>org.example</groupId><artifactId>alias-module</artifactId><version>1.0</version></dependency>
+            </dependencies></dependencyManagement><properties><module.version>1.0</module.version></properties>
+        """.trimIndent()))
+        val selected = listOf(projectInfo("alias-module", aliasFile, "2.0-SNAPSHOT"),
+            projectInfo("sample-module", moduleFile, "2.0-SNAPSHOT"), projectInfo("sample-parent", parentFile, "2.0-SNAPSHOT"))
+        try {
+            val result = project.service<BulkVersionUpdateService>().update(BulkVersionUpdateRequest(selected,
+                selected + projectInfo("consumer", consumerFile), "FEATURE-", BulkVersionMode.ADD_PREFIX, true, true))
+            assertTrue(result.issues.toString(), result.issues.isEmpty())
+            assertEquals(4, result.updatedReferenceCount)
+            assertTrue(document(moduleFile).text.contains("<version>FEATURE-2.0-SNAPSHOT</version>"))
+            assertTrue(document(aliasFile).text.contains("<version>${'$'}{project.parent.version}</version>"))
+            assertTrue(document(consumerFile).text.contains("<module.version>FEATURE-2.0-SNAPSHOT</module.version>"))
+            assertTrue(document(consumerFile).text.contains("<version>FEATURE-2.0-SNAPSHOT</version>"))
+        } finally { listOf(parentFile, moduleFile, aliasFile, consumerFile).forEach(Files::deleteIfExists) }
+    }
+    fun testSetsAnExplicitVersionAndRealignsCurrentReferences() {
+        val targetFile = tempPom("manual-target", pom("shared-api", "1.0-SNAPSHOT"))
+        val dependentFile = tempPom("manual-dependent", pom(
+            "sample-service",
+            "1.0-SNAPSHOT",
+            """<dependency><groupId>org.example</groupId><artifactId>shared-api</artifactId><version>0.9</version></dependency>""",
+        ))
+        val target = projectInfo("shared-api", targetFile)
+        val dependent = projectInfo("sample-service", dependentFile)
+        try {
+            val service = project.service<BulkVersionUpdateService>()
+            val explicit = service.update(BulkVersionUpdateRequest(
+                listOf(target), listOf(target, dependent), "2.0.0", BulkVersionMode.SET_VERSION, true,
+            ))
+            assertEquals(1, explicit.updatedReferenceCount)
+            assertTrue(document(targetFile).text.contains("<version>2.0.0</version>"))
+            assertTrue(document(dependentFile).text.contains("<version>2.0.0</version>"))
+
+            WriteCommandAction.runWriteCommandAction(project) {
+                val dependentDocument = document(dependentFile)
+                dependentDocument.setText(dependentDocument.text.replace("<version>2.0.0</version>", "<version>1.5</version>"))
+            }
+            val currentTarget = target.copy(version = "2.0.0")
+            val realigned = service.update(BulkVersionUpdateRequest(
+                listOf(currentTarget), listOf(currentTarget, dependent), "", BulkVersionMode.KEEP_CURRENT, true,
+            ))
+            assertEquals(1, realigned.updatedReferenceCount)
+            assertTrue(document(dependentFile).text.contains("<version>2.0.0</version>"))
+        } finally {
+            Files.deleteIfExists(targetFile)
+            Files.deleteIfExists(dependentFile)
+        }
+    }
+
+    fun testUpdatesSelectedVersionsAndDependentReferencesAsOneUndoableCommand() {
+        val targetSource = pom("shared-api", "1.0-SNAPSHOT")
+        val dependentSource = pom(
+            "sample-service",
+            "1.0-SNAPSHOT",
+            """
+                <dependencies>
+                    <dependency>
+                        <groupId>org.example</groupId>
+                        <artifactId>shared-api</artifactId>
+                        <version>1.0-SNAPSHOT</version>
+                    </dependency>
+                </dependencies>
+            """.trimIndent(),
+        )
+        val targetFile = tempPom("target", targetSource)
+        val dependentFile = tempPom("dependent", dependentSource)
+        val target = projectInfo("shared-api", targetFile)
+        val dependent = projectInfo("sample-service", dependentFile)
+
+        try {
+            val result = project.service<BulkVersionUpdateService>().update(
+                BulkVersionUpdateRequest(
+                    selectedProjects = listOf(target),
+                    workspaceProjects = listOf(target, dependent),
+                    prefix = "PREFIX-1234-",
+                    mode = BulkVersionMode.ADD_PREFIX,
+                    updateDependents = true,
+                ),
+            )
+            val targetDocument = document(targetFile)
+            val dependentDocument = document(dependentFile)
+
+            assertEquals(1, result.updatedProjectCount)
+            assertEquals(1, result.updatedReferenceCount)
+            assertTrue(targetDocument.text.contains("<version>PREFIX-1234-1.0-SNAPSHOT</version>"))
+            assertTrue(dependentDocument.text.contains("<version>PREFIX-1234-1.0-SNAPSHOT</version>"))
+
+            val undoManager = UndoManager.getInstance(project)
+            assertTrue(undoManager.isUndoAvailable(null))
+            undoManager.undo(null)
+            assertEquals(targetSource, targetDocument.text)
+            assertEquals(dependentSource, dependentDocument.text)
+        } finally {
+            Files.deleteIfExists(targetFile)
+            Files.deleteIfExists(dependentFile)
+        }
+    }
+
+    fun testRealignsReferencesToModulesThatInheritTheirParentVersion() {
+        val parentFile = tempPom("parent", pom("sample-parent", "2.0-SNAPSHOT"))
+        val moduleSource = inheritedPom("sample-module", "sample-parent")
+        val aliasModuleSource = inheritedPom("alias-module", "sample-parent", "${'$'}{project.parent.version}")
+        val moduleFile = tempPom("inherited-module", moduleSource)
+        val aliasModuleFile = tempPom("parent-version-module", aliasModuleSource)
+        val dependentFile = tempPom(
+            "module-dependent",
+            pom(
+                "sample-service",
+                "2.0-SNAPSHOT",
+                """
+                    <dependencies>
+                        <dependency><groupId>org.example</groupId><artifactId>sample-module</artifactId><version>1.0-SNAPSHOT</version></dependency>
+                        <dependency><groupId>org.example</groupId><artifactId>alias-module</artifactId><version>1.0-SNAPSHOT</version></dependency>
+                    </dependencies>
+                """.trimIndent(),
+            ),
+        )
+        val parent = projectInfo("sample-parent", parentFile, "2.0-SNAPSHOT")
+        val module = projectInfo("sample-module", moduleFile, "2.0-SNAPSHOT")
+        val aliasModule = projectInfo("alias-module", aliasModuleFile, "2.0-SNAPSHOT")
+        val dependent = projectInfo("sample-service", dependentFile, "2.0-SNAPSHOT")
+
+        try {
+            val result = project.service<BulkVersionUpdateService>().update(
+                BulkVersionUpdateRequest(
+                    selectedProjects = listOf(parent, module, aliasModule),
+                    workspaceProjects = listOf(parent, module, aliasModule, dependent),
+                    prefix = "",
+                    mode = BulkVersionMode.KEEP_CURRENT,
+                    updateDependents = true,
+                ),
+            )
+
+            assertTrue(result.issues.toString(), result.issues.isEmpty())
+            assertEquals(2, result.updatedReferenceCount)
+            assertEquals(3, Regex("<version>2.0-SNAPSHOT</version>").findAll(document(dependentFile).text).count())
+            assertEquals(moduleSource, document(moduleFile).text)
+            assertEquals(aliasModuleSource, document(aliasModuleFile).text)
+        } finally {
+            Files.deleteIfExists(parentFile)
+            Files.deleteIfExists(moduleFile)
+            Files.deleteIfExists(aliasModuleFile)
+            Files.deleteIfExists(dependentFile)
+        }
+    }
+
+    fun testPreviewDoesNotWriteAndRejectsNewEditorChanges() = withAlignmentFiles { service, request, target, dependent ->
+        val plan = service.prepare(request)
+        assertEquals(2, plan.edits.size)
+        assertTrue(Files.readString(target).contains("<version>1.0-SNAPSHOT</version>"))
+        val local = document(dependent).text + "\n<!-- local edit after preview -->"
+        WriteCommandAction.runWriteCommandAction(project) { document(dependent).setText(local) }
+        expectFailure { service.apply(plan) }
+        assertEquals(local, document(dependent).text)
+        assertEquals(plan.edits.first().before, document(target).text)
+    }
+
+    fun testExternalDiskChangesInvalidatePreviewBeforeAnyWrite() = withAlignmentFiles { service, request, target, dependent ->
+        val plan = service.prepare(request)
+        Files.writeString(dependent, "<project><!-- external edit --></project>")
+        expectFailure { service.apply(plan) }
+        assertEquals(plan.edits.first().before, Files.readString(target))
+        assertTrue(Files.readString(dependent).contains("external edit"))
+    }
+
+    fun testPartialSaveFailureRetainsDiskAndEditorRecoveryCopies() = withAlignmentFiles { service, request, target, dependent ->
+        val plan = service.prepare(request)
+        var saved = 0
+        val failure = expectFailure {
+            service.applyOwned(plan) { document ->
+                if (++saved == 2) error("Test save failure")
+                FileDocumentManager.getInstance().saveDocument(document)
+            }
+        }
+        assertTrue(failure is AlignmentApplyException)
+        assertTrue(failure.message.orEmpty().contains("Files possibly changed"))
+        assertTrue(failure.message.orEmpty().contains("recovery copies"))
+        val backups = Files.list(AlignmentRecoveryStore.root()).use { it.toList() }
+        assertTrue(backups.any { directory ->
+            Files.exists(directory.resolve("0.pom")) &&
+                Files.readString(directory.resolve("0.pom")) == plan.edits.first().before &&
+                Files.exists(directory.resolve("1.editor.txt"))
+        })
+        assertTrue(document(target).text.contains("2.0"))
+        assertTrue(FileDocumentManager.getInstance().isDocumentUnsaved(document(dependent)))
+    }
+
+    fun testEditDuringEarlierSaveDoesNotOverwriteLaterPom() = withAlignmentFiles { service, request, target, dependent ->
+        val plan = service.prepare(request)
+        val laterEdit = "<project><!-- work created during the first save --></project>"
+        var saved = 0
+        val failure = expectFailure {
+            service.applyOwned(plan) { document ->
+                FileDocumentManager.getInstance().saveDocument(document)
+                if (++saved == 1) Files.writeString(dependent, laterEdit)
+            }
+        }
+        assertTrue(failure is AlignmentApplyException)
+        assertTrue(failure.message.orEmpty().contains("POM changed during alignment"))
+        assertEquals(1, saved)
+        assertEquals(laterEdit, Files.readString(dependent))
+        assertTrue(Files.readString(target).contains("<version>2.0</version>"))
+    }
+
+    fun testPreviewRejectsDoctypeBeforeChangingPoms() = withAlignmentFiles { service, request, target, dependent ->
+        val targetDisk = Files.readString(target)
+        val dependentDisk = Files.readString(dependent)
+        val source = """<!DOCTYPE project [<!ENTITY local SYSTEM "file:///mph-test-missing-entity">]>""" + "\n" +
+            targetDisk.replace("</project>", "<description>&local;</description></project>")
+        WriteCommandAction.runWriteCommandAction(project) { document(target).setText(source) }
+
+        val failure = expectFailure { service.prepare(request) }
+
+        assertTrue(failure is org.xml.sax.SAXParseException)
+        assertTrue(failure.message.orEmpty().contains("DOCTYPE"))
+        assertEquals(source, document(target).text)
+        assertEquals(targetDisk, Files.readString(target))
+        assertEquals(dependentDisk, Files.readString(dependent))
+    }
+
+    private fun expectFailure(action: () -> Unit): Exception {
+        try { action() } catch (error: Exception) { return error }
+        throw AssertionError("Expected alignment to stop")
+    }
+
+    private fun withAlignmentFiles(action: (BulkVersionUpdateService, BulkVersionUpdateRequest, Path, Path) -> Unit) {
+        val target = tempPom("preview-target", pom("library", "1.0-SNAPSHOT"))
+        val dependent = tempPom("preview-dependent", pom("service", "1.0-SNAPSHOT",
+            "<dependency><groupId>org.example</groupId><artifactId>library</artifactId><version>1.0-SNAPSHOT</version></dependency>"))
+        try {
+            val info = projectInfo("library", target)
+            action(project.service<BulkVersionUpdateService>(), BulkVersionUpdateRequest(
+                listOf(info), listOf(info, projectInfo("service", dependent)), "2.0", BulkVersionMode.SET_VERSION, true,
+            ), target, dependent)
+        } finally {
+            Files.deleteIfExists(target)
+            Files.deleteIfExists(dependent)
+        }
+    }
+
+    private fun tempPom(name: String, content: String): Path =
+        Files.createTempFile("mph-bulk-$name-", ".txt").also { Files.writeString(it, content) }
+
+    private fun document(path: Path) = FileDocumentManager.getInstance().getDocument(
+        LocalFileSystem.getInstance().refreshAndFindFileByNioFile(path)!!,
+    )!!
+
+    private fun projectInfo(artifactId: String, path: Path, version: String = "1.0-SNAPSHOT") = MavenProjectInfo(
+        groupId = "org.example",
+        artifactId = artifactId,
+        version = version,
+        pomPath = path.toString(),
+        gitRootPath = path.parent.toString(),
+    )
+
+    private fun pom(artifactId: String, version: String, body: String = "") = """
+        <project>
+            <modelVersion>4.0.0</modelVersion>
+            <groupId>org.example</groupId>
+            <artifactId>$artifactId</artifactId>
+            <version>$version</version>
+            $body
+        </project>
+    """.trimIndent()
+
+    private fun inheritedPom(artifactId: String, parentArtifactId: String, version: String? = null) = """
+        <project>
+            <modelVersion>4.0.0</modelVersion>
+            <parent>
+                <groupId>org.example</groupId>
+                <artifactId>$parentArtifactId</artifactId>
+                <version>2.0-SNAPSHOT</version>
+            </parent>
+            <artifactId>$artifactId</artifactId>
+            ${version?.let { "<version>$it</version>" }.orEmpty()}
+        </project>
+    """.trimIndent()
+}

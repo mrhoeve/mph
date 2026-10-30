@@ -14,6 +14,7 @@ $ErrorActionPreference = 'Stop'
 
 $repositoryRoot = $PSScriptRoot
 $frontendRoot = Join-Path $repositoryRoot 'frontend\mph'
+$pluginRoot = Join-Path $repositoryRoot 'intellij-plugin'
 $frontendBin = Join-Path $frontendRoot 'node_modules\.bin'
 $isWindows = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
     [System.Runtime.InteropServices.OSPlatform]::Windows
@@ -46,7 +47,7 @@ function Invoke-CheckedCommand {
     param(
         [Parameter(Mandatory)] [string]$Description,
         [Parameter(Mandatory)] [string]$Command,
-        [Parameter(Mandatory)] [string[]]$Arguments,
+        [string[]]$Arguments = @(),
         [Parameter(Mandatory)] [string]$WorkingDirectory
     )
 
@@ -110,6 +111,7 @@ function Normalize-FrontendCoverage {
 
 $npmCommand = Resolve-NpmCommand
 $mavenCommand = Join-Path $repositoryRoot $(if ($isWindows) { 'mvnw.cmd' } else { 'mvnw' })
+$pluginBuildCommand = Join-Path $repositoryRoot 'build-plugin-local.ps1'
 $originalPath = $env:PATH
 $originalSonarToken = [Environment]::GetEnvironmentVariable('SONAR_TOKEN', 'Process')
 $sonarToken = $null
@@ -139,6 +141,12 @@ try {
         -Arguments @('run', 'test:coverage') `
         -WorkingDirectory $frontendRoot
     Normalize-FrontendCoverage
+
+    Invoke-CheckedCommand `
+        -Description 'Testing, packaging, and verifying the IntelliJ plugin' `
+        -Command $pluginBuildCommand `
+        -Arguments @() `
+        -WorkingDirectory $repositoryRoot
 
     $env:PATH = "$frontendBin$([System.IO.Path]::PathSeparator)$originalPath"
     $mavenArguments = @('-B', 'clean', 'verify')

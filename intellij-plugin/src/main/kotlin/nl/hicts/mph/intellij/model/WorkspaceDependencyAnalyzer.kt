@@ -1,0 +1,204 @@
+package nl.hicts.mph.intellij.model
+
+import java.nio.file.Path
+
+data class WorkspaceProjectRelationship(
+    val coordinates: MavenCoordinates,
+    val project: MavenProjectInfo?,
+    val kinds: Set<MavenReferenceKind>,
+)
+
+data class WorkspaceProjectRelationships(
+    val project: MavenProjectInfo,
+    val dependencies: List<WorkspaceProjectRelationship>,
+    val dependents: List<WorkspaceProjectRelationship>,
+)
+
+data class BuildOrderEntry(
+    val project: MavenProjectInfo,
+    val buildStep: Int,
+    val dependsOn: List<String>,
+    val partOfCycle: Boolean = false,
+    val prerequisitePomPaths: Set<String> = emptySet(),
+)
+
+data class WorkspaceBuildOrder(
+    val entries: List<BuildOrderEntry>,
+) {
+    val hasCycles: Boolean
+        get() = entries.any(BuildOrderEntry::partOfCycle)
+}
+
+class WorkspaceDependencyAnalyzer {
+    fun relationships(
+        targetPomPath: String,
+        descriptors: Collection<MavenProjectDependencyDescriptor>,
+    ): WorkspaceProjectRelationships? {
+        val byCoordinates = descriptors.mapNotNull { descriptor ->
+            descriptor.project.groupId?.takeIf(String::isNotBlank)?.let { groupId ->
+                MavenCoordinates(groupId, descriptor.project.artifactId) to descriptor
+            }
+        }.toMap()
+        val target = descriptors.firstOrNull { normalized(it.project.pomPath) == normalized(targetPomPath) }
+            ?: return null
+        val targetCoordinates = target.project.groupId?.takeIf(String::isNotBlank)?.let { groupId ->
+            MavenCoordinates(groupId, target.project.artifactId)
+        }
+
+        val dependencies = relationshipCoordinates(target).mapNotNull { (coordinates, kinds) ->
+            val dependency = byCoordinates[coordinates] ?: return@mapNotNull null
+            WorkspaceProjectRelationship(coordinates, dependency.project, kinds)
+        }.sortedWith(compareBy({ it.coordinates.artifactId }, { it.coordinates.groupId }))
+
+        val dependents = if (targetCoordinates == null) {
+            emptyList()
+        } else {
+            descriptors.asSequence()
+                .filterNot { normalized(it.project.pomPath) == normalized(targetPomPath) }
+                .mapNotNull { descriptor ->
+                    relationshipCoordinates(descriptor)[targetCoordinates]?.let { kinds ->
+                        WorkspaceProjectRelationship(
+                            MavenCoordinates(
+                                descriptor.project.groupId.orEmpty(),
+                                descriptor.project.artifactId,
+                            ),
+                            descriptor.project,
+                            kinds,
+                        )
+                    }
+                }
+                .sortedBy { it.project?.artifactId }
+                .toList()
+        }
+        return WorkspaceProjectRelationships(target.project, dependencies, dependents)
+    }
+
+    fun buildOrder(descriptors: Collection<MavenProjectDependencyDescriptor>): WorkspaceBuildOrder {
+        val repositories = descriptors.groupBy { descriptor ->
+            descriptor.project.gitRootPath ?: Path.of(descriptor.project.pomPath).parent.toString()
+        }
+        val repositoryByCoordinates = descriptors.mapNotNull { descriptor ->
+            descriptor.project.groupId?.takeIf(String::isNotBlank)?.let { groupId ->
+                MavenCoordinates(groupId, descriptor.project.artifactId) to
+                    (descriptor.project.gitRootPath ?: Path.of(descriptor.project.pomPath).parent.toString())
+            }
+        }.toMap()
+
+        val dependencies = repositories.keys.associateWith { repository ->
+            descriptors.asSequence()
+                .filter { descriptor -> repositoryPath(descriptor) == repository }
+                .flatMap { relationshipCoordinates(it).keys }
+                .mapNotNull(repositoryByCoordinates::get)
+                .filterNot(repository::equals)
+                .toSet()
+        }
+
+        val remaining = repositories.keys.toMutableSet()
+        val resolved = linkedSetOf<String>()
+        val stages = mutableListOf<List<String>>()
+        while (remaining.isNotEmpty()) {
+            val stage = remaining.filter { repository -> dependencies.getValue(repository).all(resolved::contains) }
+                .sorted()
+            if (stage.isEmpty()) break
+            stages += stage
+            remaining -= stage.toSet()
+            resolved += stage
+        }
+        if (remaining.isNotEmpty()) stages += remaining.sorted()
+
+        val entries = stages.flatMapIndexed { stageIndex, stage ->
+            stage.map { repository ->
+                val projects = repositories.getValue(repository)
+                val representative = rootProject(projects.map(MavenProjectDependencyDescriptor::project), repository)
+                BuildOrderEntry(
+                    project = representative,
+                    buildStep = stageIndex + 1,
+                    dependsOn = dependencies.getValue(repository).mapNotNull { dependencyRoot ->
+                        repositories[dependencyRoot]?.let { rootProject(it.map(MavenProjectDependencyDescriptor::project), dependencyRoot) }
+                            ?.artifactId
+                    }.sorted(),
+                    partOfCycle = repository in remaining,
+                    prerequisitePomPaths = dependencies.getValue(repository).map { dependencyRoot ->
+                        rootProject(repositories.getValue(dependencyRoot).map(MavenProjectDependencyDescriptor::project), dependencyRoot).pomPath
+                    }.toSet(),
+                )
+            }
+        }
+        return WorkspaceBuildOrder(entries)
+    }
+
+    /** Build only the selected reactors/modules, preserving dependencies within a repository too. */
+    fun buildOrderForSelection(
+        selected: List<MavenProjectInfo>,
+        descriptors: Collection<MavenProjectDependencyDescriptor>,
+    ): WorkspaceBuildOrder {
+        val unique = selected.distinctBy { normalized(it.pomPath) }
+        fun includes(root: MavenProjectInfo, module: MavenProjectInfo): Boolean =
+            root.gitRootPath == module.gitRootPath && normalized(module.pomPath).startsWith(normalized(root.pomPath).parent)
+        // A selected reactor already builds its nested modules; do not run those twice or concurrently.
+        val builds = unique.filter { candidate -> unique.none { it != candidate && includes(it, candidate) } }
+        val byCoordinates = descriptors.associateBy { MavenCoordinates(it.project.groupId.orEmpty(), it.project.artifactId) }
+        val prerequisites = builds.associate { build ->
+            val visited = mutableSetOf<String>()
+            val required = linkedSetOf<String>()
+            fun visit(descriptor: MavenProjectDependencyDescriptor) {
+                if (!visited.add(descriptor.project.pomPath)) return
+                relationshipCoordinates(descriptor).keys.mapNotNull(byCoordinates::get).forEach { dependency ->
+                    builds.firstOrNull { includes(it, dependency.project) }?.takeIf { it != build }?.let {
+                        required += it.pomPath
+                    }
+                    visit(dependency)
+                }
+            }
+            descriptors.filter { includes(build, it.project) }.forEach(::visit)
+            build.pomPath to required
+        }
+        val remaining = builds.toMutableList()
+        val resolved = mutableSetOf<String>()
+        val entries = mutableListOf<BuildOrderEntry>()
+        var step = 1
+        while (remaining.isNotEmpty()) {
+            val ready = remaining.filter { prerequisites.getValue(it.pomPath).all(resolved::contains) }
+            val cycle = ready.isEmpty()
+            val stage = if (cycle) remaining.toList() else ready
+            stage.forEach { project ->
+                val paths = prerequisites.getValue(project.pomPath)
+                entries += BuildOrderEntry(project, step, builds.filter { it.pomPath in paths }.map { it.artifactId }, cycle, paths)
+            }
+            remaining.removeAll(stage.toSet())
+            resolved += stage.map { it.pomPath }
+            step++
+        }
+        return WorkspaceBuildOrder(entries)
+    }
+
+    private fun relationshipCoordinates(
+        descriptor: MavenProjectDependencyDescriptor,
+    ): Map<MavenCoordinates, Set<MavenReferenceKind>> {
+        val relationships = linkedMapOf<MavenCoordinates, MutableSet<MavenReferenceKind>>()
+        descriptor.parent?.let { relationships.getOrPut(it, ::linkedSetOf) += MavenReferenceKind.PARENT }
+        descriptor.dependencies.forEach {
+            relationships.getOrPut(it, ::linkedSetOf) += MavenReferenceKind.DEPENDENCY
+        }
+        descriptor.managedDependencies.forEach {
+            relationships.getOrPut(it, ::linkedSetOf) += MavenReferenceKind.MANAGED_DEPENDENCY
+        }
+        return relationships
+    }
+
+    private fun rootProject(projects: List<MavenProjectInfo>, repository: String): MavenProjectInfo =
+        projects.minByOrNull { project ->
+            val repositoryPath = Path.of(repository).toAbsolutePath().normalize()
+            val projectDirectory = Path.of(project.pomPath).toAbsolutePath().normalize().parent
+            if (projectDirectory.startsWith(repositoryPath)) {
+                repositoryPath.relativize(projectDirectory).nameCount
+            } else {
+                projectDirectory.nameCount
+            }
+        } ?: error("Repository $repository has no Maven projects.")
+
+    private fun normalized(path: String): Path = Path.of(path).toAbsolutePath().normalize()
+
+    private fun repositoryPath(descriptor: MavenProjectDependencyDescriptor): String =
+        descriptor.project.gitRootPath ?: Path.of(descriptor.project.pomPath).parent.toString()
+}

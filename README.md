@@ -56,13 +56,15 @@ GitHub Actions runs the frontend and backend unit tests on every push and pull r
 
 Every push also builds the application and runs SonarQube Cloud analysis. Releases use a separate **Release** workflow that must be started manually with `develop` selected in GitHub Actions. Selecting another branch fails before verification or publication. The workflow verifies the exact `develop` commit with the complete CI workflow, including its tests and SonarQube quality gate, and aborts if `develop` changes while verification is running.
 
+After a successful push to any branch except `main`, CI also publishes a mutable GitHub pre-release for that branch. For example, `feature/plugin` produces tag `snapshot-feature-plugin`, application asset `mph-feature-plugin-SNAPSHOT.jar`, and plugin asset `mph-intellij-plugin-feature-plugin-SNAPSHOT.zip`. A later successful push to the same branch replaces that pre-release and its assets. Failed builds and pull-request-only runs never update snapshots, and snapshots never affect the immutable production releases or GitHub's latest-release designation.
+
 After successful verification, the release workflow:
 
 1. Confirms that `main` is an ancestor of the verified `develop` commit.
 2. Removes `-SNAPSHOT` (or applies the manually supplied release version), creates the release commit, and tags it.
 3. Creates a second commit containing the next development `-SNAPSHOT` version.
 4. Atomically advances `main` to the tagged release commit, advances `develop` to the next development commit, and pushes the tag.
-5. Creates the GitHub release from the already verified JAR.
+5. Creates the GitHub release from the already verified application JAR and IntelliJ plugin ZIP. Both artifacts use the same release version.
 
 For example, releasing `0.23-SNAPSHOT` creates `v0.23` on `main` and leaves `develop` at `0.24-SNAPSHOT`. Both versions can be overridden in the manual workflow form.
 
@@ -103,6 +105,12 @@ To prevent merging until CI succeeds, create a repository ruleset under **GitHub
 
 The ruleset is the enforcement layer: a workflow reports the check result, while GitHub branch rules decide whether that result blocks a merge. The release app token is generated only after the reusable CI workflow has passed and is restricted to the `release` environment.
 
+## IntelliJ IDEA plugin
+
+The [`intellij-plugin`](intellij-plugin) module brings the core MPH workflows into IntelliJ IDEA. Its **MPH** tool window uses IDEA's linked Maven projects and registered Git roots directly, groups modules by repository, and supports dependency exploration, build-order calculation and Excel export, managed-property and Spring Boot upgrades, CycloneDX SBOM export, Nexus IQ scanning, bulk version alignment, Maven builds, and synchronization of prefixed feature branches with `develop`. A context-aware **Update Dependent Maven Projects…** action remains available from a `pom.xml` to update just that project's dependent references.
+
+Version edits are performed as undoable IntelliJ changes and remain uncommitted. Maven and Nexus IQ output is streamed in the IDE, while Nexus IQ credentials are stored in IntelliJ's Password Safe. The Git workflow performs safety checks, processes repositories sequentially, preserves stashes when manual intervention is required, and aligns versions only after every selected repository rebases successfully. See the [plugin README](intellij-plugin/README.md) for usage, development, installation, and verification commands.
+
 ## Local verification build
 
 Run the complete local build from PowerShell:
@@ -111,7 +119,24 @@ Run the complete local build from PowerShell:
 .\build-local.cmd
 ```
 
-The script performs a locked `npm ci`, installs the Playwright Chromium runtime when needed, runs the frontend unit tests with coverage, normalizes LCOV paths for SonarQube, runs `mvnw clean verify`, and finally runs the full-stack Playwright tests against the packaged application. Use `-SkipPlaywright` on a machine that cannot launch a browser, or `-SkipPlaywrightBrowserInstall` when Chromium is already managed separately.
+The script performs a locked `npm ci`, installs the Playwright Chromium runtime when needed, runs the frontend unit tests with coverage, tests and packages the IntelliJ plugin with Kotlin coverage and JetBrains compatibility verification, runs `mvnw clean verify`, and finally runs the full-stack Playwright tests against the packaged application. Use `-SkipPlaywright` on a machine that cannot launch a browser, or `-SkipPlaywrightBrowserInstall` when Chromium is already managed separately.
+
+To build only the IntelliJ plugin while developing it, run:
+
+```powershell
+.\build-plugin-local.cmd
+```
+
+This runs the plugin tests with Kover coverage, creates the installable ZIP, and runs JetBrains Plugin Verifier. Use `-SkipVerification` for a faster test/package cycle or `-SkipClean` to retain incremental Gradle outputs.
+
+The plugin requires JDK 21. The build script detects JDK 21 from `MPH_JAVA_HOME_21`, `JAVA_HOME_21_X64`, `JDK_21`, a Java-21 `JAVA_HOME`, and common JDK installation folders. For a custom location, either pass it directly or set the dedicated environment variable:
+
+```powershell
+.\build-plugin-local.cmd -JavaHome 'D:\devtools\corretto-jdk21.0.5_11'
+$env:MPH_JAVA_HOME_21 = 'D:\devtools\corretto-jdk21.0.5_11'
+```
+
+`MPH_JAVA_HOME_21` affects only the plugin build, so the system-wide `JAVA_HOME` can continue to use another JDK.
 
 To include analysis against the internal SonarQube instance, create a `.sonar-token` file in the repository root containing only your token. This filename is ignored by Git. Alternatively, set `SONAR_TOKEN` in the current process environment. Then run:
 
@@ -119,7 +144,7 @@ To include analysis against the internal SonarQube instance, create a `.sonar-to
 .\build-local.cmd -Sonar
 ```
 
-The token is passed to the scanner through the `SONAR_TOKEN` environment variable and is therefore not included in Maven's command-line arguments. The defaults are project key `mrhoeve_mph`, project name `Maven Project Helper`, and server `https://sonarqube.hictsapps.nl`. Override them when necessary:
+The token is passed to the scanner through the `SONAR_TOKEN` environment variable and is therefore not included in Maven's command-line arguments. The combined analysis includes the Spring Boot backend, Angular frontend, and IntelliJ plugin, using their JaCoCo, LCOV, and Kover reports respectively. The defaults are project key `mrhoeve_mph`, project name `Maven Project Helper`, and server `https://sonarqube.hictsapps.nl`. Override them when necessary:
 
 ```powershell
 .\build-local.cmd -Sonar `
