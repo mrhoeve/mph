@@ -68,14 +68,37 @@ Configure `SONAR_TOKEN` as a repository secret and `SONAR_ORGANIZATION` plus `SO
 
 ## Releases
 
-Production releases are started manually from `develop` through the **Release** workflow. The workflow verifies the exact commit, creates a release commit and tag on `main`, advances `develop` to the next `-SNAPSHOT` version, and publishes only the verified IntelliJ plugin ZIP to GitHub Releases.
+Production releases are started manually from `develop` through the **Release** workflow. The workflow verifies the exact commit, signs the verified plugin, creates a release commit and tag on `main`, advances `develop` to the next `-SNAPSHOT` version, and publishes the same signed IntelliJ plugin ZIP to GitHub Releases and, after the initial Marketplace registration, JetBrains Marketplace.
 
 The workflow uses a GitHub App with only **Contents: Read and write** permission. Store its client ID as `RELEASE_APP_CLIENT_ID` and private key as `RELEASE_APP_PRIVATE_KEY` in the protected `release` environment. The app is the only ruleset bypass for the atomic `main`, `develop`, and tag update.
 
-JetBrains Marketplace signing and publication will be configured separately after this plugin-only migration is merged.
+### JetBrains Marketplace bootstrap
+
+JetBrains requires the first plugin version to be uploaded manually so its Marketplace listing can be configured. For the first release:
+
+1. Create or select a JetBrains Marketplace vendor profile and accept the Marketplace Developer Agreement.
+2. Start the **Release** workflow from `develop` with `marketplace_mode` set to `bootstrap`.
+3. Download the signed plugin ZIP from the resulting GitHub Release.
+4. In JetBrains Marketplace, choose **Upload plugin**, select the vendor, and upload that ZIP.
+5. Configure the MIT license, source repository, issue tracker, Maven-related tags, and the default Stable channel, then submit the plugin for approval.
+
+After JetBrains has created the plugin entry, use `marketplace_mode: publish` for every later release. IntelliJ IDEA then receives approved updates through its normal plugin update mechanism.
+
+The protected GitHub `release` environment must contain these secrets:
+
+| Secret | Purpose |
+| --- | --- |
+| `JETBRAINS_CERTIFICATE_CHAIN` | PEM certificate chain used to sign the plugin. |
+| `JETBRAINS_PRIVATE_KEY` | PEM private signing key. |
+| `JETBRAINS_PRIVATE_KEY_PASSWORD` | Password protecting the signing key. |
+| `JETBRAINS_MARKETPLACE_TOKEN` | Permanent token from the Marketplace profile's **My Tokens** tab. |
+
+Keep the token, private key, password, and certificate in 1Password as their source of truth. Copy them directly from 1Password into the GitHub environment secrets; never store them in repository files, workflow artifacts, shell history, or release assets.
+
+See the [complete Marketplace setup and release guide](intellij-plugin/docs/marketplace-publishing.md) for certificate generation, the first manual upload, later automatic updates, and recovery guidance.
 
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
 
-Issues and feature requests can be reported through the [GitHub issue tracker](https://github.com/hicts/mph/issues).
+Issues and feature requests can be reported through the [GitHub issue tracker](https://github.com/mrhoeve/mph/issues).
