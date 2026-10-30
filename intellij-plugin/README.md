@@ -1,6 +1,6 @@
 # MPH IntelliJ IDEA plugin
 
-This module provides Maven Project Helper as a native IntelliJ IDEA plugin for multi-module, multi-repository workspaces.
+This project provides Maven Project Helper as a native IntelliJ IDEA plugin for multi-module, multi-repository workspaces.
 
 ## Features
 
@@ -50,7 +50,7 @@ Open **View -> Tool Windows -> MPH**. Select modules with Ctrl-click (Cmd-click 
 
 Open **Settings -> Tools -> Maven Project Helper**, or use the settings button in the MPH tool window. Configure the Nexus IQ server URL, optional username and password/token, and any application-ID prefix or suffix used by your organization. The password is stored in IntelliJ's Password Safe and is never written to the plugin settings file.
 
-The application ID is derived from the selected repository's `Jenkinsfile`, matching the standalone application's behavior. Maven repository mirrors, credentials, local-repository location, and environment placeholders continue to come from the developer's normal Maven configuration because the plugin invokes the repository's Maven wrapper (or `mvn`) in that project directory.
+The application ID is derived from the selected repository's `Jenkinsfile`. Maven repository mirrors, credentials, local-repository location, and environment placeholders continue to come from the developer's normal Maven configuration because the plugin invokes the repository's Maven wrapper (or `mvn`) in that project directory.
 
 Repositories are processed sequentially. Committed version-only `pom.xml` conflicts are resolved from the updated `develop` version. Source-code and structural POM conflicts remain available for manual resolution. Conflicts while restoring uncommitted work are never resolved automatically, including version conflicts. Processing continues with other repositories; final version alignment runs only if every repository succeeds.
 
@@ -87,10 +87,10 @@ The script locates JDK 21 even when `JAVA_HOME` points to another JDK. Pass `-Ja
 The equivalent direct Gradle command is:
 
 ```shell
-./gradlew test verifyPlugin buildPlugin
+./gradlew clean koverXmlReport buildPlugin verifyPlugin
 ```
 
-Generate the JaCoCo-compatible Kover XML report used by the combined project SonarQube analysis with:
+Generate the JaCoCo-compatible Kover XML report used by SonarQube analysis with:
 
 ```shell
 ./gradlew koverXmlReport
@@ -98,4 +98,4 @@ Generate the JaCoCo-compatible Kover XML report used by the combined project Son
 
 The plugin supports IntelliJ IDEA 2026.1 and 2026.2. It is compiled against the lowest supported version and verified against both platform lines.
 
-The plugin owns its version in `gradle.properties` (`pluginVersion`). Its Gradle build and tests do not require the deprecated standalone application or its root `pom.xml`. Release builds use `-PreleaseBuild=true` to remove `-SNAPSHOT`; `-PmphVersion=...` overrides the packaged version. The combined release workflow updates the plugin version while the legacy application is still present.
+The plugin owns its version in `gradle.properties` (`pluginVersion`). Release builds use `-PreleaseBuild=true` to remove `-SNAPSHOT`; `-PmphVersion=...` overrides the packaged version. The release workflow publishes the verified plugin ZIP and advances this single version on `main` and `develop`.

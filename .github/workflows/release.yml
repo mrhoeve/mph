@@ -65,30 +65,16 @@ jobs:
         fetch-depth: 0
         token: ${{ steps.app-token.outputs.token }}
 
-    - name: Set up JDK 21
-      uses: actions/setup-java@v5
-      with:
-        java-version: '21'
-        distribution: 'temurin'
-        cache: maven
-
-    - name: Download verified application artifact
-      uses: actions/download-artifact@v7
-      with:
-        name: mph-jar
-        path: release-assets
-
-    - name: Download verified IntelliJ plugin artifact
-      uses: actions/download-artifact@v7
+    - name: Download verified plugin
+      uses: actions/download-artifact@v8
       with:
         name: mph-intellij-plugin
         path: release-assets
 
-    - name: Verify release assets
+    - name: Verify release artifact
       env:
         RELEASE_VERSION: ${{ needs.build.outputs.version }}
       run: |
-        test -f release-assets/mph.jar || { echo "::error::Verified application artifact is missing."; exit 1; }
         test -f "release-assets/mph-intellij-plugin-$RELEASE_VERSION.zip" || {
           echo "::error::Verified IntelliJ plugin for version $RELEASE_VERSION is missing."
           exit 1
@@ -110,24 +96,21 @@ jobs:
         VERIFIED_DEVELOP_SHA: ${{ github.sha }}
       run: |
         set -euo pipefail
-
         git fetch --force origin \
           +refs/heads/main:refs/remotes/origin/main \
           +refs/heads/develop:refs/remotes/origin/develop \
           --tags
 
         if [[ "$(git rev-parse origin/develop)" != "$VERIFIED_DEVELOP_SHA" ]]; then
-          echo "::error::develop changed while release verification was running. Start a new release to verify the latest commit."
+          echo "::error::develop changed while release verification was running. Start a new release."
           exit 1
         fi
-
         if ! git merge-base --is-ancestor origin/main "$VERIFIED_DEVELOP_SHA"; then
           echo "::error::main is not an ancestor of develop. Synchronize the branches before releasing."
           exit 1
         fi
-
         if [[ ! "$RELEASE_VERSION" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
-          echo "::error::Release version must contain dot-separated numeric components without -SNAPSHOT: $RELEASE_VERSION"
+          echo "::error::Release version must contain dot-separated numeric components: $RELEASE_VERSION"
           exit 1
         fi
 
@@ -145,33 +128,29 @@ jobs:
           VERSION_PARTS[$LAST_INDEX]=$((${VERSION_PARTS[$LAST_INDEX]} + 1))
           NEXT_VERSION=$(IFS='.'; echo "${VERSION_PARTS[*]}")-SNAPSHOT
         fi
-
         if [[ ! "$NEXT_VERSION" =~ ^[0-9]+(\.[0-9]+)*-SNAPSHOT$ ]]; then
-          echo "::error::Next development version must contain dot-separated numeric components and end in -SNAPSHOT: $NEXT_VERSION"
+          echo "::error::Next development version is invalid: $NEXT_VERSION"
           exit 1
         fi
 
         git config user.name "$APP_SLUG[bot]"
         git config user.email "$APP_USER_ID+$APP_SLUG[bot]@users.noreply.github.com"
-
         git switch --detach "$VERIFIED_DEVELOP_SHA"
-        chmod +x mvnw
+
         CURRENT_VERSION=$(sed -n 's/^pluginVersion=//p' intellij-plugin/gradle.properties | tr -d '\r')
         if [[ "$CURRENT_VERSION" != *-SNAPSHOT ]]; then
-          echo "::error::develop must contain a -SNAPSHOT version before releasing: $CURRENT_VERSION"
+          echo "::error::develop must contain a -SNAPSHOT version: $CURRENT_VERSION"
           exit 1
         fi
 
-        ./mvnw versions:set -DnewVersion="$RELEASE_VERSION" -DgenerateBackupPoms=false
         sed -i "s/^pluginVersion=.*/pluginVersion=$RELEASE_VERSION/" intellij-plugin/gradle.properties
-        git add pom.xml intellij-plugin/gradle.properties
+        git add intellij-plugin/gradle.properties
         git commit -m "Release $RELEASE_VERSION"
         RELEASE_COMMIT=$(git rev-parse HEAD)
         git tag -a "$TAG_NAME" -m "Release $RELEASE_VERSION"
 
-        ./mvnw versions:set -DnewVersion="$NEXT_VERSION" -DgenerateBackupPoms=false
         sed -i "s/^pluginVersion=.*/pluginVersion=$NEXT_VERSION/" intellij-plugin/gradle.properties
-        git add pom.xml intellij-plugin/gradle.properties
+        git add intellij-plugin/gradle.properties
         git commit -m "Prepare for next development iteration: $NEXT_VERSION"
         DEVELOPMENT_COMMIT=$(git rev-parse HEAD)
 
@@ -180,18 +159,14 @@ jobs:
           "$DEVELOPMENT_COMMIT:refs/heads/develop" \
           "refs/tags/$TAG_NAME:refs/tags/$TAG_NAME"
 
-        echo "Released $RELEASE_VERSION on main and advanced develop to $NEXT_VERSION."
-
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v3
       with:
         token: ${{ steps.app-token.outputs.token }}
         tag_name: v${{ needs.build.outputs.version }}
         name: Release v${{ needs.build.outputs.version }}
-        body: "Manual release of version ${{ needs.build.outputs.version }} from the verified develop branch."
-        files: |
-          release-assets/mph.jar
-          release-assets/mph-intellij-plugin-${{ needs.build.outputs.version }}.zip
+        body: "Manual IntelliJ plugin release of version ${{ needs.build.outputs.version }} from the verified develop branch."
+        files: release-assets/mph-intellij-plugin-${{ needs.build.outputs.version }}.zip
         prerelease: false
         make_latest: "true"
         generate_release_notes: true

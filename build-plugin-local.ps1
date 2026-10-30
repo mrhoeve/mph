@@ -2,7 +2,13 @@
 param(
     [string]$JavaHome,
     [switch]$SkipClean,
-    [switch]$SkipVerification
+    [switch]$SkipVerification,
+    [switch]$Sonar,
+    [string]$SonarHostUrl = 'https://sonarqube.hictsapps.nl',
+    [string]$SonarProjectKey = 'mrhoeve_mph',
+    [string]$SonarProjectName = 'Maven Project Helper',
+    [string]$SonarOrganization,
+    [string]$SonarTokenFile = '.sonar-token'
 )
 
 Set-StrictMode -Version Latest
@@ -100,6 +106,28 @@ JAVA_HOME may continue to point to a different JDK; MPH_JAVA_HOME_21 is only use
 "@
 }
 
+function Read-SonarToken {
+    $environmentToken = [Environment]::GetEnvironmentVariable('SONAR_TOKEN', 'Process')
+    if (-not [string]::IsNullOrWhiteSpace($environmentToken)) {
+        return $environmentToken
+    }
+
+    $tokenPath = if ([IO.Path]::IsPathRooted($SonarTokenFile)) {
+        $SonarTokenFile
+    } else {
+        Join-Path $repositoryRoot $SonarTokenFile
+    }
+    if (-not (Test-Path -LiteralPath $tokenPath -PathType Leaf)) {
+        throw "No Sonar token was found. Set SONAR_TOKEN or create the git-ignored file '$tokenPath'."
+    }
+
+    $token = (Get-Content -LiteralPath $tokenPath -Raw).Trim()
+    if ([string]::IsNullOrWhiteSpace($token)) {
+        throw "The Sonar token file is empty: $tokenPath"
+    }
+    return $token
+}
+
 $resolvedJavaHome = Resolve-Java21Home
 $gradleWrapper = Join-Path $pluginRoot $(if ($isWindows) { 'gradlew.bat' } else { 'gradlew' })
 $gradleArguments = [System.Collections.Generic.List[string]]::new()
@@ -111,16 +139,31 @@ $gradleArguments.Add('buildPlugin')
 if (-not $SkipVerification) {
     $gradleArguments.Add('verifyPlugin')
 }
+if ($Sonar) {
+    $gradleArguments.Add('sonar')
+    $gradleArguments.Add("-Dsonar.host.url=$SonarHostUrl")
+    $gradleArguments.Add("-Dsonar.projectKey=$SonarProjectKey")
+    $gradleArguments.Add("-Dsonar.projectName=$SonarProjectName")
+    $gradleArguments.Add('-Dsonar.qualitygate.wait=true')
+    $gradleArguments.Add('-Dsonar.qualitygate.timeout=300')
+    if (-not [string]::IsNullOrWhiteSpace($SonarOrganization)) {
+        $gradleArguments.Add("-Dsonar.organization=$SonarOrganization")
+    }
+}
 $gradleArguments.Add('--console=plain')
 
 $originalJavaHome = [Environment]::GetEnvironmentVariable('JAVA_HOME', 'Process')
 $originalPath = $env:PATH
+$originalSonarToken = [Environment]::GetEnvironmentVariable('SONAR_TOKEN', 'Process')
 
 try {
     $env:JAVA_HOME = $resolvedJavaHome
     $env:PATH = "$(Join-Path $resolvedJavaHome 'bin')$([System.IO.Path]::PathSeparator)$originalPath"
+    if ($Sonar) {
+        $env:SONAR_TOKEN = Read-SonarToken
+    }
     Write-Host "`n==> Using JDK 21 from $resolvedJavaHome" -ForegroundColor Cyan
-    Write-Host "==> Testing and packaging the IntelliJ plugin" -ForegroundColor Cyan
+    Write-Host $(if ($Sonar) { '==> Testing, packaging, verifying, and analyzing the IntelliJ plugin' } else { '==> Testing and packaging the IntelliJ plugin' }) -ForegroundColor Cyan
 
     Push-Location $pluginRoot
     try {
@@ -145,5 +188,6 @@ try {
     }
 } finally {
     [Environment]::SetEnvironmentVariable('JAVA_HOME', $originalJavaHome, 'Process')
+    [Environment]::SetEnvironmentVariable('SONAR_TOKEN', $originalSonarToken, 'Process')
     $env:PATH = $originalPath
 }
