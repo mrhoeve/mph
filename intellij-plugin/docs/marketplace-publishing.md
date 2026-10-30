@@ -34,11 +34,11 @@ openssl req \
   -out chain.crt
 ```
 
-Use the vendor identity in the certificate prompts. Save the following in one restricted 1Password item before deleting the temporary local files:
+Use the vendor identity in the certificate prompts. Save the following in one restricted 1Password item. Concealed fields avoid creating additional unencrypted local copies; attachments are also suitable when generated outside the repository and removed immediately afterward:
 
-- `private_encrypted.pem` as a recovery attachment;
-- `private.pem` as the signing-key attachment;
-- `chain.crt` as the certificate attachment;
+- `private_encrypted.pem` as the recovery key;
+- `private.pem` as the signing key;
+- `chain.crt` as the certificate chain;
 - the private-key password as a concealed field;
 - the certificate expiry date as a field or reminder.
 
