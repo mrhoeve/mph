@@ -39,6 +39,8 @@ See the [plugin documentation](intellij-plugin/README.md) for complete usage and
 
 ## Local build
 
+We target the previous, current, and next IntelliJ IDEA major release lines (the next line once a preview is available). Currently: **2026.1, 2026.2, and 2026.3 EAP**. See the [compatibility policy](intellij-plugin/README.md#intellij-idea-compatibility-policy) for verification and release maintenance.
+
 The plugin requires JDK 21. Run the complete local verification build from the repository root:
 
 ```powershell

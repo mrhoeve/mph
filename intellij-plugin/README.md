@@ -96,6 +96,21 @@ Generate the JaCoCo-compatible Kover XML report used by SonarQube analysis with:
 ./gradlew koverXmlReport
 ```
 
-The plugin supports IntelliJ IDEA 2026.1 and 2026.2. It is compiled against the lowest supported version and verified against both platform lines.
+### IntelliJ IDEA compatibility policy
+
+We support a rolling window of three major IntelliJ IDEA release lines: the previous stable release, the current stable release, and the next release as soon as a testable EAP/preview is available. Preview support is provisional until that line is stable. Patch releases do not shift the window.
+
+The current window is **2026.1 / 2026.2 / 2026.3 (EAP)**. The plugin is compiled against the oldest supported line and Plugin Verifier checks all three lines in local builds, CI, and release builds. Compatibility verification does not replace manual UI smoke testing, especially for previews.
+
+Maintain the pinned versions and build bounds together in `gradle.properties` (`ideaPreviousVersion`, `ideaCurrentVersion`, `ideaNextVersion`, `ideaSinceBuild`, `ideaUntilBuild`). Pins keep builds reproducible; they are not resolved dynamically to an untested future release.
+
+When a new major line becomes stable:
+
+1. Move the former current stable line into the previous slot and the new stable line into the current slot.
+2. Add the next line's published preview when available. Until then, verify the two available supported lines and do not invent or advertise a future build number.
+3. Update the minimum and maximum build bounds, this support window, and the plugin's What's New notes. Keep the upper bound limited to the newest verified line (`NNN.*`).
+4. Run all tests, package the plugin, and verify each supported line. Smoke-test the plugin in the new IDE before publishing a compatibility release.
+
+Older plugin releases remain available to older IDEs through Marketplace; dropping an IDE line from new plugin releases does not uninstall an existing compatible version.
 
 The plugin owns its version in `gradle.properties` (`pluginVersion`). Release builds use `-PreleaseBuild=true` to remove `-SNAPSHOT`; `-PmphVersion=...` overrides the packaged version. The release workflow publishes the verified plugin ZIP and advances this single version on `main` and `develop`.
