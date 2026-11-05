@@ -1,13 +1,29 @@
-# Maven Project Helper
+<h1 align="center">Maven Project Helper</h1>
 
-[![Quality gate](https://sonarcloud.io/api/project_badges/quality_gate?project=mrhoeve_mph)](https://sonarcloud.io/summary/new_code?id=mrhoeve_mph)
-[![SonarQube Cloud](https://sonarcloud.io/images/project_badges/sonarcloud-highlight.svg)](https://sonarcloud.io/summary/new_code?id=mrhoeve_mph)
+<p align="center">
+  <a href="https://plugins.jetbrains.com/plugin/35667-maven-project-helper">
+    <img src="docs/images/marketplace-install.svg" alt="Get from Marketplace" width="220">
+  </a>
+</p>
 
+<p align="center">
 Maven Project Helper (MPH) is an IntelliJ IDEA plugin for developers working with many related Maven repositories and multi-module projects. It uses IntelliJ's linked Maven projects and Git roots directly, so there is no separate server or web application to start.
+</p>
 
-[![Get from Marketplace](docs/images/marketplace-install.svg)](https://plugins.jetbrains.com/plugin/35667-maven-project-helper)
+<p align="center">
+Install from JetBrains Marketplace, or search for <strong>Maven Project Helper</strong> in IntelliJ IDEA under <strong>Settings → Plugins → Marketplace</strong>.
+</p>
 
-Install from JetBrains Marketplace, or search for **Maven Project Helper** in IntelliJ IDEA under **Settings → Plugins → Marketplace**.
+---
+
+<p align="center">
+  <a href="https://sonarcloud.io/summary/new_code?id=mrhoeve_mph">
+    <img src="https://img.shields.io/sonar/quality_gate/mrhoeve_mph?server=https%3A%2F%2Fsonarcloud.io" alt="SonarQube quality gate">
+  </a>
+  <a href="https://sonarcloud.io/summary/new_code?id=mrhoeve_mph">
+    <img src="https://img.shields.io/badge/scanned_on-SonarQube_Cloud-176b92" alt="Scanned on SonarQube Cloud">
+  </a>
+</p>
 
 ## Screenshots
 
