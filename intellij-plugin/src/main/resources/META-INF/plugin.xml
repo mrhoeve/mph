@@ -12,6 +12,11 @@
         user-visible features, improvements, and important fixes; IntelliJ renders it in the plugin's What's New tab.
     -->
     <change-notes><![CDATA[
+        <h2>Upcoming release</h2>
+        <ul>
+            <li>Add compatibility with IntelliJ IDEA 2026.3 previews while retaining 2026.1 and 2026.2 support.</li>
+            <li>Verify the previous, current, and next available IntelliJ IDEA release lines for each build.</li>
+        </ul>
         <h2>Initial IntelliJ IDEA release</h2>
         <p>
             Maven Project Helper brings multi-repository Maven workspace management directly into IntelliJ IDEA.

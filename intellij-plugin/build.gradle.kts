@@ -18,6 +18,11 @@ val requestedVersion = providers.gradleProperty("mphVersion").orNull?.trim()?.ta
 val releaseBuild = providers.gradleProperty("releaseBuild").map(String::toBoolean).getOrElse(false)
 version = requestedVersion ?: if (releaseBuild) pluginVersion.removeSuffix("-SNAPSHOT") else pluginVersion
 
+// Compile against the oldest supported line; verify all three pinned platform lines.
+val ideaPreviousVersion = providers.gradleProperty("ideaPreviousVersion").get()
+val ideaCurrentVersion = providers.gradleProperty("ideaCurrentVersion").get()
+val ideaNextVersion = providers.gradleProperty("ideaNextVersion").get()
+
 repositories {
     mavenCentral()
     intellijPlatform {
@@ -27,7 +32,7 @@ repositories {
 
 dependencies {
     intellijPlatform {
-        intellijIdea("2026.1.5")
+        intellijIdea(ideaPreviousVersion)
         bundledPlugins("com.intellij.java", "org.jetbrains.idea.maven", "Git4Idea")
         testFramework(TestFrameworkType.Platform)
     }
@@ -51,8 +56,8 @@ intellijPlatform {
         version = project.version.toString()
 
         ideaVersion {
-            sinceBuild = "261"
-            untilBuild = "262.*"
+            sinceBuild = providers.gradleProperty("ideaSinceBuild")
+            untilBuild = providers.gradleProperty("ideaUntilBuild")
         }
 
         description = """
@@ -67,7 +72,8 @@ intellijPlatform {
     pluginVerification {
         ides {
             current()
-            create(IntelliJPlatformType.IntellijIdea, "2026.2.3")
+            create(IntelliJPlatformType.IntellijIdea, ideaCurrentVersion)
+            create(IntelliJPlatformType.IntellijIdea, ideaNextVersion)
         }
     }
 }
