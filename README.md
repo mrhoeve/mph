@@ -5,6 +5,10 @@
 
 Maven Project Helper (MPH) is an IntelliJ IDEA plugin for developers working with many related Maven repositories and multi-module projects. It uses IntelliJ's linked Maven projects and Git roots directly, so there is no separate server or web application to start.
 
+[![Get from Marketplace](docs/images/marketplace-install.svg)](https://plugins.jetbrains.com/plugin/35667-maven-project-helper)
+
+Install from JetBrains Marketplace, or search for **Maven Project Helper** in IntelliJ IDEA under **Settings → Plugins → Marketplace**.
+
 ## Screenshots
 
 ### One workspace for every Maven repository
