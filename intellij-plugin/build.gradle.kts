@@ -18,10 +18,11 @@ val requestedVersion = providers.gradleProperty("mphVersion").orNull?.trim()?.ta
 val releaseBuild = providers.gradleProperty("releaseBuild").map(String::toBoolean).getOrElse(false)
 version = requestedVersion ?: if (releaseBuild) pluginVersion.removeSuffix("-SNAPSHOT") else pluginVersion
 
-// Compile against the oldest supported line; verify all three pinned platform lines.
-val ideaPreviousVersion = providers.gradleProperty("ideaPreviousVersion").get()
-val ideaCurrentVersion = providers.gradleProperty("ideaCurrentVersion").get()
-val ideaNextVersion = providers.gradleProperty("ideaNextVersion").get()
+// Compile against the oldest retained line; the verification list can grow without dropping older lines.
+val ideaBaselineVersion = providers.gradleProperty("ideaBaselineVersion").get()
+val ideaVerificationVersions = providers.gradleProperty("ideaVerificationVersions").get()
+    .split(',').map(String::trim)
+require(ideaVerificationVersions.all(String::isNotEmpty)) { "Set non-empty IDEA verification versions." }
 
 repositories {
     mavenCentral()
@@ -32,7 +33,7 @@ repositories {
 
 dependencies {
     intellijPlatform {
-        intellijIdea(ideaPreviousVersion)
+        intellijIdea(ideaBaselineVersion)
         bundledPlugins("com.intellij.java", "org.jetbrains.idea.maven", "Git4Idea")
         testFramework(TestFrameworkType.Platform)
     }
@@ -72,8 +73,9 @@ intellijPlatform {
     pluginVerification {
         ides {
             current()
-            create(IntelliJPlatformType.IntellijIdea, ideaCurrentVersion)
-            create(IntelliJPlatformType.IntellijIdea, ideaNextVersion)
+            ideaVerificationVersions.distinct().forEach { version ->
+                create(IntelliJPlatformType.IntellijIdea, version)
+            }
         }
     }
 }

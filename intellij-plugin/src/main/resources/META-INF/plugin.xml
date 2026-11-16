@@ -12,6 +12,11 @@
         user-visible features, improvements, and important fixes; IntelliJ renders it in the plugin's What's New tab.
     -->
     <change-notes><![CDATA[
+        <h2>0.27 — IntelliJ IDEA compatibility maintenance</h2>
+        <ul>
+            <li>Updated compatibility verification from the IntelliJ IDEA 2026.3 preview to the final release.</li>
+            <li>Retained support for IntelliJ IDEA 2026.1 and 2026.2. Older IDE lines are no longer automatically dropped as newer releases become available.</li>
+        </ul>
         <h2>0.26 — IntelliJ IDEA compatibility update</h2>
         <ul>
             <li>Added support for IntelliJ IDEA 2026.3 EAP, alongside continued support for 2026.1 and 2026.2.</li>

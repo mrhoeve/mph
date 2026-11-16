@@ -98,19 +98,19 @@ Generate the JaCoCo-compatible Kover XML report used by SonarQube analysis with:
 
 ### IntelliJ IDEA compatibility policy
 
-We support a rolling window of three major IntelliJ IDEA release lines: the previous stable release, the current stable release, and the next release as soon as a testable EAP/preview is available. Preview support is provisional until that line is stable. Patch releases do not shift the window.
+We target the previous stable major IntelliJ IDEA release, the current stable major release, and the next release as soon as a testable EAP/preview is available. This is a minimum target, not a three-line limit: older lines remain supported while tests and compatibility verification pass and maintenance remains practical. A new release never automatically drops an older line. Preview support is provisional until that line is stable; patch releases do not change this policy.
 
-The current window is **2026.1 / 2026.2 / 2026.3 (EAP)**. The plugin is compiled against the oldest supported line and Plugin Verifier checks all three lines in local builds, CI, and release builds. Compatibility verification does not replace manual UI smoke testing, especially for previews.
+The current supported lines are **2026.1 / 2026.2 / 2026.3 (final)**, including retained support for 261. The plugin is compiled against the oldest supported line and Plugin Verifier checks every supported line in local builds, CI, and release builds. Compatibility verification does not replace manual UI smoke testing, especially for previews.
 
-Maintain the pinned versions and build bounds together in `gradle.properties` (`ideaPreviousVersion`, `ideaCurrentVersion`, `ideaNextVersion`, `ideaSinceBuild`, `ideaUntilBuild`). Pins keep builds reproducible; they are not resolved dynamically to an untested future release.
+Maintain the pinned versions and build bounds together in `gradle.properties`: `ideaBaselineVersion` is the oldest supported line used for compilation and verification; `ideaVerificationVersions` is a comma-separated list of all additional supported versions. `ideaSinceBuild` and `ideaUntilBuild` define the advertised compatibility range. Pins keep builds reproducible; they are not resolved dynamically to an untested future release.
 
 When a new major line becomes stable:
 
-1. Move the former current stable line into the previous slot and the new stable line into the current slot.
-2. Add the next line's published preview when available. Until then, verify the two available supported lines and do not invent or advertise a future build number.
+1. Replace the new stable line's preview pin with its final release. Retain the baseline and every still-supported older line.
+2. Add the next line's published preview to `ideaVerificationVersions` when available. Until then, continue verifying all available supported lines and do not invent or advertise a future build number.
 3. Update the minimum and maximum build bounds, this support window, and the plugin's What's New notes. Keep the upper bound limited to the newest verified line (`NNN.*`).
 4. Run all tests, package the plugin, and verify each supported line. Smoke-test the plugin in the new IDE before publishing a compatibility release.
 
-Older plugin releases remain available to older IDEs through Marketplace; dropping an IDE line from new plugin releases does not uninstall an existing compatible version.
+Only drop an older line when continued support is no longer practical, for example because a necessary platform change cannot reasonably be made backwards-compatible. Explicitly document the reason and affected versions, update the baseline and minimum build if needed, and announce the change in release notes. Older plugin releases remain available to older IDEs through Marketplace; dropping an IDE line from new plugin releases does not uninstall an existing compatible version.
 
 The plugin owns its version in `gradle.properties` (`pluginVersion`). Release builds use `-PreleaseBuild=true` to remove `-SNAPSHOT`; `-PmphVersion=...` overrides the packaged version. The release workflow publishes the verified plugin ZIP and advances this single version on `main` and `develop`.
