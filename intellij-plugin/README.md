@@ -34,6 +34,8 @@ After a version update, IntelliJ refreshes its linked Maven model automatically.
 
 Open **View -> Tool Windows -> MPH**. Select modules with Ctrl-click (Cmd-click on macOS), or select a repository row to include all its modules.
 
+When repositories are on different branches, use **On this branch** or **Not on this branch** above the list and choose a branch currently shown in the workspace. MPH preselects a branch if more than half of the Git repositories are on it, but starts with **All repositories**. Filtering does not switch branches or fetch Git refs.
+
 - **Align Versions** previews the selected projects, adds or removes a prefix, and can update references in every linked Maven project.
 - **Update Version** accepts an explicit version or discovers it from the latest Git tag, updating modules and usages together.
 - **Realign Versions** repairs linked references using every selected project's current version.
@@ -101,6 +103,8 @@ Generate the JaCoCo-compatible Kover XML report used by SonarQube analysis with:
 We target the previous stable major IntelliJ IDEA release, the current stable major release, and the next release as soon as a testable EAP/preview is available. This is a minimum target, not a three-line limit: older lines remain supported while tests and compatibility verification pass and maintenance remains practical. A new release never automatically drops an older line. Preview support is provisional until that line is stable; patch releases do not change this policy.
 
 The current supported lines are **2026.1 / 2026.2 / 2026.3 (final)**, including retained support for 261. The plugin is compiled against the oldest supported line and Plugin Verifier checks every supported line in local builds, CI, and release builds. Compatibility verification does not replace manual UI smoke testing, especially for previews.
+
+The verification matrix also checks the 2026.3.1 EAP (263.8311.30) alongside the stable 263 build. This does not change the advertised compatibility range.
 
 Maintain the pinned versions and build bounds together in `gradle.properties`: `ideaBaselineVersion` is the oldest supported line used for compilation and verification; `ideaVerificationVersions` is a comma-separated list of all additional supported versions. `ideaSinceBuild` and `ideaUntilBuild` define the advertised compatibility range. Pins keep builds reproducible; they are not resolved dynamically to an untested future release.
 
