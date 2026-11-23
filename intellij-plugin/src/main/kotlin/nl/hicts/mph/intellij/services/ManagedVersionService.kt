@@ -54,6 +54,24 @@ object ManagedPropertyFilter {
     }
 }
 
+internal fun managedVersionProperties(pomContent: String, effectiveProperties: Map<String, String>): List<ManagedVersionProperty> {
+    val localProperties = PomReferenceVersionEditor.localProperties(pomContent).associateBy(LocalPomProperty::name)
+    return (effectiveProperties.keys + localProperties.keys)
+        .filter { it.contains("version", ignoreCase = true) }
+        .sorted()
+        .map { name ->
+            val local = localProperties[name]
+            ManagedVersionProperty(
+                name = name,
+                // The imported Maven model can lag behind a POM edit until the next Maven reload.
+                value = local?.value ?: effectiveProperties[name].orEmpty(),
+                source = if (local != null) "Local POM" else "Inherited Maven model",
+                isOverridden = local != null,
+                comment = local?.comment,
+            )
+        }
+}
+
 @Service(Service.Level.PROJECT)
 class ManagedVersionService(
     private val project: Project,
@@ -62,22 +80,9 @@ class ManagedVersionService(
         val mavenProject = MavenProjectsManager.getInstance(project).projects.firstOrNull {
             normalized(it.file.path) == normalized(projectInfo.pomPath)
         } ?: throw IllegalArgumentException("${projectInfo.artifactId} is no longer linked as a Maven project.")
-        val localProperties = PomReferenceVersionEditor.localProperties(currentContent(projectInfo.pomPath))
-            .associateBy(LocalPomProperty::name)
         val effectiveProperties = mavenProject.properties.stringPropertyNames()
-            .filter(::isVersionProperty)
             .associateWith { name -> mavenProject.properties.getProperty(name).orEmpty() }
-        val propertyNames = (effectiveProperties.keys + localProperties.keys.filter(::isVersionProperty)).sorted()
-        val properties = propertyNames.map { name ->
-            val local = localProperties[name]
-            ManagedVersionProperty(
-                name = name,
-                value = effectiveProperties[name] ?: local?.value.orEmpty(),
-                source = if (local != null) "Local POM" else "Inherited Maven model",
-                isOverridden = local != null,
-                comment = local?.comment,
-            )
-        }
+        val properties = managedVersionProperties(currentContent(projectInfo.pomPath), effectiveProperties)
         val parent = mavenProject.parentId?.takeIf {
             it.groupId == SPRING_BOOT_GROUP && it.artifactId == SPRING_BOOT_PARENT
         }?.let {
@@ -167,7 +172,6 @@ class ManagedVersionService(
         return Files.readString(Path.of(pomPath))
     }
 
-    private fun isVersionProperty(name: String): Boolean = name.contains("version", ignoreCase = true)
     private fun normalized(path: String): Path = Path.of(path).toAbsolutePath().normalize()
 
     private companion object {

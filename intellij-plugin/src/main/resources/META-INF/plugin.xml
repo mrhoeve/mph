@@ -14,6 +14,7 @@
     <change-notes><![CDATA[
         <h2>0.27 — IntelliJ IDEA compatibility maintenance</h2>
         <ul>
+            <li>Show saved Maven property overrides immediately in Managed Component Versions, without waiting for a Maven reload.</li>
             <li>Updated compatibility verification from the IntelliJ IDEA 2026.3 preview to the final release.</li>
             <li>Retained support for IntelliJ IDEA 2026.1 and 2026.2. Older IDE lines are no longer automatically dropped as newer releases become available.</li>
         </ul>
