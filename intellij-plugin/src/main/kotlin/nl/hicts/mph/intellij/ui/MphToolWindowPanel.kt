@@ -95,6 +95,7 @@ class MphToolWindowPanel(
         },
     private val versionResultNotifier: ((String, BulkVersionUpdateResult) -> Unit)? = null,
     refreshOnCreate: Boolean = true,
+    private val syncChangedPoms: ((Set<String>, () -> Unit, (Throwable) -> Unit) -> Unit)? = null,
 ) : SimpleToolWindowPanel(true, true), Disposable {
     private val summary = JBLabel("Discovering Maven projects…", SwingConstants.LEFT)
     private val rootNode = DefaultMutableTreeNode("Maven Projects")
@@ -116,6 +117,7 @@ class MphToolWindowPanel(
     private var repositories = emptyList<RepositoryTreeEntry>()
     private var snapshot = ProjectSnapshot(emptyList())
     private var reloadInProgress = false
+    private var refreshGeneration = 0L
     internal val toolbarActions = DefaultActionGroup()
     internal val contextActions = DefaultActionGroup()
 
@@ -441,7 +443,7 @@ class MphToolWindowPanel(
         paths.any { it.endsWith("/pom.xml") || it.endsWith("\\pom.xml") }
 
     internal fun refresh() {
-        if (project.isDisposed) return
+        if (project.isDisposed || reloadInProgress) return
         summary.text = "Refreshing Maven projects…"
 
         queueRefreshTask(createRefreshTask())
@@ -486,8 +488,9 @@ class MphToolWindowPanel(
         }
     }
 
-    internal fun createRefreshTask(): Task.Backgroundable =
-        object : Task.Backgroundable(project, "Refreshing Maven Project Helper", false) {
+    internal fun createRefreshTask(): Task.Backgroundable {
+        val generation = ++refreshGeneration
+        return object : Task.Backgroundable(project, "Refreshing Maven Project Helper", false) {
             private lateinit var snapshot: ProjectSnapshot
 
             override fun run(indicator: ProgressIndicator) {
@@ -495,13 +498,48 @@ class MphToolWindowPanel(
             }
 
             override fun onSuccess() {
-                render(snapshot)
+                if (generation == refreshGeneration && !reloadInProgress) render(snapshot)
             }
 
             override fun onThrowable(error: Throwable) {
-                summary.text = "Unable to discover Maven projects: ${error.message ?: error.javaClass.simpleName}"
+                if (generation == refreshGeneration && !reloadInProgress) {
+                    summary.text = "Unable to discover Maven projects: ${error.message ?: error.javaClass.simpleName}"
+                }
             }
         }
+    }
+
+    internal fun syncAndRefreshAfterVersionUpdate(result: BulkVersionUpdateResult) {
+        if (project.isDisposed || result.changedPomPaths.isEmpty()) return
+        reloadInProgress = true
+        refreshGeneration++ // Ignore discovery already queued by the POM saves.
+        summary.text = "Synchronizing changed Maven projects…"
+        (syncChangedPoms ?: ::syncChangedMavenProjects)(
+            result.changedPomPaths,
+            { reloadInProgress = false; refresh() },
+            { error ->
+                reloadInProgress = false
+                summary.text = "POM changes saved, but Maven sync failed: ${error.message ?: error.javaClass.simpleName}"
+            },
+        )
+    }
+
+    private fun syncChangedMavenProjects(paths: Set<String>, onSuccess: () -> Unit, onFailure: (Throwable) -> Unit) {
+        val owner = try {
+            WorkspaceOperationCoordinator.acquire("Maven sync")
+        } catch (error: WorkspaceOperationBusyException) {
+            onFailure(error)
+            return
+        }
+        try {
+            project.service<MavenModelRefreshService>().reloadChangedPoms(
+                paths, { owner.close(); onSuccess() }, { error -> owner.close(); onFailure(error) },
+            )
+        } catch (error: Exception) {
+            owner.close()
+            onFailure(error)
+        }
+    }
 
     internal fun render(snapshot: ProjectSnapshot) {
         this.snapshot = snapshot
@@ -731,7 +769,7 @@ class MphToolWindowPanel(
                 if (result.issues.isEmpty()) NotificationType.INFORMATION else NotificationType.WARNING,
             )
             .notify(project)
-        refresh()
+        syncAndRefreshAfterVersionUpdate(result)
     }
 
     private fun updateSelectedProjectVersion() {
@@ -762,7 +800,7 @@ class MphToolWindowPanel(
         )
         if (result == null) return
         notifyVersionResult("Maven versions updated", result)
-        refresh()
+        syncAndRefreshAfterVersionUpdate(result)
     }
 
     internal fun realignSelectedVersions() {
@@ -805,7 +843,7 @@ class MphToolWindowPanel(
                 try {
                     val result = realignVersions(selected, workspace) ?: return
                     notifyVersionResult("Maven references realigned", result)
-                    refresh()
+                    syncAndRefreshAfterVersionUpdate(result)
                 } catch (error: WorkspaceOperationBusyException) {
                     summary.text = error.message
                 }

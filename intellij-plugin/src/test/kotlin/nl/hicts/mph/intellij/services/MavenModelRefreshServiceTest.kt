@@ -6,6 +6,21 @@ import org.junit.Test
 
 class MavenModelRefreshServiceTest {
     @Test
+    fun `targeted sync includes transitive inheritors and changed references only once`() {
+        val inheritors = mapOf(
+            "parent" to listOf("child"),
+            "child" to listOf("grandchild"),
+            "other-parent" to listOf("unrelated"),
+        )
+        assertEquals(
+            setOf("parent", "child", "grandchild", "changed-dependent"),
+            affectedMavenProjects(listOf("parent", "child", "changed-dependent")) {
+                inheritors[it].orEmpty()
+            },
+        )
+    }
+
+    @Test
     fun `background refresh failure reaches the dispatched callback`() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val callbacks = java.util.concurrent.LinkedBlockingQueue<() -> Unit>()

@@ -14,6 +14,52 @@ import javax.swing.tree.TreePath
 import javax.swing.JTree
 
 class MphToolWindowPanelTest : BasePlatformTestCase() {
+    fun testVersionUpdateRefreshesOnlyAfterTheChangedPomsAreSynced() {
+        val original = projectInfo("sample-service", "/workspace/sample-service/pom.xml")
+        val updated = original.copy(version = "FEATURE-1.0-SNAPSHOT")
+        var discoverCount = 0
+        var onSyncSuccess: (() -> Unit)? = null
+        val changed = setOf(original.pomPath, "/workspace/dependent/pom.xml")
+        val panel = MphToolWindowPanel(
+            project,
+            discoverProjects = { snapshot(if (++discoverCount == 1) original else updated) },
+            queueRefreshTask = { task -> task.run(EmptyProgressIndicator()); task.onSuccess() },
+            refreshOnCreate = false,
+            syncChangedPoms = { paths, onSuccess, _ ->
+                assertEquals(changed, paths)
+                onSyncSuccess = onSuccess
+            },
+        )
+        panel.render(snapshot(original))
+        val stale = panel.createRefreshTask().also { it.run(EmptyProgressIndicator()) }
+        panel.syncAndRefreshAfterVersionUpdate(BulkVersionUpdateResult(1, 1, 0, emptyList(), changed))
+        panel.refresh()
+        stale.onSuccess()
+        assertEquals("Synchronizing changed Maven projects…", panel.summaryText)
+        assertEquals(1, discoverCount)
+
+        onSyncSuccess?.invoke() ?: fail("Targeted Maven sync was not requested")
+        val root = panel.projectTree.model.root as DefaultMutableTreeNode
+        val repo = (root.getChildAt(0) as DefaultMutableTreeNode).userObject as RepositoryTreeEntry
+        assertEquals(updated.version, repo.rootProject()?.version)
+        assertEquals(2, discoverCount)
+    }
+
+    fun testReportsSyncFailureWithoutClaimingThePomEditsFailed() {
+        val panel = MphToolWindowPanel(
+            project,
+            queueRefreshTask = { fail("Do not refresh stale versions after sync failure") },
+            refreshOnCreate = false,
+            syncChangedPoms = { _, _, onFailure -> onFailure(IllegalStateException("Test sync failure")) },
+        )
+        panel.syncAndRefreshAfterVersionUpdate(BulkVersionUpdateResult(0, 0, 1, emptyList()))
+        assertEquals("Discovering Maven projects…", panel.summaryText)
+        panel.syncAndRefreshAfterVersionUpdate(
+            BulkVersionUpdateResult(1, 0, 0, emptyList(), setOf("/workspace/example/pom.xml")),
+        )
+        assertEquals("POM changes saved, but Maven sync failed: Test sync failure", panel.summaryText)
+    }
+
     fun testBranchFilterUsesCurrentRepositoryBranchesAndDefaultsToTheMajority() {
         val panel = MphToolWindowPanel(project, refreshOnCreate = false)
         val longBranch = "feature/" + "long-branch-name-".repeat(20)

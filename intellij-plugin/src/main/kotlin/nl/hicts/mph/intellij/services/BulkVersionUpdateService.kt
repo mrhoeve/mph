@@ -41,6 +41,7 @@ data class BulkVersionUpdateResult(
     val updatedReferenceCount: Int,
     val unchangedProjectCount: Int,
     val issues: List<String>,
+    val changedPomPaths: Set<String> = emptySet(),
 )
 
 @Service(Service.Level.PROJECT)
@@ -136,7 +137,7 @@ class BulkVersionUpdateService(
                 )
             }
         }
-        return plan.result
+        return plan.result.copy(changedPomPaths = touched.toSet())
     }
 
     // These HTTP URIs identify parser features; they are never fetched. HTTPS would be an unrecognized feature name.
