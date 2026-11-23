@@ -19,6 +19,7 @@ import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.ui.ComboBox
 import com.intellij.openapi.ui.SimpleToolWindowPanel
 import nl.hicts.mph.intellij.services.MavenModelRefreshService
 import nl.hicts.mph.intellij.services.WorkspaceOperationCoordinator
@@ -35,6 +36,8 @@ import com.intellij.ui.TreeSpeedSearch
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.treeStructure.Tree
 import com.intellij.util.ui.JBUI
+import git4idea.repo.GitRepository
+import git4idea.repo.GitRepositoryChangeListener
 import nl.hicts.mph.intellij.icons.MphIcons
 import nl.hicts.mph.intellij.model.GitProjectGroup
 import nl.hicts.mph.intellij.model.MavenProjectInfo
@@ -49,11 +52,15 @@ import nl.hicts.mph.intellij.services.IntellijSbomService
 import nl.hicts.mph.intellij.services.NexusIqSettings
 import nl.hicts.mph.intellij.model.WorkspaceDependencyAnalyzer
 import java.awt.BorderLayout
+import java.awt.Component
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.awt.Font
 import java.nio.file.Path
 import javax.swing.JPanel
+import javax.swing.DefaultComboBoxModel
+import javax.swing.DefaultListCellRenderer
+import javax.swing.JList
 import javax.swing.JComponent
 import javax.swing.SwingConstants
 import javax.swing.JTree
@@ -88,13 +95,29 @@ class MphToolWindowPanel(
         },
     private val versionResultNotifier: ((String, BulkVersionUpdateResult) -> Unit)? = null,
     refreshOnCreate: Boolean = true,
+    private val syncChangedPoms: ((Set<String>, () -> Unit, (Throwable) -> Unit) -> Unit)? = null,
 ) : SimpleToolWindowPanel(true, true), Disposable {
     private val summary = JBLabel("Discovering Maven projects…", SwingConstants.LEFT)
     private val rootNode = DefaultMutableTreeNode("Maven Projects")
     private val treeModel = DefaultTreeModel(rootNode)
     private val tree = Tree(treeModel)
+    internal val branchFilterMode = ComboBox(RepositoryBranchFilter.entries.toTypedArray())
+    internal val branchChoice = ComboBox<String>().apply {
+        prototypeDisplayValue = "Choose a branch"
+        accessibleContext.accessibleName = "Branch"
+    }
+    internal val branchFilters = JPanel(BorderLayout(JBUI.scale(8), 0)).apply {
+        border = JBUI.Borders.empty(0, 12, 8, 12)
+        add(branchFilterField("Show repositories", branchFilterMode), BorderLayout.WEST)
+        add(branchFilterField("Branch", branchChoice), BorderLayout.CENTER)
+        isVisible = false
+    }
+    private var updatingBranchFilters = false
+    private var branchChosenByUser = false
+    private var repositories = emptyList<RepositoryTreeEntry>()
     private var snapshot = ProjectSnapshot(emptyList())
     private var reloadInProgress = false
+    private var refreshGeneration = 0L
     internal val toolbarActions = DefaultActionGroup()
     internal val contextActions = DefaultActionGroup()
 
@@ -371,11 +394,32 @@ class MphToolWindowPanel(
         tree.accessibleContext.accessibleName = "Maven projects and repositories"
 
         val body = JPanel(BorderLayout())
-        body.add(createHeader(), BorderLayout.NORTH)
+        body.add(JPanel(BorderLayout()).apply {
+            add(createHeader(), BorderLayout.NORTH)
+            add(branchFilters, BorderLayout.SOUTH)
+        }, BorderLayout.NORTH)
         body.add(ScrollPaneFactory.createScrollPane(tree, true), BorderLayout.CENTER)
         setContent(body)
 
-        project.messageBus.connect(this).subscribe(
+        branchFilterMode.accessibleContext.accessibleName = "Show repositories"
+        branchChoice.renderer = object : DefaultListCellRenderer() {
+            override fun getListCellRendererComponent(
+                list: JList<*>, value: Any?, index: Int, isSelected: Boolean, cellHasFocus: Boolean,
+            ): Component = super.getListCellRendererComponent(
+                list, value ?: "Choose a branch", index, isSelected, cellHasFocus,
+            )
+        }.apply { putClientProperty("html.disable", true) }
+        branchFilterMode.addActionListener { applyBranchFilter() }
+        branchChoice.addActionListener {
+            if (!updatingBranchFilters) branchChosenByUser = true
+            applyBranchFilter()
+        }
+
+        val connection = project.messageBus.connect(this)
+        connection.subscribe(GitRepository.GIT_REPO_CHANGE, GitRepositoryChangeListener {
+            ApplicationManager.getApplication().invokeLater(::refresh)
+        })
+        connection.subscribe(
             VirtualFileManager.VFS_CHANGES,
             object : BulkFileListener {
                 override fun after(events: List<VFileEvent>) {
@@ -399,7 +443,7 @@ class MphToolWindowPanel(
         paths.any { it.endsWith("/pom.xml") || it.endsWith("\\pom.xml") }
 
     internal fun refresh() {
-        if (project.isDisposed) return
+        if (project.isDisposed || reloadInProgress) return
         summary.text = "Refreshing Maven projects…"
 
         queueRefreshTask(createRefreshTask())
@@ -444,8 +488,9 @@ class MphToolWindowPanel(
         }
     }
 
-    internal fun createRefreshTask(): Task.Backgroundable =
-        object : Task.Backgroundable(project, "Refreshing Maven Project Helper", false) {
+    internal fun createRefreshTask(): Task.Backgroundable {
+        val generation = ++refreshGeneration
+        return object : Task.Backgroundable(project, "Refreshing Maven Project Helper", false) {
             private lateinit var snapshot: ProjectSnapshot
 
             override fun run(indicator: ProgressIndicator) {
@@ -453,36 +498,111 @@ class MphToolWindowPanel(
             }
 
             override fun onSuccess() {
-                render(snapshot)
+                if (generation == refreshGeneration && !reloadInProgress) render(snapshot)
             }
 
             override fun onThrowable(error: Throwable) {
-                summary.text = "Unable to discover Maven projects: ${error.message ?: error.javaClass.simpleName}"
+                if (generation == refreshGeneration && !reloadInProgress) {
+                    summary.text = "Unable to discover Maven projects: ${error.message ?: error.javaClass.simpleName}"
+                }
             }
         }
+    }
+
+    internal fun syncAndRefreshAfterVersionUpdate(result: BulkVersionUpdateResult) {
+        if (project.isDisposed || result.changedPomPaths.isEmpty()) return
+        reloadInProgress = true
+        refreshGeneration++ // Ignore discovery already queued by the POM saves.
+        summary.text = "Synchronizing changed Maven projects…"
+        (syncChangedPoms ?: ::syncChangedMavenProjects)(
+            result.changedPomPaths,
+            { reloadInProgress = false; refresh() },
+            { error ->
+                reloadInProgress = false
+                summary.text = "POM changes saved, but Maven sync failed: ${error.message ?: error.javaClass.simpleName}"
+            },
+        )
+    }
+
+    private fun syncChangedMavenProjects(paths: Set<String>, onSuccess: () -> Unit, onFailure: (Throwable) -> Unit) {
+        val owner = try {
+            WorkspaceOperationCoordinator.acquire("Maven sync")
+        } catch (error: WorkspaceOperationBusyException) {
+            onFailure(error)
+            return
+        }
+        try {
+            project.service<MavenModelRefreshService>().reloadChangedPoms(
+                paths, { owner.close(); onSuccess() }, { error -> owner.close(); onFailure(error) },
+            )
+        } catch (error: Exception) {
+            owner.close()
+            onFailure(error)
+        }
+    }
 
     internal fun render(snapshot: ProjectSnapshot) {
-        val hadProjects = rootNode.childCount > 0
-        val expandedRepositories = expandedRepositoryKeys()
         this.snapshot = snapshot
-        rootNode.removeAllChildren()
-        snapshot.groups.forEach { group -> rootNode.add(groupNode(group)) }
-        treeModel.reload()
-        if (hadProjects) {
-            restoreExpandedRepositories(expandedRepositories)
-        } else {
-            collapseAllRows()
+        repositories = snapshot.groups.map { group ->
+            val label = group.rootPath?.let { Path.of(it).fileName?.toString() ?: it } ?: "Outside a Git repository"
+            RepositoryTreeEntry(label, group.rootPath, group.projects)
         }
-        summary.text = "${snapshot.projectCount} Maven projects in ${snapshot.repositoryCount} Git repositories"
+        val branches = repositories.filter { it.rootPath != null }.map(RepositoryTreeEntry::branchName)
+        val options = branches.filterNotNull().distinct().sorted()
+        val previous = branchChoice.selectedItem as? String
+        updatingBranchFilters = true
+        try {
+            branchFilters.isVisible = options.isNotEmpty() && branches.distinct().size > 1
+            if (!branchFilters.isVisible || previous != null && previous !in options) {
+                branchFilterMode.selectedItem = RepositoryBranchFilter.ALL
+                branchChosenByUser = false
+            }
+            val keepChoice = branchChosenByUser || branchFilterMode.selectedItem != RepositoryBranchFilter.ALL
+            branchChoice.model = DefaultComboBoxModel(options.toTypedArray())
+            branchChoice.selectedItem = previous?.takeIf { keepChoice && it in options }
+                ?: options.firstOrNull { branch -> branches.count { it == branch } > branches.size / 2 }
+        } finally {
+            updatingBranchFilters = false
+        }
+        applyBranchFilter()
     }
 
-    private fun groupNode(group: GitProjectGroup): DefaultMutableTreeNode {
-        val label = group.rootPath?.let { Path.of(it).fileName?.toString() ?: it } ?: "Outside a Git repository"
-        val repository = RepositoryTreeEntry(label, group.rootPath, group.projects)
-        return DefaultMutableTreeNode(repository).also { node ->
-            group.projects.forEach { node.add(DefaultMutableTreeNode(ProjectTreeEntry(it))) }
+    private fun applyBranchFilter() {
+        if (updatingBranchFilters) return
+        val mode = branchFilterMode.selectedItem as RepositoryBranchFilter
+        val branch = branchChoice.selectedItem as? String
+        branchChoice.isEnabled = mode != RepositoryBranchFilter.ALL
+        branchChoice.toolTipText = branch
+        val filtering = branchFilters.isVisible && branch != null && mode != RepositoryBranchFilter.ALL
+        val visible = if (filtering) repositories.filter {
+            it.rootPath != null && (it.branchName == branch) == (mode == RepositoryBranchFilter.MATCHING)
+        } else repositories
+        val expandedRepositories = expandedRepositoryKeys()
+        // Hidden selections must not be passed to workspace actions.
+        tree.clearSelection()
+        rootNode.removeAllChildren()
+        visible.forEach { repository -> rootNode.add(groupNode(repository)) }
+        treeModel.reload()
+        restoreExpandedRepositories(expandedRepositories)
+        tree.emptyText.text = if (filtering) "No repositories match the branch filter" else "No linked Maven projects"
+        summary.text = if (filtering) {
+            "${visible.size} of ${snapshot.repositoryCount} Git repositories"
+        } else {
+            "${snapshot.projectCount} Maven projects in ${snapshot.repositoryCount} Git repositories"
         }
     }
+
+    private fun groupNode(repository: RepositoryTreeEntry): DefaultMutableTreeNode {
+        return DefaultMutableTreeNode(repository).also { node ->
+            repository.projects.forEach { node.add(DefaultMutableTreeNode(ProjectTreeEntry(it))) }
+        }
+    }
+
+    private fun branchFilterField(label: String, choice: JComponent): JComponent =
+        JPanel(BorderLayout(0, JBUI.scale(2))).apply {
+            add(JBLabel(label).apply { labelFor = choice }, BorderLayout.NORTH)
+            add(choice, BorderLayout.CENTER)
+        }
 
     private fun createHeader(): JComponent {
         val title = JBLabel(MPH_TITLE, MphIcons.Mph, SwingConstants.LEFT)
@@ -649,7 +769,7 @@ class MphToolWindowPanel(
                 if (result.issues.isEmpty()) NotificationType.INFORMATION else NotificationType.WARNING,
             )
             .notify(project)
-        refresh()
+        syncAndRefreshAfterVersionUpdate(result)
     }
 
     private fun updateSelectedProjectVersion() {
@@ -680,7 +800,7 @@ class MphToolWindowPanel(
         )
         if (result == null) return
         notifyVersionResult("Maven versions updated", result)
-        refresh()
+        syncAndRefreshAfterVersionUpdate(result)
     }
 
     internal fun realignSelectedVersions() {
@@ -723,7 +843,7 @@ class MphToolWindowPanel(
                 try {
                     val result = realignVersions(selected, workspace) ?: return
                     notifyVersionResult("Maven references realigned", result)
-                    refresh()
+                    syncAndRefreshAfterVersionUpdate(result)
                 } catch (error: WorkspaceOperationBusyException) {
                     summary.text = error.message
                 }
@@ -791,11 +911,22 @@ internal data class ProjectTreeEntry(
     override fun toString(): String = project.artifactId
 }
 
+internal enum class RepositoryBranchFilter(private val label: String) {
+    ALL("All repositories"),
+    MATCHING("On this branch"),
+    DIFFERENT("Not on this branch");
+
+    override fun toString(): String = label
+}
+
 internal data class RepositoryTreeEntry(
     val label: String,
     val rootPath: String?,
     val projects: List<MavenProjectInfo>,
 ) {
+    val branchName: String?
+        get() = rootProject()?.gitStatus?.branchName
+
     fun rootProject(): MavenProjectInfo? {
         val root = rootPath?.let(Path::of)?.toAbsolutePath()?.normalize()
         return projects.minByOrNull { project ->

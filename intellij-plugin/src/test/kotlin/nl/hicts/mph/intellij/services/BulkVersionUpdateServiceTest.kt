@@ -103,6 +103,7 @@ class BulkVersionUpdateServiceTest : BasePlatformTestCase() {
 
             assertEquals(1, result.updatedProjectCount)
             assertEquals(1, result.updatedReferenceCount)
+            assertEquals(setOf(target.pomPath, dependent.pomPath), result.changedPomPaths)
             assertTrue(targetDocument.text.contains("<version>PREFIX-1234-1.0-SNAPSHOT</version>"))
             assertTrue(dependentDocument.text.contains("<version>PREFIX-1234-1.0-SNAPSHOT</version>"))
 

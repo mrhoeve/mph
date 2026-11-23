@@ -4,6 +4,7 @@ import com.intellij.openapi.progress.EmptyProgressIndicator
 import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import nl.hicts.mph.intellij.model.GitProjectGroup
+import nl.hicts.mph.intellij.model.GitWorkspaceStatus
 import nl.hicts.mph.intellij.model.MavenProjectInfo
 import nl.hicts.mph.intellij.model.ProjectSnapshot
 import nl.hicts.mph.intellij.services.BulkVersionUpdateResult
@@ -13,6 +14,105 @@ import javax.swing.tree.TreePath
 import javax.swing.JTree
 
 class MphToolWindowPanelTest : BasePlatformTestCase() {
+    fun testVersionUpdateRefreshesOnlyAfterTheChangedPomsAreSynced() {
+        val original = projectInfo("sample-service", "/workspace/sample-service/pom.xml")
+        val updated = original.copy(version = "FEATURE-1.0-SNAPSHOT")
+        var discoverCount = 0
+        var onSyncSuccess: (() -> Unit)? = null
+        val changed = setOf(original.pomPath, "/workspace/dependent/pom.xml")
+        val panel = MphToolWindowPanel(
+            project,
+            discoverProjects = { snapshot(if (++discoverCount == 1) original else updated) },
+            queueRefreshTask = { task -> task.run(EmptyProgressIndicator()); task.onSuccess() },
+            refreshOnCreate = false,
+            syncChangedPoms = { paths, onSuccess, _ ->
+                assertEquals(changed, paths)
+                onSyncSuccess = onSuccess
+            },
+        )
+        panel.render(snapshot(original))
+        val stale = panel.createRefreshTask().also { it.run(EmptyProgressIndicator()) }
+        panel.syncAndRefreshAfterVersionUpdate(BulkVersionUpdateResult(1, 1, 0, emptyList(), changed))
+        panel.refresh()
+        stale.onSuccess()
+        assertEquals("Synchronizing changed Maven projects…", panel.summaryText)
+        assertEquals(1, discoverCount)
+
+        onSyncSuccess?.invoke() ?: fail("Targeted Maven sync was not requested")
+        val root = panel.projectTree.model.root as DefaultMutableTreeNode
+        val repo = (root.getChildAt(0) as DefaultMutableTreeNode).userObject as RepositoryTreeEntry
+        assertEquals(updated.version, repo.rootProject()?.version)
+        assertEquals(2, discoverCount)
+    }
+
+    fun testReportsSyncFailureWithoutClaimingThePomEditsFailed() {
+        val panel = MphToolWindowPanel(
+            project,
+            queueRefreshTask = { fail("Do not refresh stale versions after sync failure") },
+            refreshOnCreate = false,
+            syncChangedPoms = { _, _, onFailure -> onFailure(IllegalStateException("Test sync failure")) },
+        )
+        panel.syncAndRefreshAfterVersionUpdate(BulkVersionUpdateResult(0, 0, 1, emptyList()))
+        assertEquals("Discovering Maven projects…", panel.summaryText)
+        panel.syncAndRefreshAfterVersionUpdate(
+            BulkVersionUpdateResult(1, 0, 0, emptyList(), setOf("/workspace/example/pom.xml")),
+        )
+        assertEquals("POM changes saved, but Maven sync failed: Test sync failure", panel.summaryText)
+    }
+
+    fun testBranchFilterUsesCurrentRepositoryBranchesAndDefaultsToTheMajority() {
+        val panel = MphToolWindowPanel(project, refreshOnCreate = false)
+        val longBranch = "feature/" + "long-branch-name-".repeat(20)
+        panel.render(branchSnapshot("feature/x", "feature/x", longBranch))
+        val root = panel.projectTree.model.root as DefaultMutableTreeNode
+
+        assertTrue(panel.branchFilters.isVisible)
+        assertEquals(RepositoryBranchFilter.ALL, panel.branchFilterMode.selectedItem)
+        assertEquals("feature/x", panel.branchChoice.selectedItem)
+        assertFalse(panel.branchChoice.isEnabled)
+        assertEquals(listOf(longBranch, "feature/x"), (0 until panel.branchChoice.itemCount).map(panel.branchChoice::getItemAt))
+        assertEquals(3, root.childCount)
+
+        panel.projectTree.setSelectionRow(0)
+        panel.branchFilterMode.selectedItem = RepositoryBranchFilter.DIFFERENT
+        assertTrue(panel.branchChoice.isEnabled)
+        assertTrue(panel.selectedProjects().isEmpty())
+        assertEquals("1 of 3 Git repositories", panel.summaryText)
+        val different = root.getChildAt(0) as DefaultMutableTreeNode
+        assertEquals("repo-2", different.toString())
+        assertEquals(2, different.childCount)
+
+        panel.branchChoice.selectedItem = longBranch
+        panel.branchFilterMode.selectedItem = RepositoryBranchFilter.MATCHING
+        assertEquals(longBranch, panel.branchChoice.toolTipText)
+        assertEquals("repo-2", root.getChildAt(0).toString())
+        assertEquals(1, root.childCount)
+
+        panel.render(branchSnapshot("feature/x", "feature/x", "feature/x"))
+        assertFalse(panel.branchFilters.isVisible)
+        assertEquals(RepositoryBranchFilter.ALL, panel.branchFilterMode.selectedItem)
+        assertEquals(3, root.childCount)
+    }
+
+    fun testNoMajorityLeavesBranchUnsetAndBranchlessRepositoriesCanBeFound() {
+        val panel = MphToolWindowPanel(project, refreshOnCreate = false)
+        panel.render(branchSnapshot("develop", "feature/x", null))
+        val root = panel.projectTree.model.root as DefaultMutableTreeNode
+        assertNull(panel.branchChoice.selectedItem)
+        assertEquals(2, panel.branchChoice.itemCount)
+        panel.branchFilterMode.selectedItem = RepositoryBranchFilter.DIFFERENT
+        assertEquals(3, root.childCount)
+        panel.branchChoice.selectedItem = "feature/x"
+        assertEquals(listOf("repo-0", "repo-2"), (0 until root.childCount).map { root.getChildAt(it).toString() })
+    }
+
+    private fun branchSnapshot(vararg branches: String?) = ProjectSnapshot(branches.mapIndexed { index, branch ->
+        val name = "repo-$index"
+        val root = "/workspace/$name"
+        val main = projectInfo(name, "$root/pom.xml").copy(gitStatus = branch?.let { GitWorkspaceStatus(it, 0, 0) })
+        GitProjectGroup(root, listOf(main, main.copy(artifactId = "$name-module", pomPath = "$root/module/pom.xml")))
+    })
+
     fun testToolbarAndContextMenuGroupActionsAndExposeVersionAndRecoveryCommands() {
         val panel = MphToolWindowPanel(project, refreshOnCreate = false)
         val toolbar = panel.toolbarActions.getChildren(null)

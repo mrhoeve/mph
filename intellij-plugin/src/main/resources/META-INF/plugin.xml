@@ -14,6 +14,9 @@
     <change-notes><![CDATA[
         <h2>0.27 — IntelliJ IDEA compatibility maintenance</h2>
         <ul>
+            <li>Refresh project versions after adding or removing a prefix by syncing changed POMs and their inheriting projects, without reloading the entire workspace.</li>
+            <li>Filter workspace repositories by their current Git branch to find repositories on or off the expected branch.</li>
+            <li>Show saved Maven property overrides immediately in Managed Component Versions, without waiting for a Maven reload.</li>
             <li>Updated compatibility verification from the IntelliJ IDEA 2026.3 preview to the final release.</li>
             <li>Retained support for IntelliJ IDEA 2026.1 and 2026.2. Older IDE lines are no longer automatically dropped as newer releases become available.</li>
         </ul>

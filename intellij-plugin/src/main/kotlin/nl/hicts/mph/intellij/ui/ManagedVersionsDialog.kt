@@ -154,7 +154,7 @@ class ManagedVersionsDialog(
         val dialog = PropertyOverrideDialog(ideProject, property)
         if (!dialog.showAndGet()) return
         service.overrideProperty(projectInfo, property.name, dialog.value, dialog.comment)
-        reload()
+        reload(property.name)
     }
 
     private fun removeSelected() {
@@ -195,17 +195,20 @@ class ManagedVersionsDialog(
     }
 
     private fun checkNexusIq() {
+        val scannedAnalysis = analysis
         nexusButton.isEnabled = false
         summary.text = "Checking managed components with Nexus IQ…"
         object : Task.Backgroundable(ideProject, "Checking managed Maven versions", true) {
             private lateinit var enriched: ManagedVersionAnalysis
             override fun run(indicator: ProgressIndicator) {
-                enriched = service.enrichWithNexus(analysis)
+                enriched = service.enrichWithNexus(scannedAnalysis)
             }
 
             override fun onSuccess() {
-                analysis = enriched
-                refreshTable()
+                if (analysis === scannedAnalysis) {
+                    analysis = enriched
+                    refreshTable()
+                }
                 nexusButton.isEnabled = true
             }
 
@@ -216,8 +219,13 @@ class ManagedVersionsDialog(
         }.queue()
     }
 
-    private fun reload() {
+    private fun reload(selectedName: String? = null) {
         analysis = service.inspect(projectInfo)
         refreshTable()
+        val row = displayed.indexOfFirst { it.name == selectedName }
+        if (row >= 0) {
+            val viewRow = table.convertRowIndexToView(row)
+            if (viewRow >= 0) table.setRowSelectionInterval(viewRow, viewRow)
+        }
     }
 }
