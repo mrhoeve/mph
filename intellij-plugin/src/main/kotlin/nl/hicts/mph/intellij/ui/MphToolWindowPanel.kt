@@ -52,12 +52,15 @@ import nl.hicts.mph.intellij.services.IntellijSbomService
 import nl.hicts.mph.intellij.services.NexusIqSettings
 import nl.hicts.mph.intellij.model.WorkspaceDependencyAnalyzer
 import java.awt.BorderLayout
+import java.awt.Component
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.awt.Font
 import java.nio.file.Path
 import javax.swing.JPanel
 import javax.swing.DefaultComboBoxModel
+import javax.swing.DefaultListCellRenderer
+import javax.swing.JList
 import javax.swing.JComponent
 import javax.swing.SwingConstants
 import javax.swing.JTree
@@ -397,7 +400,13 @@ class MphToolWindowPanel(
         setContent(body)
 
         branchFilterMode.accessibleContext.accessibleName = "Show repositories"
-        branchChoice.renderer = com.intellij.ui.SimpleListCellRenderer.create("Choose a branch") { it }
+        branchChoice.renderer = object : DefaultListCellRenderer() {
+            override fun getListCellRendererComponent(
+                list: JList<*>, value: Any?, index: Int, isSelected: Boolean, cellHasFocus: Boolean,
+            ): Component = super.getListCellRendererComponent(
+                list, value ?: "Choose a branch", index, isSelected, cellHasFocus,
+            )
+        }.apply { putClientProperty("html.disable", true) }
         branchFilterMode.addActionListener { applyBranchFilter() }
         branchChoice.addActionListener {
             if (!updatingBranchFilters) branchChosenByUser = true
