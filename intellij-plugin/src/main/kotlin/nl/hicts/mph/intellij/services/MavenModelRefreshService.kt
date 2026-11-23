@@ -29,17 +29,15 @@ class MavenModelRefreshService(private val project: Project, private val scope: 
     fun reloadChangedPoms(paths: Set<String>, onSuccess: () -> Unit, onFailure: (Throwable) -> Unit) {
         reloadModel(onSuccess, onFailure) { manager ->
             val fileSystem = LocalFileSystem.getInstance()
-            val changed = paths.map { path ->
-                val file = fileSystem.findFileByNioFile(Path.of(path)) ?: error("POM is unavailable: $path")
-                manager.findProject(file) ?: error("POM is no longer linked as a Maven project: $path")
-            }
-            val files = affectedMavenProjects(changed, manager::findInheritors).map { it.file }
-            if (files.isNotEmpty()) {
-                manager.updateMavenProjects(MavenSyncSpec.incremental("MPH version update", true), files, emptyList())
-                check(files.all { manager.findProject(it)?.hasReadingErrors() == false }) {
-                    "One or more affected Maven projects could not be read."
-                }
-            }
+            synchronizeChangedMavenProjects(
+                paths,
+                findFile = { fileSystem.findFileByNioFile(Path.of(it)) },
+                findProject = { manager.findProject(it) },
+                inheritors = manager::findInheritors,
+                projectFile = { it.file },
+                hasReadingErrors = { it.hasReadingErrors() },
+                sync = { manager.updateMavenProjects(MavenSyncSpec.incremental("MPH version update", true), it, emptyList()) },
+            )
         }
     }
 
@@ -56,7 +54,28 @@ class MavenModelRefreshService(private val project: Project, private val scope: 
     }
 }
 
-internal fun <T> affectedMavenProjects(changed: Collection<T>, inheritors: (T) -> Collection<T>): Set<T> {
+internal suspend fun <File : Any, Model : Any> synchronizeChangedMavenProjects(
+    paths: Set<String>,
+    findFile: (String) -> File?,
+    findProject: (File) -> Model?,
+    inheritors: (Model) -> Collection<Model>,
+    projectFile: (Model) -> File,
+    hasReadingErrors: (Model) -> Boolean,
+    sync: suspend (List<File>) -> Unit,
+) {
+    if (paths.isEmpty()) return
+    val changed = paths.map { path ->
+        val file = findFile(path) ?: error("POM is unavailable: $path")
+        findProject(file) ?: error("POM is no longer linked as a Maven project: $path")
+    }
+    val files = affectedMavenProjects(changed, inheritors).map(projectFile).distinct()
+    sync(files)
+    check(files.all { findProject(it)?.let(hasReadingErrors) == false }) {
+        "One or more affected Maven projects could not be read."
+    }
+}
+
+private fun <T> affectedMavenProjects(changed: Collection<T>, inheritors: (T) -> Collection<T>): Set<T> {
     val affected = linkedSetOf<T>()
     val pending = ArrayDeque(changed)
     while (pending.isNotEmpty()) {
