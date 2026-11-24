@@ -8,6 +8,8 @@ data class PomReferenceUpdate(
     val updatedReferenceCount: Int,
     val unresolvedProperties: Set<String>,
     val missingVersionCount: Int,
+    val sharedProperties: Set<String> = emptySet(),
+    val changes: List<PomVersionChange> = emptyList(),
 ) {
     val changed: Boolean
         get() = updatedReferenceCount > 0
@@ -17,7 +19,28 @@ data class PomProjectVersionUpdate(
     val content: String,
     val changed: Boolean,
     val unresolvedProperty: String? = null,
+    val changes: List<PomVersionChange> = emptyList(),
 )
+
+data class PomVersionChange(
+    val range: IntRange,
+    val label: String,
+    val oldVersion: String,
+    val newVersion: String,
+    val referenceCount: Int = 0,
+)
+
+internal fun applyPomVersionChanges(content: String, changes: List<PomVersionChange>): String =
+    StringBuilder(content).apply {
+        var nextStart = content.length
+        changes.sortedByDescending { it.range.first }.forEach { change ->
+            val start = change.range.first
+            val end = change.range.last + 1
+            require(start >= 0 && start <= end && end <= nextStart) { "Overlapping or invalid POM version changes." }
+            replace(start, end, change.newVersion)
+            nextStart = start
+        }
+    }.toString()
 
 data class LocalPomProperty(
     val name: String,
@@ -31,7 +54,12 @@ data class PomPropertyUpdate(
 )
 
 object PomReferenceVersionEditor {
-    private val propertyReference = Regex("^\\$\\{([^}]+)}$")
+    private val propertyReference = Regex("^\\$\\{([^{}]+)}$")
+    private val expressionStart = "${'$'}{"
+
+    private fun isMavenVariable(name: String): Boolean =
+        name in setOf("version", "basedir", "maven.build.timestamp") ||
+            listOf("project.", "pom.", "settings.", "env.").any(name::startsWith)
 
     internal fun inheritsVersionFrom(content: String, parentContent: String, parent: MavenCoordinates): Boolean {
         val parentBlock = tagMatches(content, "parent", xmlTextRanges(content)).singleOrNull() ?: return false
@@ -48,8 +76,10 @@ object PomReferenceVersionEditor {
             ?.groups?.get(1)?.value?.trim()
             ?.takeIf(String::isNotBlank)
             ?: return null
-        val propertyName = propertyReference.matchEntire(version)?.groups?.get(1)?.value ?: return version
-        return findPropertyValue(content, propertyName)
+        if (expressionStart !in version) return version
+        val propertyName = propertyReference.matchEntire(version)?.groups?.get(1)?.value ?: return null
+        if (isMavenVariable(propertyName)) return null
+        return findPropertyValue(content, propertyName)?.takeUnless { expressionStart in it }
     }
 
     fun updateProjectVersion(content: String, newVersion: String): PomProjectVersionUpdate {
@@ -60,17 +90,20 @@ object PomReferenceVersionEditor {
         val oldVersion = value.value.trim()
         val propertyName = propertyReference.matchEntire(oldVersion)?.groups?.get(1)?.value
         if (propertyName != null) {
-            val propertyUpdate = updateProperty(content, propertyName, newVersion)
+            if (isMavenVariable(propertyName)) return PomProjectVersionUpdate(content, changed = false)
+            val propertyUpdate = updateProperty(content, propertyName, newVersion, literalOnly = true)
             return PomProjectVersionUpdate(
                 content = propertyUpdate.content,
                 changed = propertyUpdate.changed,
                 unresolvedProperty = propertyName.takeUnless { propertyUpdate.found },
+                changes = listOfNotNull(propertyUpdate.change),
             )
         }
-        if (oldVersion == newVersion) return PomProjectVersionUpdate(content, changed = false)
+        if (oldVersion == newVersion || expressionStart in oldVersion) return PomProjectVersionUpdate(content, changed = false)
         return PomProjectVersionUpdate(
             content = content.replaceRange(value.range, newVersion),
             changed = true,
+            changes = listOf(PomVersionChange(value.range, "Project version", oldVersion, newVersion)),
         )
     }
 
@@ -147,8 +180,8 @@ object PomReferenceVersionEditor {
         val comments = xmlTextRanges(content)
         val dependencyManagement = tagRanges(content, "dependencyManagement", comments)
         val pluginBlocks = tagRanges(content, "plugin", comments)
-        val replacements = mutableListOf<Replacement>()
-        val referencedProperties = linkedMapOf<String, MutableList<Replacement>>()
+        val replacements = mutableListOf<PomVersionChange>()
+        val referencedProperties = linkedMapOf<String, Int>()
         val collector = VersionReplacementCollector(
             target = UpdateTarget(content, target, newVersion, referenceKinds),
             ranges = ReferenceRanges(comments, dependencyManagement, pluginBlocks),
@@ -156,23 +189,27 @@ object PomReferenceVersionEditor {
         )
         val missingVersionCount = collectParentReplacement(collector) + collectDependencyReplacements(collector)
 
-        // A property shared with another artifact must not silently change that artifact as a side effect.
-        // Keep the property and specialize only the requested references when its uses are not exclusive.
-        referencedProperties.entries.removeIf { (name, locations) ->
+        // Keep shared expressions intact instead of hardcoding one consumer or changing unrelated consumers.
+        val sharedProperties = linkedSetOf<String>()
+        referencedProperties.entries.removeIf { (name, referenceCount) ->
             val uses = Regex(Regex.escape("\${$name}")).findAll(content)
                 .count { match -> comments.none { match.range.first in it } }
-            if (uses > locations.size) { replacements += locations; true } else false
+            if (uses <= referenceCount) false else {
+                if (findPropertyValue(content, name) != newVersion) sharedProperties += name
+                true
+            }
         }
 
-        val propertyResult = updateReferencedProperties(
-            applyReplacements(content, replacements), newVersion, referencedProperties.mapValues { it.value.size }, replacements.size,
-        )
+        val propertyResult = updateReferencedProperties(content, newVersion, referencedProperties)
+        val changes = replacements + propertyResult.changes
 
         return PomReferenceUpdate(
-            content = propertyResult.content,
-            updatedReferenceCount = propertyResult.updatedReferenceCount,
+            content = applyPomVersionChanges(content, changes),
+            updatedReferenceCount = changes.sumOf(PomVersionChange::referenceCount),
             unresolvedProperties = propertyResult.unresolvedProperties,
             missingVersionCount = missingVersionCount,
+            sharedProperties = sharedProperties,
+            changes = changes,
         )
     }
 
@@ -186,6 +223,7 @@ object PomReferenceVersionEditor {
             parent.range.first,
             version,
             collector.target.newVersion,
+            "Parent: ${collector.target.coordinates.artifactId}",
             collector.collected.replacements,
             collector.collected.referencedProperties,
         )
@@ -214,6 +252,8 @@ object PomReferenceVersionEditor {
                     dependency.range.first,
                     version,
                     collector.target.newVersion,
+                    if (managed) "Managed dependency: ${collector.target.coordinates.artifactId}"
+                    else "Dependency: ${collector.target.coordinates.artifactId}",
                     collector.collected.replacements,
                     collector.collected.referencedProperties,
                 )
@@ -234,60 +274,57 @@ object PomReferenceVersionEditor {
     }
 
     private fun updateReferencedProperties(
-        initialContent: String,
+        content: String,
         newVersion: String,
         referencedProperties: Map<String, Int>,
-        initialUpdateCount: Int,
     ): ReferencedPropertyUpdate {
-        var content = initialContent
-        var updatedReferenceCount = initialUpdateCount
+        val changes = mutableListOf<PomVersionChange>()
         val unresolvedProperties = linkedSetOf<String>()
         referencedProperties.forEach { (propertyName, referenceCount) ->
-            val propertyUpdate = updateProperty(content, propertyName, newVersion)
-            content = propertyUpdate.content
+            val propertyUpdate = updateProperty(content, propertyName, newVersion, literalOnly = true)
             if (!propertyUpdate.found) {
                 unresolvedProperties += propertyName
-            } else if (propertyUpdate.changed) {
-                updatedReferenceCount += referenceCount
             }
+            propertyUpdate.change?.let { changes += it.copy(referenceCount = referenceCount) }
         }
-        return ReferencedPropertyUpdate(content, updatedReferenceCount, unresolvedProperties)
+        return ReferencedPropertyUpdate(changes, unresolvedProperties)
     }
 
     private fun collectVersionReplacement(
         blockStart: Int,
         version: MatchResult,
         newVersion: String,
-        replacements: MutableList<Replacement>,
-        referencedProperties: MutableMap<String, MutableList<Replacement>>,
+        label: String,
+        replacements: MutableList<PomVersionChange>,
+        referencedProperties: MutableMap<String, Int>,
     ) {
         val valueGroup = version.groups[1] ?: return
         val oldVersion = valueGroup.value.trim()
         val propertyName = propertyReference.matchEntire(oldVersion)?.groups?.get(1)?.value
-        if (propertyName != null) {
-            referencedProperties.getOrPut(propertyName) { mutableListOf() } += Replacement(
-                IntRange(blockStart + valueGroup.range.first, blockStart + valueGroup.range.last), newVersion,
-            )
-        } else if (oldVersion != newVersion) {
-            replacements += Replacement(
+        if (propertyName != null && !isMavenVariable(propertyName)) {
+            referencedProperties.merge(propertyName, 1, Int::plus)
+        } else if (expressionStart !in oldVersion && oldVersion != newVersion) {
+            replacements += PomVersionChange(
                 IntRange(blockStart + valueGroup.range.first, blockStart + valueGroup.range.last),
-                newVersion,
+                label, oldVersion, newVersion, referenceCount = 1,
             )
         }
     }
 
-    private fun updateProperty(content: String, propertyName: String, newVersion: String): PropertyUpdate {
+    private fun updateProperty(content: String, propertyName: String, newVersion: String, literalOnly: Boolean = false): PropertyUpdate {
         val comments = xmlTextRanges(content)
         val propertyBlocks = tagMatches(content, "properties", comments)
         propertyBlocks.forEach { properties ->
             val property = elementMatch(properties.value, Regex.escape(propertyName)) ?: return@forEach
             val valueGroup = property.groups[1] ?: return@forEach
+            if (literalOnly && expressionStart in valueGroup.value) return PropertyUpdate(content, found = false, changed = false)
             if (valueGroup.value.trim() == newVersion) return PropertyUpdate(content, found = true, changed = false)
             val range = IntRange(
                 properties.range.first + valueGroup.range.first,
                 properties.range.first + valueGroup.range.last,
             )
-            return PropertyUpdate(content.replaceRange(range, newVersion), found = true, changed = true)
+            return PropertyUpdate(content.replaceRange(range, newVersion), found = true, changed = true,
+                change = PomVersionChange(range, "Property: $propertyName", valueGroup.value.trim(), newVersion))
         }
         return PropertyUpdate(content, found = false, changed = false)
     }
@@ -361,16 +398,9 @@ object PomReferenceVersionEditor {
             .map(MatchResult::range)
             .toList()
 
-    private fun applyReplacements(content: String, replacements: List<Replacement>): String =
-        replacements.sortedByDescending { it.range.first }.fold(content) { current, replacement ->
-            current.replaceRange(replacement.range, replacement.value)
-        }
-
-    private data class Replacement(val range: IntRange, val value: String)
-    private data class PropertyUpdate(val content: String, val found: Boolean, val changed: Boolean)
+    private data class PropertyUpdate(val content: String, val found: Boolean, val changed: Boolean, val change: PomVersionChange? = null)
     private data class ReferencedPropertyUpdate(
-        val content: String,
-        val updatedReferenceCount: Int,
+        val changes: List<PomVersionChange>,
         val unresolvedProperties: Set<String>,
     )
     private data class VersionReplacementCollector(
@@ -390,7 +420,7 @@ object PomReferenceVersionEditor {
         val pluginBlocks: List<IntRange>,
     )
     private data class CollectedReplacements(
-        val replacements: MutableList<Replacement>,
-        val referencedProperties: MutableMap<String, MutableList<Replacement>>,
+        val replacements: MutableList<PomVersionChange>,
+        val referencedProperties: MutableMap<String, Int>,
     )
 }

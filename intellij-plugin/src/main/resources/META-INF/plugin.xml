@@ -12,6 +12,11 @@
         user-visible features, improvements, and important fixes; IntelliJ renders it in the plugin's What's New tab.
     -->
     <change-notes><![CDATA[
+        <h2>0.28 — Safer Maven version alignment</h2>
+        <ul>
+            <li>Preserve Maven version expressions such as ${project.version} during alignment.</li>
+            <li>Choose individual version changes or entire POM files in the alignment preview. The diff updates as you change the selection.</li>
+        </ul>
         <h2>0.27 — IntelliJ IDEA compatibility maintenance</h2>
         <ul>
             <li>Refresh project versions after adding or removing a prefix by syncing changed POMs and their inheriting projects, without reloading the entire workspace.</li>

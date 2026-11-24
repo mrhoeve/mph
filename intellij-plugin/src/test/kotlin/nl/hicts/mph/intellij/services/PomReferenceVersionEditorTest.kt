@@ -9,17 +9,66 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PomReferenceVersionEditorTest {
+    @Test
+    fun `selected version changes are applied against original offsets and reject overlaps`() {
+        val original = "1.0 2.0"
+        val first = PomVersionChange(0..2, "Parent", "1.0", "PREFIX-1.0")
+        val second = PomVersionChange(4..6, "Dependency", "2.0", "3.0")
+        assertEquals("PREFIX-1.0 3.0", applyPomVersionChanges(original, listOf(first, second)))
+        assertEquals("1.0 3.0", applyPomVersionChanges(original, listOf(second)))
+        assertEquals(original, applyPomVersionChanges(original, emptyList()))
+        assertThrows(IllegalArgumentException::class.java) {
+            applyPomVersionChanges(original, listOf(first, second.copy(range = 2..4)))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            applyPomVersionChanges(original, listOf(first.copy(range = -1..1)))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            applyPomVersionChanges(original, listOf(second.copy(range = 4..7)))
+        }
+    }
+
     @Test fun `shared dependency properties cannot overwrite the version of another artifact`() {
         val source = """<project><properties><shared.version>1.0</shared.version></properties><dependencies>
             <dependency><groupId>org.example</groupId><artifactId>first</artifactId><version>${'$'}{shared.version}</version></dependency>
             <dependency><groupId>org.example</groupId><artifactId>second</artifactId><version>${'$'}{shared.version}</version></dependency>
             </dependencies></project>"""
         val first = PomReferenceVersionEditor.update(source, MavenCoordinates("org.example", "first"), "2.0", MavenReferenceKind.entries.toSet())
-        assertTrue(first.content.contains("<artifactId>first</artifactId><version>2.0</version>"))
-        assertTrue(first.content.contains("<shared.version>1.0</shared.version>"))
+        assertEquals(source, first.content)
+        assertEquals(setOf("shared.version"), first.sharedProperties)
         val second = PomReferenceVersionEditor.update(first.content, MavenCoordinates("org.example", "second"), "3.0", MavenReferenceKind.entries.toSet())
-        assertTrue(second.content.contains("<artifactId>first</artifactId><version>2.0</version>"))
-        assertTrue(second.content.contains("<shared.version>3.0</shared.version>"))
+        assertEquals(source, second.content)
+        assertEquals(0, second.updatedReferenceCount)
+        assertEquals(setOf("shared.version"), second.sharedProperties)
+    }
+
+    @Test
+    fun `alignment preserves Maven and composite expressions even when used elsewhere`() {
+        val expressions = listOf(
+            "${'$'}{project.version}", "${'$'}{pom.version}", "${'$'}{project.parent.version}",
+            "${'$'}{settings.localRepository}", "${'$'}{env.VERSION}", "${'$'}{revision}${'$'}{changelist}",
+        )
+        for (expression in expressions) {
+            val source = """<project><version>$expression</version><dependencies>
+                <dependency><groupId>org.example</groupId><artifactId>shared-api</artifactId><version>$expression</version></dependency>
+                <dependency><groupId>org.example</groupId><artifactId>other</artifactId><version>$expression</version></dependency>
+                </dependencies></project>"""
+            assertEquals(source, PomReferenceVersionEditor.update(
+                source, target, "2.0", setOf(MavenReferenceKind.DEPENDENCY),
+            ).content)
+            assertEquals(source, PomReferenceVersionEditor.updateProjectVersion(source, "2.0").content)
+            assertEquals(null, PomReferenceVersionEditor.findProjectVersion(source))
+        }
+    }
+
+    @Test
+    fun `alignment never flattens a local alias to the project version`() {
+        val source = """<project><properties><alias.version>${'$'}{project.version}</alias.version></properties>
+            <dependencies><dependency><groupId>org.example</groupId><artifactId>shared-api</artifactId>
+            <version>${'$'}{alias.version}</version></dependency></dependencies></project>"""
+        val result = PomReferenceVersionEditor.update(source, target, "2.0", setOf(MavenReferenceKind.DEPENDENCY))
+        assertEquals(source, result.content)
+        assertEquals(setOf("alias.version"), result.unresolvedProperties)
     }
     @Test
     fun `adds updates and removes local Maven properties with comments`() {

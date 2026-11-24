@@ -11,6 +11,69 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 class BulkVersionUpdateServiceTest : BasePlatformTestCase() {
+    fun testAppliesOneLogicalChangeWithoutTouchingOtherVersionsInTheSamePom() {
+        val libraryFile = tempPom("library", pom("library", "2.0"))
+        val clientFile = tempPom("client", pom("client", "3.0"))
+        val consumerSource = pom("consumer", "1.0", """
+            <properties><library.version>1.0</library.version></properties>
+            <dependencies>
+                <dependency><groupId>org.example</groupId><artifactId>library</artifactId><version>${'$'}{library.version}</version></dependency>
+                <dependency><groupId>org.example</groupId><artifactId>client</artifactId><version>2.0</version></dependency>
+            </dependencies>
+            <dependencyManagement><dependencies>
+                <dependency><groupId>org.example</groupId><artifactId>library</artifactId><version>${'$'}{library.version}</version></dependency>
+            </dependencies></dependencyManagement>
+        """.trimIndent())
+        val consumerFile = tempPom("consumer", consumerSource)
+        val targets = listOf(projectInfo("library", libraryFile), projectInfo("client", clientFile))
+        val consumer = projectInfo("consumer", consumerFile)
+        try {
+            val service = project.service<BulkVersionUpdateService>()
+            val plan = service.prepare(BulkVersionUpdateRequest(
+                targets, targets + consumer, "", BulkVersionMode.KEEP_CURRENT, true,
+            ))
+            val edit = plan.edits.single()
+            assertEquals(listOf("Property: library.version", "Dependency: client"), edit.changes.map(PomVersionChange::label))
+            assertEquals(2, edit.changes.first().referenceCount)
+            assertEquals(3, plan.result.updatedReferenceCount)
+            val result = service.apply(plan.withSelectedChanges { _, index -> index == 0 })
+            assertEquals(2, result.updatedReferenceCount)
+            assertEquals(setOf(consumer.pomPath), result.changedPomPaths)
+            assertEquals(consumerSource.replace("<library.version>1.0</library.version>", "<library.version>2.0</library.version>"),
+                Files.readString(consumerFile))
+        } finally {
+            listOf(libraryFile, clientFile, consumerFile).forEach(Files::deleteIfExists)
+        }
+    }
+
+    fun testOnlyAppliesIncludedPomDiffsAndReportsTheirCounts() {
+        val targetFile = tempPom("included-target", pom("shared-api", "1.0-SNAPSHOT"))
+        val excludedFile = tempPom("excluded-project", pom("excluded", "1.0-SNAPSHOT",
+            """<dependencies><dependency><groupId>org.example</groupId><artifactId>shared-api</artifactId><version>1.0-SNAPSHOT</version></dependency></dependencies>"""))
+        val target = projectInfo("shared-api", targetFile)
+        val excluded = projectInfo("excluded", excludedFile)
+        try {
+            val service = project.service<BulkVersionUpdateService>()
+            val plan = service.prepare(BulkVersionUpdateRequest(
+                listOf(target, excluded), listOf(target, excluded), "FEATURE-", BulkVersionMode.ADD_PREFIX, true,
+            ))
+            assertEquals(2, plan.edits.size)
+            assertEquals(1, plan.result.updatedReferenceCount)
+            val before = Files.readString(excludedFile)
+            val result = service.apply(plan.withSelectedChanges { edit, _ -> edit.project.pomPath == target.pomPath })
+            assertEquals(setOf(target.pomPath), result.changedPomPaths)
+            assertEquals(1, result.updatedProjectCount)
+            assertEquals(1, result.unchangedProjectCount)
+            assertEquals(0, result.updatedReferenceCount)
+            assertEquals(before, Files.readString(excludedFile))
+            assertEquals(before, document(excludedFile).text)
+            assertTrue(Files.readString(targetFile).contains("<version>FEATURE-1.0-SNAPSHOT</version>"))
+        } finally {
+            Files.deleteIfExists(targetFile)
+            Files.deleteIfExists(excludedFile)
+        }
+    }
+
     fun testSynchronizationPrefixesInheritedModulesAndTheirConsumersUsingTheCurrentParent() {
         val parentFile = tempPom("parent", pom("sample-parent", "2.0-SNAPSHOT"))
         val moduleFile = tempPom("module", inheritedPom("sample-module", "sample-parent"))

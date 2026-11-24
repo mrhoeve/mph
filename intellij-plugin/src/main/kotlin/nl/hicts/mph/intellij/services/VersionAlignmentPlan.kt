@@ -7,13 +7,35 @@ import java.nio.file.Path
 import java.util.Properties
 import java.util.UUID
 
-data class AlignmentEdit(val project: MavenProjectInfo, val before: String, val after: String)
+data class AlignmentEdit(
+    val project: MavenProjectInfo,
+    val before: String,
+    val changes: List<PomVersionChange>,
+    val selectedProject: Boolean = false,
+) {
+    val after: String get() = applyPomVersionChanges(before, changes)
+    val updatedReferenceCount: Int get() = changes.sumOf(PomVersionChange::referenceCount)
+}
 internal data class AlignmentInput(val project: MavenProjectInfo, val content: String, val diskBytes: ByteArray)
 class VersionAlignmentPlan internal constructor(
     internal val inputs: List<AlignmentInput>,
     val edits: List<AlignmentEdit>,
     val result: BulkVersionUpdateResult,
-)
+) {
+    internal fun withSelectedChanges(include: (AlignmentEdit, Int) -> Boolean): VersionAlignmentPlan {
+        val included = edits.mapNotNull { edit ->
+            val changes = edit.changes.filterIndexed { index, _ -> include(edit, index) }
+            if (changes.isEmpty()) null else edit.copy(changes = changes)
+        }
+        if (included == edits) return this
+        val updated = included.count(AlignmentEdit::selectedProject)
+        return VersionAlignmentPlan(inputs, included, result.copy(
+            updatedProjectCount = updated,
+            updatedReferenceCount = included.sumOf(AlignmentEdit::updatedReferenceCount),
+            unchangedProjectCount = result.unchangedProjectCount + result.updatedProjectCount - updated,
+        ))
+    }
+}
 class AlignmentApplyException(message: String, cause: Throwable) : IllegalStateException(message, cause)
 
 /** Stored outside IDE caches, including unsaved editor text as well as exact disk bytes. */
