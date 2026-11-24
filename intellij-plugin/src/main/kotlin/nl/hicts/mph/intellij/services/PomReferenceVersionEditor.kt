@@ -8,6 +8,7 @@ data class PomReferenceUpdate(
     val updatedReferenceCount: Int,
     val unresolvedProperties: Set<String>,
     val missingVersionCount: Int,
+    val sharedProperties: Set<String> = emptySet(),
 ) {
     val changed: Boolean
         get() = updatedReferenceCount > 0
@@ -31,7 +32,12 @@ data class PomPropertyUpdate(
 )
 
 object PomReferenceVersionEditor {
-    private val propertyReference = Regex("^\\$\\{([^}]+)}$")
+    private val propertyReference = Regex("^\\$\\{([^{}]+)}$")
+    private val expressionStart = "${'$'}{"
+
+    private fun isMavenVariable(name: String): Boolean =
+        name in setOf("version", "basedir", "maven.build.timestamp") ||
+            listOf("project.", "pom.", "settings.", "env.").any(name::startsWith)
 
     internal fun inheritsVersionFrom(content: String, parentContent: String, parent: MavenCoordinates): Boolean {
         val parentBlock = tagMatches(content, "parent", xmlTextRanges(content)).singleOrNull() ?: return false
@@ -48,8 +54,10 @@ object PomReferenceVersionEditor {
             ?.groups?.get(1)?.value?.trim()
             ?.takeIf(String::isNotBlank)
             ?: return null
-        val propertyName = propertyReference.matchEntire(version)?.groups?.get(1)?.value ?: return version
-        return findPropertyValue(content, propertyName)
+        if (expressionStart !in version) return version
+        val propertyName = propertyReference.matchEntire(version)?.groups?.get(1)?.value ?: return null
+        if (isMavenVariable(propertyName)) return null
+        return findPropertyValue(content, propertyName)?.takeUnless { expressionStart in it }
     }
 
     fun updateProjectVersion(content: String, newVersion: String): PomProjectVersionUpdate {
@@ -60,14 +68,15 @@ object PomReferenceVersionEditor {
         val oldVersion = value.value.trim()
         val propertyName = propertyReference.matchEntire(oldVersion)?.groups?.get(1)?.value
         if (propertyName != null) {
-            val propertyUpdate = updateProperty(content, propertyName, newVersion)
+            if (isMavenVariable(propertyName)) return PomProjectVersionUpdate(content, changed = false)
+            val propertyUpdate = updateProperty(content, propertyName, newVersion, literalOnly = true)
             return PomProjectVersionUpdate(
                 content = propertyUpdate.content,
                 changed = propertyUpdate.changed,
                 unresolvedProperty = propertyName.takeUnless { propertyUpdate.found },
             )
         }
-        if (oldVersion == newVersion) return PomProjectVersionUpdate(content, changed = false)
+        if (oldVersion == newVersion || expressionStart in oldVersion) return PomProjectVersionUpdate(content, changed = false)
         return PomProjectVersionUpdate(
             content = content.replaceRange(value.range, newVersion),
             changed = true,
@@ -148,7 +157,7 @@ object PomReferenceVersionEditor {
         val dependencyManagement = tagRanges(content, "dependencyManagement", comments)
         val pluginBlocks = tagRanges(content, "plugin", comments)
         val replacements = mutableListOf<Replacement>()
-        val referencedProperties = linkedMapOf<String, MutableList<Replacement>>()
+        val referencedProperties = linkedMapOf<String, Int>()
         val collector = VersionReplacementCollector(
             target = UpdateTarget(content, target, newVersion, referenceKinds),
             ranges = ReferenceRanges(comments, dependencyManagement, pluginBlocks),
@@ -156,16 +165,19 @@ object PomReferenceVersionEditor {
         )
         val missingVersionCount = collectParentReplacement(collector) + collectDependencyReplacements(collector)
 
-        // A property shared with another artifact must not silently change that artifact as a side effect.
-        // Keep the property and specialize only the requested references when its uses are not exclusive.
-        referencedProperties.entries.removeIf { (name, locations) ->
+        // Keep shared expressions intact instead of hardcoding one consumer or changing unrelated consumers.
+        val sharedProperties = linkedSetOf<String>()
+        referencedProperties.entries.removeIf { (name, referenceCount) ->
             val uses = Regex(Regex.escape("\${$name}")).findAll(content)
                 .count { match -> comments.none { match.range.first in it } }
-            if (uses > locations.size) { replacements += locations; true } else false
+            if (uses <= referenceCount) false else {
+                if (findPropertyValue(content, name) != newVersion) sharedProperties += name
+                true
+            }
         }
 
         val propertyResult = updateReferencedProperties(
-            applyReplacements(content, replacements), newVersion, referencedProperties.mapValues { it.value.size }, replacements.size,
+            applyReplacements(content, replacements), newVersion, referencedProperties, replacements.size,
         )
 
         return PomReferenceUpdate(
@@ -173,6 +185,7 @@ object PomReferenceVersionEditor {
             updatedReferenceCount = propertyResult.updatedReferenceCount,
             unresolvedProperties = propertyResult.unresolvedProperties,
             missingVersionCount = missingVersionCount,
+            sharedProperties = sharedProperties,
         )
     }
 
@@ -243,7 +256,7 @@ object PomReferenceVersionEditor {
         var updatedReferenceCount = initialUpdateCount
         val unresolvedProperties = linkedSetOf<String>()
         referencedProperties.forEach { (propertyName, referenceCount) ->
-            val propertyUpdate = updateProperty(content, propertyName, newVersion)
+            val propertyUpdate = updateProperty(content, propertyName, newVersion, literalOnly = true)
             content = propertyUpdate.content
             if (!propertyUpdate.found) {
                 unresolvedProperties += propertyName
@@ -259,16 +272,14 @@ object PomReferenceVersionEditor {
         version: MatchResult,
         newVersion: String,
         replacements: MutableList<Replacement>,
-        referencedProperties: MutableMap<String, MutableList<Replacement>>,
+        referencedProperties: MutableMap<String, Int>,
     ) {
         val valueGroup = version.groups[1] ?: return
         val oldVersion = valueGroup.value.trim()
         val propertyName = propertyReference.matchEntire(oldVersion)?.groups?.get(1)?.value
-        if (propertyName != null) {
-            referencedProperties.getOrPut(propertyName) { mutableListOf() } += Replacement(
-                IntRange(blockStart + valueGroup.range.first, blockStart + valueGroup.range.last), newVersion,
-            )
-        } else if (oldVersion != newVersion) {
+        if (propertyName != null && !isMavenVariable(propertyName)) {
+            referencedProperties.merge(propertyName, 1, Int::plus)
+        } else if (expressionStart !in oldVersion && oldVersion != newVersion) {
             replacements += Replacement(
                 IntRange(blockStart + valueGroup.range.first, blockStart + valueGroup.range.last),
                 newVersion,
@@ -276,12 +287,13 @@ object PomReferenceVersionEditor {
         }
     }
 
-    private fun updateProperty(content: String, propertyName: String, newVersion: String): PropertyUpdate {
+    private fun updateProperty(content: String, propertyName: String, newVersion: String, literalOnly: Boolean = false): PropertyUpdate {
         val comments = xmlTextRanges(content)
         val propertyBlocks = tagMatches(content, "properties", comments)
         propertyBlocks.forEach { properties ->
             val property = elementMatch(properties.value, Regex.escape(propertyName)) ?: return@forEach
             val valueGroup = property.groups[1] ?: return@forEach
+            if (literalOnly && expressionStart in valueGroup.value) return PropertyUpdate(content, found = false, changed = false)
             if (valueGroup.value.trim() == newVersion) return PropertyUpdate(content, found = true, changed = false)
             val range = IntRange(
                 properties.range.first + valueGroup.range.first,
@@ -391,6 +403,6 @@ object PomReferenceVersionEditor {
     )
     private data class CollectedReplacements(
         val replacements: MutableList<Replacement>,
-        val referencedProperties: MutableMap<String, MutableList<Replacement>>,
+        val referencedProperties: MutableMap<String, Int>,
     )
 }

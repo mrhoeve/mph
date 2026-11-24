@@ -11,6 +11,34 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 class BulkVersionUpdateServiceTest : BasePlatformTestCase() {
+    fun testOnlyAppliesIncludedPomDiffsAndReportsTheirCounts() {
+        val targetFile = tempPom("included-target", pom("shared-api", "1.0-SNAPSHOT"))
+        val excludedFile = tempPom("excluded-project", pom("excluded", "1.0-SNAPSHOT",
+            """<dependencies><dependency><groupId>org.example</groupId><artifactId>shared-api</artifactId><version>1.0-SNAPSHOT</version></dependency></dependencies>"""))
+        val target = projectInfo("shared-api", targetFile)
+        val excluded = projectInfo("excluded", excludedFile)
+        try {
+            val service = project.service<BulkVersionUpdateService>()
+            val plan = service.prepare(BulkVersionUpdateRequest(
+                listOf(target, excluded), listOf(target, excluded), "FEATURE-", BulkVersionMode.ADD_PREFIX, true,
+            ))
+            assertEquals(2, plan.edits.size)
+            assertEquals(1, plan.result.updatedReferenceCount)
+            val before = Files.readString(excludedFile)
+            val result = service.apply(plan.including(setOf(target.pomPath)))
+            assertEquals(setOf(target.pomPath), result.changedPomPaths)
+            assertEquals(1, result.updatedProjectCount)
+            assertEquals(1, result.unchangedProjectCount)
+            assertEquals(0, result.updatedReferenceCount)
+            assertEquals(before, Files.readString(excludedFile))
+            assertEquals(before, document(excludedFile).text)
+            assertTrue(Files.readString(targetFile).contains("<version>FEATURE-1.0-SNAPSHOT</version>"))
+        } finally {
+            Files.deleteIfExists(targetFile)
+            Files.deleteIfExists(excludedFile)
+        }
+    }
+
     fun testSynchronizationPrefixesInheritedModulesAndTheirConsumersUsingTheCurrentParent() {
         val parentFile = tempPom("parent", pom("sample-parent", "2.0-SNAPSHOT"))
         val moduleFile = tempPom("module", inheritedPom("sample-module", "sample-parent"))

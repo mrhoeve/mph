@@ -13,6 +13,25 @@ import javax.swing.JButton
 
 /** Offscreen layout checks; these are not a substitute for native IDE interaction. */
 class PluginDialogVisualTest : BasePlatformTestCase() {
+    fun testAlignmentIncludesAllPomsByDefaultAndAllowsIndividualExclusions() {
+        val first = MavenProjectInfo("org.example", "first", "1.0", "/workspace/first/pom.xml", null)
+        val second = first.copy(artifactId = "second", pomPath = "/workspace/second/pom.xml")
+        val edits = listOf(first, second).map { AlignmentEdit(it, "<project/>", "<project/>", selectedProject = true) }
+        val plan = VersionAlignmentPlan(emptyList(), edits, BulkVersionUpdateResult(2, 0, 0, emptyList()))
+        val dialog = VersionAlignmentPreviewDialog(project, plan)
+        try {
+            assertEquals(edits, dialog.selectedPlan().edits)
+            dialog.files.setValueAt(false, 1, 0)
+            assertEquals(listOf(edits.first()), dialog.selectedPlan().edits)
+            dialog.files.setValueAt(false, 0, 0)
+            assertTrue(dialog.selectedPlan().edits.isEmpty())
+            dialog.files.setValueAt(true, 1, 0)
+            assertEquals(listOf(edits.last()), dialog.selectedPlan().edits)
+        } finally {
+            dialog.close(DialogWrapper.CANCEL_EXIT_CODE)
+        }
+    }
+
     fun testDialogsRenderAtNormalAndNarrowWidths() {
         val info = MavenProjectInfo("org.example", "sample-library", "FEATURE-1.0-SNAPSHOT", "C:/workspace/library/pom.xml", "C:/workspace/library")
         val plan = VersionAlignmentPlan(emptyList(), listOf(AlignmentEdit(info, "<project><version>1.0</version></project>", "<project><version>FEATURE-1.0</version></project>")), BulkVersionUpdateResult(1, 0, 0, emptyList()))

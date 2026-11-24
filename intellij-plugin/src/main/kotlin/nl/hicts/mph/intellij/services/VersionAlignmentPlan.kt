@@ -7,13 +7,30 @@ import java.nio.file.Path
 import java.util.Properties
 import java.util.UUID
 
-data class AlignmentEdit(val project: MavenProjectInfo, val before: String, val after: String)
+data class AlignmentEdit(
+    val project: MavenProjectInfo,
+    val before: String,
+    val after: String,
+    val selectedProject: Boolean = false,
+    val updatedReferenceCount: Int = 0,
+)
 internal data class AlignmentInput(val project: MavenProjectInfo, val content: String, val diskBytes: ByteArray)
 class VersionAlignmentPlan internal constructor(
     internal val inputs: List<AlignmentInput>,
     val edits: List<AlignmentEdit>,
     val result: BulkVersionUpdateResult,
-)
+) {
+    internal fun including(pomPaths: Set<String>): VersionAlignmentPlan {
+        val included = edits.filter { it.project.pomPath in pomPaths }
+        if (included.size == edits.size) return this
+        val updated = included.count(AlignmentEdit::selectedProject)
+        return VersionAlignmentPlan(inputs, included, result.copy(
+            updatedProjectCount = updated,
+            updatedReferenceCount = included.sumOf(AlignmentEdit::updatedReferenceCount),
+            unchangedProjectCount = result.unchangedProjectCount + result.updatedProjectCount - updated,
+        ))
+    }
+}
 class AlignmentApplyException(message: String, cause: Throwable) : IllegalStateException(message, cause)
 
 /** Stored outside IDE caches, including unsaved editor text as well as exact disk bytes. */

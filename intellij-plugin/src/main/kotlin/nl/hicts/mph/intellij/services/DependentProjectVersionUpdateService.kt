@@ -62,7 +62,10 @@ class DependentProjectVersionUpdateService(
                         unchangedProjects++
                     }
                     update.unresolvedProperties.forEach { property ->
-                        issues += "${dependent.project.artifactId}: property '$property' is inherited or missing."
+                        issues += "${dependent.project.artifactId}: property '$property' is inherited, missing, or itself an expression."
+                    }
+                    update.sharedProperties.forEach { property ->
+                        issues += "${dependent.project.artifactId}: shared property '$property' was left unchanged because it has other uses."
                     }
                     if (update.missingVersionCount > 0) {
                         issues += "${dependent.project.artifactId}: ${update.missingVersionCount} reference(s) have no local version."

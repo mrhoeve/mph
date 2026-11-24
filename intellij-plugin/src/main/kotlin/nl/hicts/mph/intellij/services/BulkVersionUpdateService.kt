@@ -70,6 +70,7 @@ class BulkVersionUpdateService(
             LocalFileSystem.getInstance().findFileByPath(info.pomPath.replace('\\', '/'))?.let(manager::getDocument)
         }
         val selected = request.selectedProjects.distinctBy { it.pomPath }
+        val selectedPaths = selected.map(MavenProjectInfo::pomPath).toSet()
         val issues = mutableListOf<String>()
         val targets = targetVersions(request, selected, documents, issues)
         var references = 0
@@ -78,7 +79,9 @@ class BulkVersionUpdateService(
             references += update.updatedReferences
             if (update.content == input.content) null else {
                 validatePom(update.content)
-                AlignmentEdit(input.project, input.content, update.content)
+                AlignmentEdit(input.project, input.content, update.content,
+                    selectedProject = input.project.pomPath in selectedPaths,
+                    updatedReferenceCount = update.updatedReferences)
             }
         }
         val changed = edits.map { it.project.pomPath }.toSet()
@@ -222,7 +225,7 @@ class BulkVersionUpdateService(
             val update = PomReferenceVersionEditor.updateProjectVersion(content, target.version)
             content = update.content
             update.unresolvedProperty?.let { property ->
-                issues += "${projectInfo.artifactId}: project version property '$property' is inherited or missing."
+                issues += "${projectInfo.artifactId}: project version property '$property' cannot be updated safely."
             }
         }
         if (!updateDependents) return DocumentUpdate(content, 0)
@@ -256,7 +259,10 @@ class BulkVersionUpdateService(
             MavenReferenceKind.entries.toSet(),
         )
         update.unresolvedProperties.forEach { property ->
-            issues += "${projectInfo.artifactId}: property '$property' is inherited or missing."
+            issues += "${projectInfo.artifactId}: property '$property' is inherited, missing, or itself an expression."
+        }
+        update.sharedProperties.forEach { property ->
+            issues += "${projectInfo.artifactId}: shared property '$property' was left unchanged because it has other uses."
         }
         if (update.missingVersionCount > 0) {
             issues += "${projectInfo.artifactId}: ${update.missingVersionCount} reference(s) have no local version."
