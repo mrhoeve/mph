@@ -9,6 +9,25 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PomReferenceVersionEditorTest {
+    @Test
+    fun `selected version changes are applied against original offsets and reject overlaps`() {
+        val original = "1.0 2.0"
+        val first = PomVersionChange(0..2, "Parent", "1.0", "PREFIX-1.0")
+        val second = PomVersionChange(4..6, "Dependency", "2.0", "3.0")
+        assertEquals("PREFIX-1.0 3.0", applyPomVersionChanges(original, listOf(first, second)))
+        assertEquals("1.0 3.0", applyPomVersionChanges(original, listOf(second)))
+        assertEquals(original, applyPomVersionChanges(original, emptyList()))
+        assertThrows(IllegalArgumentException::class.java) {
+            applyPomVersionChanges(original, listOf(first, second.copy(range = 2..4)))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            applyPomVersionChanges(original, listOf(first.copy(range = -1..1)))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            applyPomVersionChanges(original, listOf(second.copy(range = 4..7)))
+        }
+    }
+
     @Test fun `shared dependency properties cannot overwrite the version of another artifact`() {
         val source = """<project><properties><shared.version>1.0</shared.version></properties><dependencies>
             <dependency><groupId>org.example</groupId><artifactId>first</artifactId><version>${'$'}{shared.version}</version></dependency>

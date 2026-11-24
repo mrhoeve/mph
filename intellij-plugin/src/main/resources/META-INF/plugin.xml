@@ -15,7 +15,7 @@
         <h2>0.28 — Safer Maven version alignment</h2>
         <ul>
             <li>Preserve Maven version expressions such as ${project.version} during alignment.</li>
-            <li>Choose which POM files to include when applying a reviewed alignment.</li>
+            <li>Choose individual version changes or entire POM files in the alignment preview. The diff updates as you change the selection.</li>
         </ul>
         <h2>0.27 — IntelliJ IDEA compatibility maintenance</h2>
         <ul>

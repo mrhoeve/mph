@@ -16,25 +16,61 @@ class PluginDialogVisualTest : BasePlatformTestCase() {
     fun testAlignmentIncludesAllPomsByDefaultAndAllowsIndividualExclusions() {
         val first = MavenProjectInfo("org.example", "first", "1.0", "/workspace/first/pom.xml", null)
         val second = first.copy(artifactId = "second", pomPath = "/workspace/second/pom.xml")
-        val edits = listOf(first, second).map { AlignmentEdit(it, "<project/>", "<project/>", selectedProject = true) }
+        val edits = listOf(first, second).map { versionEdit(it) }
         val plan = VersionAlignmentPlan(emptyList(), edits, BulkVersionUpdateResult(2, 0, 0, emptyList()))
         val dialog = VersionAlignmentPreviewDialog(project, plan)
         try {
             assertEquals(edits, dialog.selectedPlan().edits)
-            dialog.files.setValueAt(false, 1, 0)
+            dialog.files.setValueAt(false, 2, 0)
             assertEquals(listOf(edits.first()), dialog.selectedPlan().edits)
             dialog.files.setValueAt(false, 0, 0)
             assertTrue(dialog.selectedPlan().edits.isEmpty())
-            dialog.files.setValueAt(true, 1, 0)
+            dialog.files.setValueAt(true, 3, 0)
             assertEquals(listOf(edits.last()), dialog.selectedPlan().edits)
         } finally {
             dialog.close(DialogWrapper.CANCEL_EXIT_CODE)
         }
     }
 
+    fun testAlignmentDiffUpdatesWhenAChangeIsDeselected() {
+        val info = MavenProjectInfo("org.example", "example", "1.0", "/workspace/example/pom.xml", null)
+        val source = "<project><version>1.0</version><properties><library.version>2.0</library.version></properties></project>"
+        val projectOffset = source.indexOf("1.0")
+        val propertyOffset = source.indexOf("2.0")
+        val edit = AlignmentEdit(info, source, listOf(
+            PomVersionChange(projectOffset until projectOffset + 3, "Project version", "1.0", "FEATURE-1.0"),
+            PomVersionChange(propertyOffset until propertyOffset + 3, "Property: library.version", "2.0", "2.1", referenceCount = 3),
+        ), selectedProject = true)
+        val dialog = VersionAlignmentPreviewDialog(project, VersionAlignmentPlan(
+            emptyList(), listOf(edit), BulkVersionUpdateResult(1, 3, 0, emptyList()),
+        ))
+        try {
+            assertEquals(edit.after, dialog.previewContent(0))
+            dialog.files.setValueAt(false, 1, 0)
+            assertEquals(source.replace("2.0", "2.1"), dialog.previewContent(0))
+            assertEquals(3, dialog.selectedPlan().result.updatedReferenceCount)
+            assertEquals(dialog.previewContent(0), dialog.selectedPlan().edits.single().after)
+            dialog.files.setValueAt(false, 0, 0)
+            assertEquals(source, dialog.previewContent(0))
+            assertTrue(dialog.selectedPlan().edits.isEmpty())
+            dialog.files.setValueAt(true, 0, 0)
+            assertEquals(edit.after, dialog.previewContent(0))
+        } finally {
+            dialog.close(DialogWrapper.CANCEL_EXIT_CODE)
+        }
+    }
+
+    private fun versionEdit(info: MavenProjectInfo): AlignmentEdit {
+        val source = "<project><version>1.0</version></project>"
+        val start = source.indexOf("1.0")
+        return AlignmentEdit(info, source, listOf(
+            PomVersionChange(start until start + 3, "Project version", "1.0", "FEATURE-1.0"),
+        ), selectedProject = true)
+    }
+
     fun testDialogsRenderAtNormalAndNarrowWidths() {
         val info = MavenProjectInfo("org.example", "sample-library", "FEATURE-1.0-SNAPSHOT", "C:/workspace/library/pom.xml", "C:/workspace/library")
-        val plan = VersionAlignmentPlan(emptyList(), listOf(AlignmentEdit(info, "<project><version>1.0</version></project>", "<project><version>FEATURE-1.0</version></project>")), BulkVersionUpdateResult(1, 0, 0, emptyList()))
+        val plan = VersionAlignmentPlan(emptyList(), listOf(versionEdit(info)), BulkVersionUpdateResult(1, 0, 0, emptyList()))
         val dialogs = listOf(
             "alignment" to VersionAlignmentPreviewDialog(project, plan),
             "recovery" to RecoveryBrowserDialog(project, emptyList()),

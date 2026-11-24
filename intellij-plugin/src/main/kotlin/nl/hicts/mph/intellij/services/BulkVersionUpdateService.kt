@@ -73,20 +73,17 @@ class BulkVersionUpdateService(
         val selectedPaths = selected.map(MavenProjectInfo::pomPath).toSet()
         val issues = mutableListOf<String>()
         val targets = targetVersions(request, selected, documents, issues)
-        var references = 0
         val edits = inputs.mapNotNull { input ->
-            val update = updateDocument(input.project, input.content, targets, request.updateDependents, issues)
-            references += update.updatedReferences
-            if (update.content == input.content) null else {
-                validatePom(update.content)
-                AlignmentEdit(input.project, input.content, update.content,
-                    selectedProject = input.project.pomPath in selectedPaths,
-                    updatedReferenceCount = update.updatedReferences)
-            }
+            val changes = planDocumentChanges(input.project, input.content, targets, request.updateDependents, issues)
+            if (changes.isEmpty()) null else AlignmentEdit(
+                input.project, input.content, changes, selectedProject = input.project.pomPath in selectedPaths,
+            ).also { validatePom(it.after) }
         }
         val changed = edits.map { it.project.pomPath }.toSet()
         val updated = selected.count { it.pomPath in changed }
-        return VersionAlignmentPlan(inputs, edits, BulkVersionUpdateResult(updated, references, selected.size - updated, issues.distinct()))
+        return VersionAlignmentPlan(inputs, edits, BulkVersionUpdateResult(
+            updated, edits.sumOf(AlignmentEdit::updatedReferenceCount), selected.size - updated, issues.distinct(),
+        ))
     }
 
     fun apply(plan: VersionAlignmentPlan, owner: WorkspaceOperationCoordinator.Lease? = null): BulkVersionUpdateResult =
@@ -96,6 +93,8 @@ class BulkVersionUpdateService(
         plan: VersionAlignmentPlan,
         save: (Document) -> Unit = FileDocumentManager.getInstance()::saveDocument,
     ): BulkVersionUpdateResult {
+        if (plan.edits.isEmpty()) return plan.result
+        val afterByPath = plan.edits.associate { edit -> edit.project.pomPath to edit.after.also(::validatePom) }
         val manager = FileDocumentManager.getInstance()
         val documents = plan.inputs.associate { input ->
             val path = Path.of(input.project.pomPath)
@@ -109,7 +108,6 @@ class BulkVersionUpdateService(
             }
             input.project.pomPath to document
         }
-        if (plan.edits.isEmpty()) return plan.result
         val backup = AlignmentRecoveryStore.capture(plan.inputs)
         val touched = mutableListOf<String>()
         WriteCommandAction.writeCommandAction(project).withName("Apply reviewed Maven alignment").withGlobalUndo().run<RuntimeException> {
@@ -129,7 +127,7 @@ class BulkVersionUpdateService(
                         "POM changed during alignment: ${edit.project.pomPath}"
                     }
                     touched += edit.project.pomPath
-                    document.setText(edit.after)
+                    document.setText(afterByPath.getValue(edit.project.pomPath))
                     save(document)
                     check(!manager.isDocumentUnsaved(document)) { "POM could not be saved: ${edit.project.pomPath}" }
                 }
@@ -211,32 +209,35 @@ class BulkVersionUpdateService(
             }
         }
 
-    private fun updateDocument(
+    private fun planDocumentChanges(
         projectInfo: MavenProjectInfo,
         originalContent: String,
         targets: List<TargetVersion>,
         updateDependents: Boolean,
         issues: MutableList<String>,
-    ): DocumentUpdate {
-        var content = originalContent
+    ): List<PomVersionChange> {
+        val changes = mutableListOf<PomVersionChange>()
         targets.firstOrNull {
             it.project.pomPath == projectInfo.pomPath && it.updateProjectVersion
         }?.let { target ->
-            val update = PomReferenceVersionEditor.updateProjectVersion(content, target.version)
-            content = update.content
+            val update = PomReferenceVersionEditor.updateProjectVersion(originalContent, target.version)
+            changes += update.changes
             update.unresolvedProperty?.let { property ->
                 issues += "${projectInfo.artifactId}: project version property '$property' cannot be updated safely."
             }
         }
-        if (!updateDependents) return DocumentUpdate(content, 0)
-
-        var updatedReferences = 0
-        targets.forEach { target ->
-            val update = updateReference(content, projectInfo, target, issues) ?: return@forEach
-            content = update.content
-            updatedReferences += update.updatedReferenceCount
+        if (updateDependents) targets.forEach { target ->
+            changes += updateReference(originalContent, projectInfo, target, issues)?.changes.orEmpty()
         }
-        return DocumentUpdate(content, updatedReferences)
+        return changes.groupBy(PomVersionChange::range).values.mapNotNull { sameLocation ->
+            val first = sameLocation.first()
+            if (sameLocation.any { it.newVersion != first.newVersion }) {
+                issues += "${projectInfo.artifactId}: ${first.label} has conflicting target versions and was left unchanged."
+                null
+            } else {
+                first.copy(referenceCount = sameLocation.maxOf(PomVersionChange::referenceCount))
+            }
+        }.sortedBy { it.range.first }
     }
 
     private fun updateReference(
@@ -275,5 +276,4 @@ class BulkVersionUpdateService(
         val version: String,
         val updateProjectVersion: Boolean,
     )
-    private data class DocumentUpdate(val content: String, val updatedReferences: Int)
 }
